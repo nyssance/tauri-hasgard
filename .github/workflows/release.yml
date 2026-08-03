@@ -17,7 +17,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -59,7 +59,7 @@ jobs:
             archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -99,7 +99,7 @@ jobs:
     needs: cli
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           pattern: cli-*
@@ -126,7 +126,7 @@ jobs:
     needs: [native-e2e, validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: crates-auth
@@ -143,7 +143,7 @@ jobs:
     needs: [native-e2e, validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -163,7 +163,7 @@ jobs:
     needs: github-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -182,12 +182,12 @@ jobs:
             homebrew-tap
             scoop-bucket
           permission-contents: write
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: nyssance/homebrew-tap
           token: ${{ steps.distribution-token.outputs.token }}
           path: homebrew-tap
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: nyssance/scoop-bucket
           token: ${{ steps.distribution-token.outputs.token }}
