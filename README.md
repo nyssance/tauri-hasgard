@@ -106,33 +106,28 @@ bun add --dev @nyssance/tauri-hasgard @playwright/test
 ```
 
 ```ts
-import { createHasgardTest } from "@nyssance/tauri-hasgard";
-import {
-  expect as playwrightExpect,
-  test as playwrightTest,
-} from "@playwright/test";
+import { createHasgardTest } from "@nyssance/tauri-hasgard"
+import { expect as playwrightExpect, test as playwrightTest } from "@playwright/test"
 
 const { test, expect } = createHasgardTest({
   test: playwrightTest,
   expect: playwrightExpect,
-  socketPath: (workerIndex) => `/tmp/my-app-e2e-${workerIndex}.sock`,
+  socketPath: workerIndex => `/tmp/my-app-e2e-${workerIndex}.sock`,
   windowLabel: "main",
   readySelector: '[data-app-ready="true"]',
   launch: {
     command: "bun",
     args: ["run", "tauri", "dev"],
     cwd: import.meta.dirname,
-    timeoutMs: 120_000,
-  },
-});
+    timeoutMs: 120_000
+  }
+})
 
 test("opens settings", async ({ hasgard, window }) => {
-  await window.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = await hasgard.waitForWindow("settings", 5_000);
-  await expect(
-    settings.getByRole("heading", { name: "Settings" }),
-  ).toBeVisible();
-});
+  await window.getByRole("button", { name: "Settings", exact: true }).click()
+  const settings = await hasgard.waitForWindow("settings", 5_000)
+  await expect(settings.getByRole("heading", { name: "Settings" })).toBeVisible()
+})
 ```
 
 Hasgard uses Playwright Test for fixtures, isolation, retries, reporters, and parallel workers. The worker-scoped `hasgard` fixture is a `HasgardApplication`; the test-scoped `window` fixture is the configured primary `HasgardWindow`. There is deliberately no `page` fixture: native Tauri webviews do not implement the complete Playwright `Page` contract.

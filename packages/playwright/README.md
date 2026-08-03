@@ -9,25 +9,22 @@ The fixture object model is `HasgardApplication → HasgardWindow → HasgardLoc
 ## Setup
 
 ```ts
-import { createHasgardTest } from "@nyssance/tauri-hasgard";
-import {
-  expect as playwrightExpect,
-  test as playwrightTest,
-} from "@playwright/test";
+import { createHasgardTest } from "@nyssance/tauri-hasgard"
+import { expect as playwrightExpect, test as playwrightTest } from "@playwright/test"
 
 export const { test, expect } = createHasgardTest({
   test: playwrightTest,
   expect: playwrightExpect,
-  socketPath: (workerIndex) => `/tmp/my-app-e2e-${workerIndex}.sock`,
+  socketPath: workerIndex => `/tmp/my-app-e2e-${workerIndex}.sock`,
   windowLabel: "main",
   readySelector: '[data-app-ready="true"]',
   launch: {
     command: "bun",
     args: ["run", "tauri", "dev"],
     cwd: import.meta.dirname,
-    timeoutMs: 120_000,
-  },
-});
+    timeoutMs: 120_000
+  }
+})
 ```
 
 The fixture passes the selected socket to the application as `TAURI_HASGARD_SOCKET`, so each Playwright worker receives an isolated connection.
@@ -36,21 +33,19 @@ The fixture passes the selected socket to the application as `TAURI_HASGARD_SOCK
 
 ```ts
 test("saves settings in a secondary window", async ({ hasgard }) => {
-  const settings = hasgard.window("settings");
-  await settings
-    .getByRole("textbox", { name: "Display name" })
-    .fill("Nyssance");
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(settings.getByRole("status")).toHaveText("Saved");
-});
+  const settings = hasgard.window("settings")
+  await settings.getByRole("textbox", { name: "Display name" }).fill("Nyssance")
+  await settings.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(settings.getByRole("status")).toHaveText("Saved")
+})
 ```
 
 Use `window` for the configured primary window:
 
 ```ts
 test("opens preferences", async ({ window }) => {
-  await window.getByRole("button", { name: "Settings", exact: true }).click();
-});
+  await window.getByRole("button", { name: "Settings", exact: true }).click()
+})
 ```
 
 ## Targets

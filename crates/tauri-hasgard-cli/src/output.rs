@@ -532,7 +532,9 @@ pub(crate) fn format_windows(value: &serde_json::Value) {
         let title = strip_ansi(window.get("title").and_then(serde_json::Value::as_str).unwrap_or(""));
         let padded_label = format!("{label:<max_label$}");
         let padded_url = format!("{url:<max_url$}");
-        println!("{}   {}   {}", crate::style::bold(&padded_label), crate::style::dim(&padded_url), title,);
+        let label = crate::style::bold(&padded_label);
+        let url = crate::style::dim(&padded_url);
+        println!("{label}   {url}   {title}");
     }
 }
 

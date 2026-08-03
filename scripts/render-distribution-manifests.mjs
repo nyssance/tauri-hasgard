@@ -1,23 +1,26 @@
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 
-const [tag, assetDirectory, outputDirectory] = process.argv.slice(2);
+const [tag, assetDirectory, outputDirectory] = process.argv.slice(2)
 if (!tag || !assetDirectory || !outputDirectory) {
-  throw new Error("usage: render-distribution-manifests.mjs <tag> <asset-directory> <output-directory>");
+  throw new Error("usage: render-distribution-manifests.mjs <tag> <asset-directory> <output-directory>")
 }
-if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`invalid release tag: ${tag}`);
+if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`invalid release tag: ${tag}`)
 
-const version = tag.slice(1);
-const repository = "https://github.com/nyssance/tauri-hasgard";
-const release = `${repository}/releases/download/${tag}`;
-const asset = target => `tauri-hasgard-${version}-${target}`;
-const hash = name => createHash("sha256").update(readFileSync(join(assetDirectory, name))).digest("hex");
+const version = tag.slice(1)
+const repository = "https://github.com/nyssance/tauri-hasgard"
+const release = `${repository}/releases/download/${tag}`
+const asset = target => `tauri-hasgard-${version}-${target}`
+const hash = name =>
+  createHash("sha256")
+    .update(readFileSync(join(assetDirectory, name)))
+    .digest("hex")
 
-const macArm = `${asset("aarch64-apple-darwin")}.tar.gz`;
-const macIntel = `${asset("x86_64-apple-darwin")}.tar.gz`;
-const winArm = `${asset("aarch64-pc-windows-msvc")}.zip`;
-const winIntel = `${asset("x86_64-pc-windows-msvc")}.zip`;
+const macArm = `${asset("aarch64-apple-darwin")}.tar.gz`
+const macIntel = `${asset("x86_64-apple-darwin")}.tar.gz`
+const winArm = `${asset("aarch64-pc-windows-msvc")}.zip`
+const winIntel = `${asset("x86_64-pc-windows-msvc")}.zip`
 
 const formula = `class TauriHasgard < Formula
   desc "Native automation and testing bridge for Tauri 2 applications"
@@ -43,7 +46,7 @@ const formula = `class TauriHasgard < Formula
     assert_match version.to_s, shell_output("#{bin}/tauri-hasgard --version")
   end
 end
-`;
+`
 
 const scoop = {
   version,
@@ -62,8 +65,8 @@ const scoop = {
       arm64: { url: `${repository}/releases/download/v$version/tauri-hasgard-$version-aarch64-pc-windows-msvc.zip` }
     }
   }
-};
+}
 
-mkdirSync(outputDirectory, { recursive: true });
-writeFileSync(join(outputDirectory, "tauri-hasgard.rb"), formula);
-writeFileSync(join(outputDirectory, "tauri-hasgard.json"), `${JSON.stringify(scoop, null, 2)}\n`);
+mkdirSync(outputDirectory, { recursive: true })
+writeFileSync(join(outputDirectory, "tauri-hasgard.rb"), formula)
+writeFileSync(join(outputDirectory, "tauri-hasgard.json"), `${JSON.stringify(scoop, null, 2)}\n`)

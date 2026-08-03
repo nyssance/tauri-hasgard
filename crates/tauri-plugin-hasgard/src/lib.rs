@@ -29,7 +29,7 @@ use tauri::Manager;
 
 #[cfg(all(any(unix, windows), debug_assertions))]
 pub(crate) const BRIDGE_JS: &str =
-    concat!(include_str!("../js/vendor/html-to-image.iife.js"), "\n", include_str!("../js/bridge.js"),);
+    concat!(include_str!("../js/vendor/html-to-image.iife.js"), "\n", include_str!("../js/bridge.js"));
 
 /// Initialize the tauri-hasgard plugin.
 ///

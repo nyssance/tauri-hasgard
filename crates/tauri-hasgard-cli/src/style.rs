@@ -3,12 +3,16 @@ use std::fmt::Display;
 
 /// Format a success message: "✓ {msg}" in green (if terminal supports color).
 pub(crate) fn success(msg: &str) -> String {
-    format!("{} {}", "✓".if_supports_color(Stdout, |t| t.green()), msg.if_supports_color(Stdout, |t| t.green()),)
+    let symbol = "✓".if_supports_color(Stdout, |text| text.green());
+    let message = msg.if_supports_color(Stdout, |text| text.green());
+    format!("{symbol} {message}")
 }
 
 /// Format an error message: "✗ {msg}" in red.
 pub(crate) fn error(msg: &str) -> String {
-    format!("{} {}", "✗".if_supports_color(Stdout, |t| t.red()), msg.if_supports_color(Stdout, |t| t.red()),)
+    let symbol = "✗".if_supports_color(Stdout, |text| text.red());
+    let message = msg.if_supports_color(Stdout, |text| text.red());
+    format!("{symbol} {message}")
 }
 
 /// Format info text in cyan.

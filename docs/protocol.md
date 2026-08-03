@@ -24,13 +24,13 @@ Snapshot elements contain:
 
 ```ts
 interface SnapshotElement {
-  ref: string;
-  role: string;
-  depth: number;
-  name?: string;
-  value?: string;
-  checked?: boolean;
-  disabled?: boolean;
+  ref: string
+  role: string
+  depth: number
+  name?: string
+  value?: string
+  checked?: boolean
+  disabled?: boolean
 }
 ```
 
