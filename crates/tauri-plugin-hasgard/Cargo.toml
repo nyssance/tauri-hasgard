@@ -55,7 +55,7 @@ core-graphics = "0.24"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
-serial_test = "3"
+serial_test = "4"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [build-dependencies]
