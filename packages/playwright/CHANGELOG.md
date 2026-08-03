@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Keep Windows native E2E diagnostics without allowing Windows-only failures to block releases.
+
 ## 0.1.1
 
 - Keep Windows builds, E2E coverage, release archives, and Scoop distribution enabled.

@@ -1,6 +1,6 @@
 {
   "name": "@nyssance/tauri-hasgard",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Playwright Test fixtures for native Tauri Hasgard automation",
   "type": "module",
   "main": "./dist/index.js",
