@@ -8,7 +8,8 @@ import { HasgardApplication } from "./window.js"
 export function createHasgardTest(config: HasgardTestConfig) {
   const base = config.test
   const expect = createHasgardExpect(config.expect)
-  const fixtureTimeoutMs = config.launch ? config.launch.timeoutMs : 30_000
+  const readinessTimeoutMs = config.launch ? config.launch.timeoutMs : 30_000
+  const fixtureTimeoutMs = config.launch ? config.launch.timeoutMs + 30_000 : 30_000
   const test = base.extend<HasgardFixtures, HasgardWorkerFixtures>({
     hasgard: [
       async ({}, use, workerInfo) => {
@@ -24,7 +25,7 @@ export function createHasgardTest(config: HasgardTestConfig) {
           const hasgard = new HasgardApplication(rpc)
           const ping = await hasgard.ping()
           if (ping.status !== "ok") throw new Error(`Unexpected Hasgard ping status: ${ping.status}`)
-          await hasgard.waitForWindowReady(config.windowLabel, config.readySelector, fixtureTimeoutMs)
+          await hasgard.waitForWindowReady(config.windowLabel, config.readySelector, readinessTimeoutMs)
           await use(hasgard)
         } finally {
           rpc.disconnect()

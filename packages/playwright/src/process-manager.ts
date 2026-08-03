@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { access, rm } from "node:fs/promises"
+import { createConnection } from "node:net"
 import type { HasgardLaunchConfig } from "./types.js"
 
 export class HasgardProcess {
@@ -43,12 +44,16 @@ export class HasgardProcess {
           `Tauri process exited with code ${this.child.exitCode}\nstdout:\n${this.stdout}\nstderr:\n${this.stderr}`
         )
       }
-      try {
-        await access(socketPath)
-        return
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code
-        if (code !== "ENOENT") throw error
+      if (process.platform === "win32") {
+        if (await namedPipeAcceptsConnections(socketPath)) return
+      } else {
+        try {
+          await access(socketPath)
+          return
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (code !== "ENOENT") throw error
+        }
       }
       await new Promise(resolve => setTimeout(resolve, 50))
     }
@@ -59,17 +64,43 @@ export class HasgardProcess {
     const child = this.child
     if (!child || child.exitCode !== null) return
     const exited = new Promise<void>(resolve => child.once("exit", () => resolve()))
-    if (process.platform === "win32") {
-      child.kill("SIGTERM")
+    if (process.platform === "win32" && child.pid !== undefined) {
+      await terminateWindowsProcessTree(child.pid)
     } else if (child.pid !== undefined) {
       process.kill(-child.pid, "SIGTERM")
     }
     const timeout = new Promise<"timeout">(resolve => setTimeout(() => resolve("timeout"), 5_000))
     if ((await Promise.race([exited, timeout])) === "timeout") {
-      if (process.platform === "win32") child.kill("SIGKILL")
+      if (process.platform === "win32" && child.pid !== undefined) await terminateWindowsProcessTree(child.pid)
       else if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL")
       await exited
     }
     this.child = undefined
   }
+}
+
+async function namedPipeAcceptsConnections(path: string): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    const socket = createConnection({ path })
+    socket.once("connect", () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once("error", error => {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === "ENOENT" || code === "ECONNREFUSED" || code === "EBUSY") {
+        resolve(false)
+        return
+      }
+      reject(error)
+    })
+  })
+}
+
+async function terminateWindowsProcessTree(pid: number): Promise<void> {
+  const taskkill = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" })
+  await new Promise<void>((resolve, reject) => {
+    taskkill.once("exit", () => resolve())
+    taskkill.once("error", reject)
+  })
 }

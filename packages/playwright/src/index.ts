@@ -1,4 +1,5 @@
 export { createHasgardExpect } from "./expect.js"
+export { hasgardEndpointPath } from "./endpoint.js"
 export { createHasgardTest } from "./fixture.js"
 export { HasgardProcess } from "./process-manager.js"
 export { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"

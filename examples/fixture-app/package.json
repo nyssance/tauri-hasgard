@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite --port 14731 --strictPort",
     "build": "tsc --noEmit && vite build",
+    "build:e2e": "tauri build --debug --no-bundle --features hasgard-testing",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "test:e2e": "playwright test"
+    "test:e2e": "bun run build:e2e && playwright test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1"
