@@ -24,8 +24,7 @@ export function createHasgardTest(config: HasgardTestConfig) {
           const hasgard = new HasgardApplication(rpc)
           const ping = await hasgard.ping()
           if (ping.status !== "ok") throw new Error(`Unexpected Hasgard ping status: ${ping.status}`)
-          const primaryWindow = await hasgard.waitForWindow(config.windowLabel, fixtureTimeoutMs)
-          await primaryWindow.locator(config.readySelector).waitFor({ state: "attached", timeoutMs: fixtureTimeoutMs })
+          await hasgard.waitForWindowReady(config.windowLabel, config.readySelector, fixtureTimeoutMs)
           await use(hasgard)
         } finally {
           rpc.disconnect()

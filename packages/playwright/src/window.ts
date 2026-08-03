@@ -110,6 +110,16 @@ export class HasgardApplication {
     throw new Error(`Window '${label}' did not finish loading within ${timeoutMs}ms`)
   }
 
+  async waitForWindowReady(label: string, readySelector: string, timeoutMs: number): Promise<HasgardWindow> {
+    const window = await this.waitForWindow(label, timeoutMs)
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() <= deadline) {
+      if ((await window.locator(readySelector).count()) === 1) return window
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    throw new Error(`Window '${label}' did not match ready selector '${readySelector}' within ${timeoutMs}ms`)
+  }
+
   window(label: string): HasgardWindow {
     return new HasgardWindow(this.rpc, label)
   }

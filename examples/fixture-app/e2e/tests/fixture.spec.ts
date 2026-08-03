@@ -16,8 +16,7 @@ test("controls forms, a native dialog, and keyboard focus in the main window", a
 
 test("targets a real secondary window without leaking commands to main", async ({ hasgard, window }) => {
   await window.getByRole("button", { name: "Open settings", exact: true }).click()
-  const settings = await hasgard.waitForWindow("settings", 5_000)
-  await settings.locator('html[data-hasgard-ready="true"]').waitFor({ state: "attached", timeoutMs: 5_000 })
+  const settings = await hasgard.waitForWindowReady("settings", 'html[data-hasgard-ready="true"]', 5_000)
   await settings.getByRole("combobox", { name: "Theme" }).selectOption("dark")
   await settings.getByRole("button", { name: "Apply", exact: true }).click()
   await expect(settings.getByRole("status")).toHaveText("Applied dark")
