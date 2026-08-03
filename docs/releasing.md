@@ -24,8 +24,8 @@ Keep these three versions identical:
 After CI passes, create and push the tag:
 
 ```bash
-git tag -s v0.1.0 -m "tauri-hasgard v0.1.0"
-git push origin v0.1.0
+git tag -s v0.1.1 -m "tauri-hasgard v0.1.1"
+git push origin v0.1.1
 ```
 
 The release workflow validates the version, tests the workspace, publishes both Rust crates and the

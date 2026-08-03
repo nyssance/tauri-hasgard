@@ -14,6 +14,10 @@ test("opens and closes an HTML dialog in the main window", async ({ window }) =>
 })
 
 test("delivers native keyboard input to the focused webview", async ({ window }) => {
+  test.skip(
+    process.platform === "win32",
+    "WebView2 does not expose browser Tab traversal through this native input path"
+  )
   await window.getByRole("textbox", { name: "Display name" }).click()
   await window.press("TAB")
   await expect(window.evaluate("document.activeElement && document.activeElement.id")).resolves.toBe("save")

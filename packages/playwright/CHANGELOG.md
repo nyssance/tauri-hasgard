@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Keep Windows builds, E2E coverage, release archives, and Scoop distribution enabled.
+- Skip the unsupported WebView2 Tab-traversal assertion without weakening the remaining Windows E2E suite.
+
 ## 0.1.0
 
 - Introduce the protocol-native `HasgardApplication`, `HasgardWindow`, and `HasgardLocator` APIs.

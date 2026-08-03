@@ -54,11 +54,6 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::sync::Mutex;
 use thiserror::Error;
 
-#[cfg(windows)]
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_TAB,
-};
-
 /// Serializes all OS-level key injections from this process. Concurrent calls
 /// to `simulate_press` from multiple tokio tasks would otherwise interleave
 /// modifier-down/up events on the libei/uinput backends, producing scrambled
@@ -293,42 +288,9 @@ fn tap_main_key(enigo: &mut Enigo, key: Key, has_modifiers: bool) -> Result<(), 
 /// keymap lookups resolve a `Key::Unicode` character to the physical key
 /// regardless of case or shift level), so every key goes through enigo's
 /// layout-aware [`Key`] path.
-#[cfg(all(not(target_os = "linux"), not(windows)))]
+#[cfg(not(target_os = "linux"))]
 fn tap_main_key(enigo: &mut Enigo, key: Key, _has_modifiers: bool) -> Result<(), KeyError> {
     enigo.key(key, Direction::Click).map_err(|e| KeyError::EnigoInput(e.to_string()))
-}
-
-#[cfg(windows)]
-fn tap_main_key(enigo: &mut Enigo, key: Key, _has_modifiers: bool) -> Result<(), KeyError> {
-    if matches!(key, Key::Tab) {
-        return windows_tap_virtual_key(VK_TAB);
-    }
-    enigo.key(key, Direction::Click).map_err(|e| KeyError::EnigoInput(e.to_string()))
-}
-
-/// Inject a Windows virtual key as a real key-down/key-up pair.
-///
-/// Enigo 0.6 reports success for `Key::Tab` on Windows, but WebView2 does not
-/// receive a focus-navigation `VK_TAB`. `SendInput` is the Win32 input path a
-/// physical keyboard uses, so the event reaches WebView2's focus controller.
-#[cfg(windows)]
-fn windows_tap_virtual_key(key: VIRTUAL_KEY) -> Result<(), KeyError> {
-    let inputs = [
-        INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: key, ..Default::default() } } },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: key, dwFlags: KEYEVENTF_KEYUP, ..Default::default() } },
-        },
-    ];
-    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-    if sent != inputs.len() as u32 {
-        return Err(KeyError::EnigoInput(format!(
-            "SendInput injected {sent}/{} keyboard events: {}",
-            inputs.len(),
-            std::io::Error::last_os_error()
-        )));
-    }
-    Ok(())
 }
 
 /// Press `combo` at the OS level. Modifiers are pressed in order, then the
