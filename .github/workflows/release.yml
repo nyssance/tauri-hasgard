@@ -128,13 +128,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check published crates
+        id: published
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          curl --fail --silent --show-error --user-agent tauri-hasgard-release "https://crates.io/api/v1/crates/tauri-plugin-hasgard/$version" >/dev/null && plugin=true || plugin=false
+          curl --fail --silent --show-error --user-agent tauri-hasgard-release "https://crates.io/api/v1/crates/tauri-hasgard-cli/$version" >/dev/null && cli=true || cli=false
+          echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
+          echo "cli=$cli" >> "$GITHUB_OUTPUT"
       - uses: rust-lang/crates-io-auth-action@v1
         id: crates-auth
+        if: steps.published.outputs.plugin != 'true' || steps.published.outputs.cli != 'true'
       - name: Publish plugin
+        if: steps.published.outputs.plugin != 'true'
         run: cargo publish --locked -p tauri-plugin-hasgard
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
       - name: Publish CLI
+        if: steps.published.outputs.cli != 'true'
         run: cargo publish --locked -p tauri-hasgard-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
@@ -156,7 +168,14 @@ jobs:
       - run: bun run build
       - run: cp ../../LICENSE ../../NOTICE.md .
         working-directory: packages/playwright
-      - run: npm publish --access public
+      - name: Check published npm package
+        id: published
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          npm view "@nyssance/tauri-hasgard@$version" version >/dev/null 2>&1 && published=true || published=false
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+      - if: steps.published.outputs.published != 'true'
+        run: npm publish --access public
         working-directory: packages/playwright
 
   package-managers:

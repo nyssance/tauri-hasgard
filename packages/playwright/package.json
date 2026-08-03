@@ -47,7 +47,7 @@
   "homepage": "https://github.com/nyssance/tauri-hasgard",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nyssance/tauri-hasgard"
+    "url": "git+https://github.com/nyssance/tauri-hasgard.git"
   },
   "engines": {
     "node": ">=20"
