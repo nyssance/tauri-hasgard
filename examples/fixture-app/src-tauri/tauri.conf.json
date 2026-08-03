@@ -16,6 +16,14 @@
         "title": "Hasgard Fixture",
         "width": 900,
         "height": 700
+      },
+      {
+        "label": "settings",
+        "title": "Settings",
+        "url": "settings.html",
+        "visible": false,
+        "width": 480,
+        "height": 360
       }
     ],
     "security": {

@@ -152,7 +152,28 @@ fn make_focus_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> FocusFn {
         } else {
             handle.get_webview_window("main").ok_or_else(|| "Window 'main' not found".to_owned())?
         };
-        target.set_focus().map_err(|e| e.to_string())
+        target.set_focus().map_err(|e| e.to_string())?;
+
+        #[cfg(windows)]
+        {
+            use std::sync::mpsc;
+            use std::time::Duration;
+            use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
+
+            let (sender, receiver) = mpsc::sync_channel(1);
+            target
+                .with_webview(move |webview| {
+                    let result = unsafe { webview.controller().MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) }
+                        .map_err(|error| error.to_string());
+                    sender.send(result).expect("focus result receiver must exist");
+                })
+                .map_err(|error| error.to_string())?;
+            receiver
+                .recv_timeout(Duration::from_secs(2))
+                .map_err(|error| format!("WebView focus timed out: {error}"))??;
+        }
+
+        Ok(())
     })
 }
 
