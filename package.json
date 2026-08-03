@@ -1,0 +1,25 @@
+{
+  "name": "tauri-hasgard-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter '@nyssance/tauri-hasgard' build",
+    "format": "cargo fmt && bun run format:web",
+    "format:check": "cargo fmt -- --check && prettier --check .",
+    "format:imports": "biome check --formatter-enabled=false --linter-enabled=false --only=organizeImports --write packages/playwright/src examples/fixture-app/src examples/fixture-app/e2e",
+    "format:web": "bun run format:imports && prettier --write .",
+    "test": "bun run --filter '@nyssance/tauri-hasgard' test",
+    "typecheck": "bun run --filter '@nyssance/tauri-hasgard' typecheck && bun run --cwd examples/fixture-app typecheck",
+    "test:e2e": "bun run --cwd examples/fixture-app test:e2e"
+  },
+  "packageManager": "bun@1.3.14",
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.6",
+    "prettier": "^3.9.6"
+  }
+}

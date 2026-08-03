@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hasgard Fixture",
+  "version": "0.1.0",
+  "identifier": "dev.nyssance.tauri-hasgard-fixture",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://127.0.0.1:14731",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Hasgard Fixture",
+        "width": 900,
+        "height": 700
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

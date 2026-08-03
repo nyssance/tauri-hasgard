@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hasgard fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Hasgard fixture</h1>
+      <label for="display-name">Display name</label>
+      <input id="display-name" name="display-name" />
+      <button id="save" type="button">Save</button>
+      <output id="status" role="status"></output>
+      <button id="open-dialog" type="button">Open dialog</button>
+      <button id="open-settings" type="button">Open settings</button>
+      <dialog id="confirm-dialog">
+        <h2>Confirm action</h2>
+        <button id="close-dialog" type="button">Close</button>
+      </dialog>
+      <section aria-label="Unequal turns" id="turns"></section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

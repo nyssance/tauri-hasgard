@@ -1,0 +1,55 @@
+{
+  "name": "@nyssance/tauri-hasgard",
+  "version": "0.1.0",
+  "description": "Playwright Test fixtures for native Tauri Hasgard automation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "scripts": {
+    "build": "bun node_modules/tsup/dist/cli-default.js src/index.ts --format esm --outDir dist --clean && bun node_modules/typescript/bin/tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true",
+    "dev": "tsup src/index.ts --format esm --dts --outDir dist --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.61.1 <2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "^26.1.0",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "tauri",
+    "playwright",
+    "e2e",
+    "testing",
+    "desktop",
+    "webview"
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/nyssance/tauri-hasgard",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nyssance/tauri-hasgard"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
