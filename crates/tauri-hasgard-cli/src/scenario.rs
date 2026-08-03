@@ -38,11 +38,7 @@ pub(crate) struct ScenarioMeta {
 
 impl Default for ScenarioMeta {
     fn default() -> Self {
-        Self {
-            name: None,
-            fail_fast: true,
-            global_timeout_ms: None,
-        }
+        Self { name: None, fail_fast: true, global_timeout_ms: None }
     }
 }
 
@@ -76,9 +72,7 @@ pub(crate) struct Step {
 
 impl Step {
     fn display_name(&self, idx: usize) -> String {
-        self.name
-            .clone()
-            .unwrap_or_else(|| format!("step-{}", idx + 1))
+        self.name.clone().unwrap_or_else(|| format!("step-{}", idx + 1))
     }
 }
 
@@ -108,26 +102,17 @@ pub(crate) struct ScenarioReport {
 impl ScenarioReport {
     #[must_use]
     pub(crate) fn passed(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|r| matches!(r.outcome, StepOutcome::Passed { .. }))
-            .count()
+        self.results.iter().filter(|r| matches!(r.outcome, StepOutcome::Passed { .. })).count()
     }
 
     #[must_use]
     pub(crate) fn failed(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|r| matches!(r.outcome, StepOutcome::Failed { .. }))
-            .count()
+        self.results.iter().filter(|r| matches!(r.outcome, StepOutcome::Failed { .. })).count()
     }
 
     #[must_use]
     pub(crate) fn skipped(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|r| matches!(r.outcome, StepOutcome::Skipped))
-            .count()
+        self.results.iter().filter(|r| matches!(r.outcome, StepOutcome::Skipped)).count()
     }
 
     #[must_use]
@@ -139,23 +124,16 @@ impl ScenarioReport {
 // ── Main runner ───────────────────────────────────────────────────────────────
 
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read scenario file: {}", path.display()))?;
-    toml::from_str(&content)
-        .with_context(|| format!("Failed to parse scenario TOML: {}", path.display()))
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read scenario file: {}", path.display()))?;
+    toml::from_str(&content).with_context(|| format!("Failed to parse scenario TOML: {}", path.display()))
 }
 
 pub(crate) async fn run_scenario(
-    client: &mut Client,
-    scenario: &Scenario,
-    window: Option<&str>,
-    fail_fast_override: Option<bool>,
+    client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>,
 ) -> Result<ScenarioReport> {
     let meta = &scenario.scenario;
-    let name = meta
-        .name
-        .clone()
-        .unwrap_or_else(|| "unnamed scenario".to_string());
+    let name = meta.name.clone().unwrap_or_else(|| "unnamed scenario".to_string());
     let fail_fast = fail_fast_override.unwrap_or(meta.fail_fast);
 
     let total_start = Instant::now();
@@ -167,10 +145,7 @@ pub(crate) async fn run_scenario(
 
         if failed && fail_fast {
             print_step_line(idx, scenario.step.len(), &step_name, "SKIP");
-            results.push(StepResult {
-                name: step_name,
-                outcome: StepOutcome::Skipped,
-            });
+            results.push(StepResult { name: step_name, outcome: StepOutcome::Skipped });
             continue;
         }
 
@@ -188,36 +163,23 @@ pub(crate) async fn run_scenario(
                 print_step_fail(idx, scenario.step.len(), &step_name, &msg);
                 let _ = take_failure_screenshot(client, &step_name, window).await;
                 failed = true;
-                StepOutcome::Failed {
-                    duration: dur,
-                    message: msg,
-                }
+                StepOutcome::Failed { duration: dur, message: msg }
             }
         };
 
-        results.push(StepResult {
-            name: step_name,
-            outcome,
-        });
+        results.push(StepResult { name: step_name, outcome });
     }
 
-    Ok(ScenarioReport {
-        name,
-        results,
-        total_duration: total_start.elapsed(),
-    })
+    Ok(ScenarioReport { name, results, total_duration: total_start.elapsed() })
 }
 
 async fn run_step(client: &mut Client, step: &Step, window: Option<&str>) -> Result<Value> {
     // wait/watch send timeout in RPC params; all other actions use a tokio deadline
     let is_rpc_timed = matches!(step.action.as_str(), "wait" | "watch");
     match (is_rpc_timed, step.timeout_ms) {
-        (false, Some(ms)) => tokio::time::timeout(
-            Duration::from_millis(ms),
-            dispatch_step(client, step, window),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("step '{}' timed out after {ms}ms", step.action))?,
+        (false, Some(ms)) => tokio::time::timeout(Duration::from_millis(ms), dispatch_step(client, step, window))
+            .await
+            .map_err(|_| anyhow::anyhow!("step '{}' timed out after {ms}ms", step.action))?,
         _ => dispatch_step(client, step, window).await,
     }
 }
@@ -228,9 +190,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
     match step.action.as_str() {
         "click" => {
             let t = require_target(step)?;
-            client
-                .call("click", with_window(Some(target_params(t)), window))
-                .await
+            client.call("click", with_window(Some(target_params(t)), window)).await
         }
         "fill" => {
             let t = require_target(step)?;
@@ -247,13 +207,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             client.call("type", with_window(Some(p), window)).await
         }
         "press" => {
-            let key = step
-                .key
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("press step requires 'key'"))?;
-            client
-                .call("press", with_window(Some(json!({"key": key})), window))
-                .await
+            let key = step.key.as_deref().ok_or_else(|| anyhow::anyhow!("press step requires 'key'"))?;
+            client.call("press", with_window(Some(json!({"key": key})), window)).await
         }
         "select" => {
             let t = require_target(step)?;
@@ -264,9 +219,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "check" => {
             let t = require_target(step)?;
-            client
-                .call("check", with_window(Some(target_params(t)), window))
-                .await
+            client.call("check", with_window(Some(target_params(t)), window)).await
         }
         "scroll" => {
             let direction = step.direction.as_deref().unwrap_or("down");
@@ -285,13 +238,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
                 .await
         }
         "navigate" => {
-            let url = step
-                .url
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("navigate step requires 'url'"))?;
-            client
-                .call("navigate", with_window(Some(json!({"url": url})), window))
-                .await
+            let url = step.url.as_deref().ok_or_else(|| anyhow::anyhow!("navigate step requires 'url'"))?;
+            client.call("navigate", with_window(Some(json!({"url": url})), window)).await
         }
         "wait" => {
             let timeout = timeout_ms.unwrap_or(10_000);
@@ -307,12 +255,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             }
             let target_from_ref = step.step_ref.as_deref().map(|r| format!("@{r}"));
             let target = step.target.as_deref().or(target_from_ref.as_deref());
-            let params = build_wait_params(
-                target,
-                step.selector.as_deref(),
-                step.gone.unwrap_or(false),
-                timeout,
-            );
+            let params = build_wait_params(target, step.selector.as_deref(), step.gone.unwrap_or(false), timeout);
             client.call("wait", with_window(Some(params), window)).await
         }
         "watch" => {
@@ -328,28 +271,15 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             if let Some(sel) = &step.selector {
                 params.insert("selector".into(), json!(sel));
             }
-            client
-                .call("watch", with_window(Some(Value::Object(params)), window))
-                .await
+            client.call("watch", with_window(Some(Value::Object(params)), window)).await
         }
         "eval" => {
-            let script = step
-                .script
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("eval step requires 'script'"))?;
-            client
-                .call("eval", with_window(Some(json!({"script": script})), window))
-                .await
+            let script = step.script.as_deref().ok_or_else(|| anyhow::anyhow!("eval step requires 'script'"))?;
+            client.call("eval", with_window(Some(json!({"script": script})), window)).await
         }
         "screenshot" => {
             let result = client
-                .call(
-                    "screenshot",
-                    with_window(
-                        Some(json!({"path": step.path, "selector": step.selector})),
-                        window,
-                    ),
-                )
+                .call("screenshot", with_window(Some(json!({"path": step.path, "selector": step.selector})), window))
                 .await?;
             if let Some(path) = &step.path {
                 save_screenshot_result(&result, path)?;
@@ -358,18 +288,11 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "assert-text" => {
             let t = require_target(step)?;
-            let expected = step
-                .expected
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("assert-text requires 'expected'"))?;
-            let result = client
-                .call("text", with_window(Some(target_params(t)), window))
-                .await?;
+            let expected =
+                step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-text requires 'expected'"))?;
+            let result = client.call("text", with_window(Some(target_params(t)), window)).await?;
             let actual = result.as_str().unwrap_or_default();
-            anyhow::ensure!(
-                actual == expected,
-                "expected text {expected:?}, got {actual:?}"
-            );
+            anyhow::ensure!(actual == expected, "expected text {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
         "assert-exists" => {
@@ -382,55 +305,32 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "assert-visible" => {
             let t = require_target(step)?;
-            let result = client
-                .call("visible", with_window(Some(target_params(t)), window))
-                .await?;
-            let visible = result
-                .get("visible")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let result = client.call("visible", with_window(Some(target_params(t)), window)).await?;
+            let visible = result.get("visible").and_then(Value::as_bool).unwrap_or(false);
             anyhow::ensure!(visible, "element is not visible");
             Ok(json!({"ok": true}))
         }
         "assert-hidden" => {
             let t = require_target(step)?;
-            let result = client
-                .call("visible", with_window(Some(target_params(t)), window))
-                .await?;
-            let visible = result
-                .get("visible")
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
+            let result = client.call("visible", with_window(Some(target_params(t)), window)).await?;
+            let visible = result.get("visible").and_then(Value::as_bool).unwrap_or(true);
             anyhow::ensure!(!visible, "element is visible");
             Ok(json!({"ok": true}))
         }
         "assert-value" => {
             let t = require_target(step)?;
-            let expected = step
-                .expected
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("assert-value requires 'expected'"))?;
-            let result = client
-                .call("value", with_window(Some(target_params(t)), window))
-                .await?;
+            let expected =
+                step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-value requires 'expected'"))?;
+            let result = client.call("value", with_window(Some(target_params(t)), window)).await?;
             let actual = result.as_str().unwrap_or_default();
-            anyhow::ensure!(
-                actual == expected,
-                "expected value {expected:?}, got {actual:?}"
-            );
+            anyhow::ensure!(actual == expected, "expected value {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
         "assert-url" => {
-            let expected = step
-                .expected
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("assert-url requires 'expected'"))?;
+            let expected = step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-url requires 'expected'"))?;
             let result = client.call("url", with_window(None, window)).await?;
             let actual = result.as_str().unwrap_or_default();
-            anyhow::ensure!(
-                actual.contains(expected),
-                "URL does not contain {expected:?}, got {actual:?}"
-            );
+            anyhow::ensure!(actual.contains(expected), "URL does not contain {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
         other => anyhow::bail!("unknown step action: {other:?}"),
@@ -438,41 +338,23 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
 }
 
 fn require_target(step: &Step) -> Result<&str> {
-    step.target
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("step '{}' requires 'target'", step.action))
+    step.target.as_deref().ok_or_else(|| anyhow::anyhow!("step '{}' requires 'target'", step.action))
 }
 
 // ── Screenshot on failure ─────────────────────────────────────────────────────
 
-async fn take_failure_screenshot(
-    client: &mut Client,
-    step_name: &str,
-    window: Option<&str>,
-) -> Result<()> {
+async fn take_failure_screenshot(client: &mut Client, step_name: &str, window: Option<&str>) -> Result<()> {
     let dir = Path::new("tauri-hasgard-failures");
     std::fs::create_dir_all(dir)?;
 
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis());
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
 
-    let safe_name: String = step_name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_name: String =
+        step_name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     let filename = format!("{safe_name}-{ts}.png");
     let path = dir.join(filename.as_str());
 
-    let result = client
-        .call("screenshot", with_window(Some(json!({})), window))
-        .await?;
+    let result = client.call("screenshot", with_window(Some(json!({})), window)).await?;
     save_screenshot_result(&result, &path)?;
     let arrow = crate::style::dim("failure screenshot →");
     eprintln!("  {arrow} {}", path.display());
@@ -480,12 +362,8 @@ async fn take_failure_screenshot(
 }
 
 fn save_screenshot_result(result: &Value, path: &Path) -> Result<()> {
-    let data_url = result
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("screenshot result is not a string"))?;
-    let base64_data = data_url
-        .strip_prefix("data:image/png;base64,")
-        .unwrap_or(data_url);
+    let data_url = result.as_str().ok_or_else(|| anyhow::anyhow!("screenshot result is not a string"))?;
+    let base64_data = data_url.strip_prefix("data:image/png;base64,").unwrap_or(data_url);
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data)
         .map_err(|e| anyhow::anyhow!("Failed to decode base64 screenshot: {e}"))?;
@@ -607,8 +485,7 @@ pub(crate) fn write_junit_xml(report: &ScenarioReport, path: &Path) -> Result<()
     {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, &buf)
-        .with_context(|| format!("Failed to write JUnit XML to {}", path.display()))?;
+    std::fs::write(path, &buf).with_context(|| format!("Failed to write JUnit XML to {}", path.display()))?;
 
     Ok(())
 }
@@ -625,10 +502,7 @@ mod tests {
             name: "test-scenario".to_string(),
             results: results
                 .into_iter()
-                .map(|(name, outcome)| StepResult {
-                    name: name.to_string(),
-                    outcome,
-                })
+                .map(|(name, outcome)| StepResult { name: name.to_string(), outcome })
                 .collect(),
             total_duration: Duration::from_millis(1234),
         }
@@ -637,19 +511,8 @@ mod tests {
     #[test]
     fn test_scenario_report_counts() {
         let report = make_report(vec![
-            (
-                "step-1",
-                StepOutcome::Passed {
-                    duration: Duration::from_millis(100),
-                },
-            ),
-            (
-                "step-2",
-                StepOutcome::Failed {
-                    duration: Duration::from_millis(50),
-                    message: "oops".into(),
-                },
-            ),
+            ("step-1", StepOutcome::Passed { duration: Duration::from_millis(100) }),
+            ("step-2", StepOutcome::Failed { duration: Duration::from_millis(50), message: "oops".into() }),
             ("step-3", StepOutcome::Skipped),
         ]);
         assert_eq!(report.passed(), 1);
@@ -661,18 +524,8 @@ mod tests {
     #[test]
     fn test_scenario_report_all_passed() {
         let report = make_report(vec![
-            (
-                "step-1",
-                StepOutcome::Passed {
-                    duration: Duration::from_millis(10),
-                },
-            ),
-            (
-                "step-2",
-                StepOutcome::Passed {
-                    duration: Duration::from_millis(20),
-                },
-            ),
+            ("step-1", StepOutcome::Passed { duration: Duration::from_millis(10) }),
+            ("step-2", StepOutcome::Passed { duration: Duration::from_millis(20) }),
         ]);
         assert!(report.all_passed());
     }
@@ -795,18 +648,8 @@ action = "ping"
     #[test]
     fn test_junit_xml_all_passed() {
         let report = make_report(vec![
-            (
-                "click button",
-                StepOutcome::Passed {
-                    duration: Duration::from_millis(123),
-                },
-            ),
-            (
-                "fill form",
-                StepOutcome::Passed {
-                    duration: Duration::from_millis(45),
-                },
-            ),
+            ("click button", StepOutcome::Passed { duration: Duration::from_millis(123) }),
+            ("fill form", StepOutcome::Passed { duration: Duration::from_millis(45) }),
         ]);
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("results.xml");
@@ -825,19 +668,8 @@ action = "ping"
     #[test]
     fn test_junit_xml_with_failures_and_skips() {
         let report = make_report(vec![
-            (
-                "step-1",
-                StepOutcome::Passed {
-                    duration: Duration::from_millis(10),
-                },
-            ),
-            (
-                "step-2",
-                StepOutcome::Failed {
-                    duration: Duration::from_millis(20),
-                    message: "oops & done".into(),
-                },
-            ),
+            ("step-1", StepOutcome::Passed { duration: Duration::from_millis(10) }),
+            ("step-2", StepOutcome::Failed { duration: Duration::from_millis(20), message: "oops & done".into() }),
             ("step-3", StepOutcome::Skipped),
         ]);
         let dir = tempfile::tempdir().expect("temp dir");

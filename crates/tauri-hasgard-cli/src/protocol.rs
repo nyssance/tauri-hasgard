@@ -47,12 +47,7 @@ impl Response {
     /// Create a success response.
     #[must_use]
     pub fn success(id: u64, result: serde_json::Value) -> Self {
-        Self {
-            jsonrpc: "2.0".to_owned(),
-            id: serde_json::Value::Number(id.into()),
-            result: Some(result),
-            error: None,
-        }
+        Self { jsonrpc: "2.0".to_owned(), id: serde_json::Value::Number(id.into()), result: Some(result), error: None }
     }
 
     /// Create an error response.
@@ -62,11 +57,7 @@ impl Response {
             jsonrpc: "2.0".to_owned(),
             id,
             result: None,
-            error: Some(RpcError {
-                code,
-                message: message.into(),
-                data: None,
-            }),
+            error: Some(RpcError { code, message: message.into(), data: None }),
         }
     }
 }
@@ -104,11 +95,7 @@ mod tests {
 
     #[test]
     fn test_serialize_error_response() {
-        let resp = Response::error(
-            serde_json::Value::Number(1.into()),
-            -32601,
-            "Method not found",
-        );
+        let resp = Response::error(serde_json::Value::Number(1.into()), -32601, "Method not found");
         let s = serde_json::to_string(&resp).expect("serialize");
         assert!(s.contains(r#""error""#));
         assert!(!s.contains(r#""result""#));

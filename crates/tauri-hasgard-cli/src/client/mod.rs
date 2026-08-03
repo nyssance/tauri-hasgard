@@ -31,20 +31,11 @@ impl Client {
     }
 
     /// Send a JSON-RPC request and return the result value.
-    pub async fn call(
-        &mut self,
-        method: &str,
-        params: Option<serde_json::Value>,
-    ) -> Result<serde_json::Value> {
+    pub async fn call(&mut self, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
         let id = self.next_id;
         self.next_id += 1;
 
-        let request = Request {
-            jsonrpc: "2.0".to_owned(),
-            id,
-            method: method.to_owned(),
-            params,
-        };
+        let request = Request { jsonrpc: "2.0".to_owned(), id, method: method.to_owned(), params };
 
         let mut bytes = serde_json::to_vec(&request)?;
         bytes.push(b'\n');
@@ -97,12 +88,7 @@ mod tests {
     /// or leak a previous test's bind into the next one.
     fn unique_socket_path(tag: &str) -> PathBuf {
         let n = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        PathBuf::from(format!(
-            "/tmp/tauri-hasgard-test-{}-{}-{}.sock",
-            tag,
-            std::process::id(),
-            n
-        ))
+        PathBuf::from(format!("/tmp/tauri-hasgard-test-{}-{}-{}.sock", tag, std::process::id(), n))
     }
 
     fn mock_server(path: &PathBuf) -> tokio::task::JoinHandle<()> {
@@ -118,11 +104,7 @@ mod tests {
                 let resp = if req.method == "ping" {
                     Response::success(req.id, serde_json::json!({"status": "ok"}))
                 } else {
-                    Response::error(
-                        serde_json::Value::Number(req.id.into()),
-                        -32601,
-                        "Method not found",
-                    )
+                    Response::error(serde_json::Value::Number(req.id.into()), -32601, "Method not found")
                 };
                 let mut bytes = serde_json::to_vec(&resp).expect("serialize response");
                 bytes.push(b'\n');
@@ -141,9 +123,7 @@ mod tests {
                 Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
             }
         }
-        Client::connect(path)
-            .await
-            .expect("Failed to connect after retries")
+        Client::connect(path).await.expect("Failed to connect after retries")
     }
 
     #[tokio::test]
@@ -231,12 +211,7 @@ mod tests {
         let mut client = connect_with_retry(&socket).await;
         let result = client.call("nonexistent", None).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .expect_err("call returns error")
-                .to_string()
-                .contains("-32601")
-        );
+        assert!(result.expect_err("call returns error").to_string().contains("-32601"));
 
         handle.abort();
         let _ = std::fs::remove_file(&socket);

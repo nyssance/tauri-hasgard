@@ -20,10 +20,7 @@ pub(crate) fn format_assert_fail(message: &str) {
 pub(crate) fn format_text(value: &serde_json::Value) {
     // {error: {message: "...", code: N}} → "✗ <message>"
     if let Some(err) = value.get("error") {
-        let msg = err
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("unknown error");
+        let msg = err.get("message").and_then(serde_json::Value::as_str).unwrap_or("unknown error");
         let code = err.get("code").and_then(serde_json::Value::as_i64);
         if let Some(c) = code {
             println!("{}", crate::style::error(&format!("{msg} (code {c})")));
@@ -68,21 +65,10 @@ pub(crate) fn format_snapshot(value: &serde_json::Value) {
     }
 
     for el in elements {
-        let depth = usize::try_from(
-            el.get("depth")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-        )
-        .unwrap_or(0);
+        let depth = usize::try_from(el.get("depth").and_then(serde_json::Value::as_u64).unwrap_or(0)).unwrap_or(0);
         let indent = "  ".repeat(depth);
-        let role = el
-            .get("role")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("?");
-        let r#ref = el
-            .get("ref")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("?");
+        let role = el.get("role").and_then(serde_json::Value::as_str).unwrap_or("?");
+        let r#ref = el.get("ref").and_then(serde_json::Value::as_str).unwrap_or("?");
 
         let mut line = format!("{indent}- {}", crate::style::info(role));
 
@@ -126,10 +112,7 @@ pub(crate) fn format_logs(value: &serde_json::Value) -> String {
         return String::from("No logs captured\n");
     }
     for entry in entries {
-        let timestamp = entry
-            .get("timestamp")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_u64).unwrap_or(0);
         let level = entry.get("level").and_then(|l| l.as_str()).unwrap_or("log");
         let args = entry.get("args").and_then(|a| a.as_array());
 
@@ -174,20 +157,11 @@ pub(crate) fn format_network(value: &serde_json::Value) -> String {
         return String::from("No requests captured\n");
     }
     for entry in entries {
-        let timestamp = entry
-            .get("timestamp")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_u64).unwrap_or(0);
         let method = entry.get("method").and_then(|m| m.as_str()).unwrap_or("?");
         let url = entry.get("url").and_then(|u| u.as_str()).unwrap_or("?");
-        let status = entry
-            .get("status")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let duration = entry
-            .get("duration_ms")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let status = entry.get("status").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let duration = entry.get("duration_ms").and_then(serde_json::Value::as_u64).unwrap_or(0);
         let error = entry.get("error").and_then(|e| e.as_str());
 
         let time_str = format_timestamp(timestamp);
@@ -216,10 +190,7 @@ pub(crate) fn format_network(value: &serde_json::Value) -> String {
                 crate::style::error(&err_safe)
             );
         } else {
-            let _ = writeln!(
-                output,
-                "[{time_str}] {method_display} {status_display} {url_safe} {duration_display}"
-            );
+            let _ = writeln!(output, "[{time_str}] {method_display} {status_display} {url_safe} {duration_display}");
         }
     }
     output
@@ -227,10 +198,7 @@ pub(crate) fn format_network(value: &serde_json::Value) -> String {
 
 /// Format a single storage value (from `storage get`).
 pub(crate) fn format_storage_value(value: &serde_json::Value) {
-    let found = value
-        .get("found")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    let found = value.get("found").and_then(serde_json::Value::as_bool).unwrap_or(false);
     if !found {
         println!("{}", crate::style::dim("(not found)"));
         return;
@@ -256,69 +224,33 @@ pub(crate) fn format_storage(value: &serde_json::Value) {
     }
     for entry in entries {
         let key = entry.get("key").and_then(|k| k.as_str()).unwrap_or("?");
-        let val = entry
-            .get("value")
-            .and_then(|v| v.as_str())
-            .unwrap_or("null");
+        let val = entry.get("value").and_then(|v| v.as_str()).unwrap_or("null");
         let key_safe = strip_ansi(key);
         let val_safe = strip_ansi(val);
-        println!(
-            "{} {} {}",
-            crate::style::bold(&key_safe),
-            crate::style::dim("="),
-            val_safe
-        );
+        println!("{} {} {}", crate::style::bold(&key_safe), crate::style::dim("="), val_safe);
     }
     if value.get("truncated").and_then(serde_json::Value::as_bool) == Some(true) {
-        println!(
-            "{}",
-            crate::style::warn("(output truncated — more entries exist)")
-        );
+        println!("{}", crate::style::warn("(output truncated — more entries exist)"));
     }
 }
 
 /// Format a single form field for display.
 fn format_form_field(field: &serde_json::Value) {
-    let field_name = strip_ansi(
-        field
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(""),
-    );
-    let display_name = if field_name.is_empty() {
-        "(unnamed)".to_owned()
-    } else {
-        field_name
-    };
-    let field_type = strip_ansi(
-        field
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(""),
-    );
+    let field_name = strip_ansi(field.get("name").and_then(serde_json::Value::as_str).unwrap_or(""));
+    let display_name = if field_name.is_empty() { "(unnamed)".to_owned() } else { field_name };
+    let field_type = strip_ansi(field.get("type").and_then(serde_json::Value::as_str).unwrap_or(""));
     let field_value_raw = field.get("value");
     let field_value = match field_value_raw {
-        Some(serde_json::Value::Array(arr)) => arr
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(strip_ansi)
-            .collect::<Vec<_>>()
-            .join(", "),
-        _ => strip_ansi(
-            field_value_raw
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(""),
-        ),
+        Some(serde_json::Value::Array(arr)) => {
+            arr.iter().filter_map(|v| v.as_str()).map(strip_ansi).collect::<Vec<_>>().join(", ")
+        }
+        _ => strip_ansi(field_value_raw.and_then(serde_json::Value::as_str).unwrap_or("")),
     };
     let checked = field.get("checked").and_then(serde_json::Value::as_bool);
 
     let mut line = format!("  {display_name}");
     if !field_type.is_empty() {
-        let _ = write!(
-            line,
-            " {}",
-            crate::style::dim(format!("[type={field_type}]"))
-        );
+        let _ = write!(line, " {}", crate::style::dim(format!("[type={field_type}]")));
     }
     if field_type == "password" {
         if field_value.is_empty() {
@@ -352,14 +284,8 @@ pub(crate) fn format_forms(value: &serde_json::Value) {
         return;
     }
     for form in forms {
-        let id = form
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        let name = form
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
+        let id = form.get("id").and_then(serde_json::Value::as_str).unwrap_or("");
+        let name = form.get("name").and_then(serde_json::Value::as_str).unwrap_or("");
         let mut header = String::from("form");
         if !id.is_empty() {
             let _ = write!(header, "#{}", strip_ansi(id));
@@ -373,23 +299,13 @@ pub(crate) fn format_forms(value: &serde_json::Value) {
             for field in fields {
                 format_form_field(field);
             }
-            if form
-                .get("fieldsTruncated")
-                .and_then(serde_json::Value::as_bool)
-                == Some(true)
-            {
-                println!(
-                    "  {}",
-                    crate::style::warn("(fields truncated — more fields exist)")
-                );
+            if form.get("fieldsTruncated").and_then(serde_json::Value::as_bool) == Some(true) {
+                println!("  {}", crate::style::warn("(fields truncated — more fields exist)"));
             }
         }
     }
     if value.get("truncated").and_then(serde_json::Value::as_bool) == Some(true) {
-        println!(
-            "{}",
-            crate::style::warn("(output truncated — more forms exist)")
-        );
+        println!("{}", crate::style::warn("(output truncated — more forms exist)"));
     }
 }
 
@@ -399,9 +315,8 @@ pub(crate) fn format_watch(value: &serde_json::Value) {
     let removed = value.get("removed").and_then(|v| v.as_array());
     let modified = value.get("modified").and_then(|v| v.as_array());
 
-    let is_empty = added.is_none_or(Vec::is_empty)
-        && removed.is_none_or(Vec::is_empty)
-        && modified.is_none_or(Vec::is_empty);
+    let is_empty =
+        added.is_none_or(Vec::is_empty) && removed.is_none_or(Vec::is_empty) && modified.is_none_or(Vec::is_empty);
 
     if is_empty {
         println!("{}", crate::style::dim("No DOM changes detected."));
@@ -434,17 +349,9 @@ pub(crate) fn format_watch(value: &serde_json::Value) {
             let tag = strip_ansi(el.get("tag").and_then(|t| t.as_str()).unwrap_or("?"));
             if let Some(attr) = el.get("attribute").and_then(|a| a.as_str()) {
                 let attr_safe = strip_ansi(attr);
-                let is_removed = el
-                    .get("removed")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
+                let is_removed = el.get("removed").and_then(serde_json::Value::as_bool).unwrap_or(false);
                 if is_removed {
-                    println!(
-                        "  {} {} {}",
-                        crate::style::info(&tag),
-                        attr_safe,
-                        crate::style::dim("<removed>")
-                    );
+                    println!("  {} {} {}", crate::style::info(&tag), attr_safe, crate::style::dim("<removed>"));
                 } else {
                     let val = strip_ansi(el.get("value").and_then(|v| v.as_str()).unwrap_or(""));
                     println!(
@@ -456,30 +363,15 @@ pub(crate) fn format_watch(value: &serde_json::Value) {
                 }
             } else if let Some(text) = el.get("text").and_then(|t| t.as_str()) {
                 let text_safe = strip_ansi(text);
-                println!(
-                    "  {} {}",
-                    crate::style::info(&tag),
-                    crate::style::dim(format!("\"{text_safe}\""))
-                );
+                println!("  {} {}", crate::style::info(&tag), crate::style::dim(format!("\"{text_safe}\"")));
             } else {
-                println!(
-                    "  {} {}",
-                    crate::style::info(&tag),
-                    crate::style::dim("(unknown change)")
-                );
+                println!("  {} {}", crate::style::info(&tag), crate::style::dim("(unknown change)"));
             }
         }
     }
 
-    if value
-        .get("truncated")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        println!(
-            "{}",
-            crate::style::warn("(some entries truncated — mutation buffer limit reached)")
-        );
+    if value.get("truncated").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        println!("{}", crate::style::warn("(some entries truncated — mutation buffer limit reached)"));
     }
 }
 
@@ -532,20 +424,9 @@ pub(crate) fn format_diff(value: &serde_json::Value) {
     if let Some(entries) = changed_entries {
         for entry in entries {
             let el = entry.get("new").unwrap_or(entry);
-            let role = strip_ansi(
-                el.get("role")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("?"),
-            );
-            let r#ref = strip_ansi(
-                el.get("ref")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("?"),
-            );
-            let name = el
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(strip_ansi);
+            let role = strip_ansi(el.get("role").and_then(serde_json::Value::as_str).unwrap_or("?"));
+            let r#ref = strip_ansi(el.get("ref").and_then(serde_json::Value::as_str).unwrap_or("?"));
+            let name = el.get("name").and_then(serde_json::Value::as_str).map(strip_ansi);
 
             let old = entry.get("old");
             let field_changes = entry.get("changes").and_then(|c| c.as_array());
@@ -570,8 +451,7 @@ pub(crate) fn format_diff(value: &serde_json::Value) {
                             .unwrap_or_default(),
                     );
 
-                    let mut line =
-                        format!("{} {} ", crate::style::warn("~"), crate::style::info(&role));
+                    let mut line = format!("{} {} ", crate::style::warn("~"), crate::style::info(&role));
                     if let Some(ref n) = name {
                         let _ = write!(line, "{} ", crate::style::bold(format!("\"{n}\"")));
                     }
@@ -586,8 +466,7 @@ pub(crate) fn format_diff(value: &serde_json::Value) {
                     println!("{line}");
                 }
             } else {
-                let mut line =
-                    format!("{} {} ", crate::style::warn("~"), crate::style::info(&role));
+                let mut line = format!("{} {} ", crate::style::warn("~"), crate::style::info(&role));
                 if let Some(ref n) = name {
                     let _ = write!(line, "{} ", crate::style::bold(format!("\"{n}\"")));
                 }
@@ -598,19 +477,9 @@ pub(crate) fn format_diff(value: &serde_json::Value) {
     }
 }
 
-fn format_diff_entry(
-    prefix: &str,
-    el: &serde_json::Value,
-    prefix_style: &dyn Fn(&str) -> String,
-) -> String {
-    let role = el
-        .get("role")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("?");
-    let r#ref = el
-        .get("ref")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("?");
+fn format_diff_entry(prefix: &str, el: &serde_json::Value, prefix_style: &dyn Fn(&str) -> String) -> String {
+    let role = el.get("role").and_then(serde_json::Value::as_str).unwrap_or("?");
+    let r#ref = el.get("ref").and_then(serde_json::Value::as_str).unwrap_or("?");
     let name = el.get("name").and_then(serde_json::Value::as_str);
 
     let mut line = format!("{} {} ", prefix_style(prefix), crate::style::info(role));
@@ -647,57 +516,23 @@ pub(crate) fn format_windows(value: &serde_json::Value) {
 
     let max_label = windows
         .iter()
-        .map(|w| {
-            strip_ansi(
-                w.get("label")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            )
-            .len()
-        })
+        .map(|w| strip_ansi(w.get("label").and_then(serde_json::Value::as_str).unwrap_or("")).len())
         .max()
         .unwrap_or(0);
 
     let max_url = windows
         .iter()
-        .map(|w| {
-            strip_ansi(
-                w.get("url")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            )
-            .len()
-        })
+        .map(|w| strip_ansi(w.get("url").and_then(serde_json::Value::as_str).unwrap_or("")).len())
         .max()
         .unwrap_or(0);
 
     for window in windows {
-        let label = strip_ansi(
-            window
-                .get("label")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(""),
-        );
-        let url = strip_ansi(
-            window
-                .get("url")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(""),
-        );
-        let title = strip_ansi(
-            window
-                .get("title")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(""),
-        );
+        let label = strip_ansi(window.get("label").and_then(serde_json::Value::as_str).unwrap_or(""));
+        let url = strip_ansi(window.get("url").and_then(serde_json::Value::as_str).unwrap_or(""));
+        let title = strip_ansi(window.get("title").and_then(serde_json::Value::as_str).unwrap_or(""));
         let padded_label = format!("{label:<max_label$}");
         let padded_url = format!("{url:<max_url$}");
-        println!(
-            "{}   {}   {}",
-            crate::style::bold(&padded_label),
-            crate::style::dim(&padded_url),
-            title,
-        );
+        println!("{}   {}   {}", crate::style::bold(&padded_label), crate::style::dim(&padded_url), title,);
     }
 }
 
@@ -712,14 +547,8 @@ pub(crate) fn format_record(value: &serde_json::Value) -> String {
         match status {
             "recording" => return crate::style::success("Recording started"),
             "saved" => {
-                let path = value
-                    .get("path")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("?");
-                let count = value
-                    .get("count")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
+                let path = value.get("path").and_then(serde_json::Value::as_str).unwrap_or("?");
+                let count = value.get("count").and_then(serde_json::Value::as_u64).unwrap_or(0);
                 return crate::style::success(&format!(
                     "Recording saved \u{2014} {count} actions \u{2192} {}",
                     strip_ansi(path)
@@ -729,21 +558,12 @@ pub(crate) fn format_record(value: &serde_json::Value) -> String {
         }
     }
     if let Some(active) = value.get("active").and_then(serde_json::Value::as_bool) {
-        let count = value
-            .get("count")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let count = value.get("count").and_then(serde_json::Value::as_u64).unwrap_or(0);
         if active {
-            let elapsed_ms = value
-                .get("elapsed_ms")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
+            let elapsed_ms = value.get("elapsed_ms").and_then(serde_json::Value::as_u64).unwrap_or(0);
             // Precision below ~285 million years of ms is exact in f64; safe for display.
             let secs = Duration::from_millis(elapsed_ms).as_secs_f64();
-            return format!(
-                "{} Recording: {count} actions ({secs:.1}s)",
-                crate::style::info("\u{25cf}")
-            );
+            return format!("{} Recording: {count} actions ({secs:.1}s)", crate::style::info("\u{25cf}"));
         }
         return format!("{} Not recording", crate::style::dim("\u{25cb}"));
     }
@@ -758,11 +578,7 @@ pub(crate) fn format_record(value: &serde_json::Value) -> String {
 /// Returns a string like "[3/10] click @e3 → ok" with color based on result.
 pub(crate) fn format_replay_step(step: usize, total: usize, action: &str, result: &str) -> String {
     let action_safe = strip_ansi(action);
-    let result_display = if result == "ok" {
-        crate::style::success(result)
-    } else {
-        crate::style::error(result)
-    };
+    let result_display = if result == "ok" { crate::style::success(result) } else { crate::style::error(result) };
     format!(
         "{} {} \u{2192} {result_display}",
         crate::style::dim(format!("[{step}/{total}]")),
@@ -953,10 +769,7 @@ mod tests {
     #[test]
     fn test_strip_ansi_preserves_backslash_in_osc() {
         // Bare backslash inside OSC should not terminate early
-        assert_eq!(
-            strip_ansi("\x1b]8;;http://host/path\\to\\file\x07link"),
-            "link"
-        );
+        assert_eq!(strip_ansi("\x1b]8;;http://host/path\\to\\file\x07link"), "link");
     }
 
     #[test]

@@ -18,10 +18,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use cli::{
-    AssertKind, Cli, Command, FormsArgs, RecordAction, StorageAction, StorageArgs, Target,
-    parse_target,
-};
+use cli::{AssertKind, Cli, Command, FormsArgs, RecordAction, StorageAction, StorageArgs, Target, parse_target};
 use client::Client;
 
 #[tokio::main]
@@ -34,74 +31,28 @@ async fn main() -> Result<()> {
     // CLI tools must keep stdout reserved for data so callers can pipe into
     // `jq`, `python -c 'json.load(...)'`, etc. without log noise corrupting the
     // payload (see #80).
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_writer(std::io::stderr)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(env_filter).with_writer(std::io::stderr).init();
 
     if is_mcp {
         return mcp::run_mcp_server(args.socket, args.window).await;
     }
 
-    if let Command::Run {
-        ref scenario,
-        ref junit,
-        no_fail_fast,
-    } = args.command
-    {
-        return run_scenario_command(
-            scenario,
-            junit.as_deref(),
-            no_fail_fast,
-            args.socket,
-            args.window.as_deref(),
-        )
-        .await;
+    if let Command::Run { ref scenario, ref junit, no_fail_fast } = args.command {
+        return run_scenario_command(scenario, junit.as_deref(), no_fail_fast, args.socket, args.window.as_deref())
+            .await;
     }
 
     let socket = resolve_socket(args.socket)?;
     let mut client = Client::connect(&socket).await?;
 
     // Handle --follow mode: loop forever polling for new entries
-    if let Command::Logs {
-        follow: true,
-        ref level,
-        ref last,
-        ..
-    } = args.command
-    {
-        follow_logs(
-            &mut client,
-            args.json,
-            level.as_deref(),
-            *last,
-            args.window.as_deref(),
-        )
-        .await?;
-    } else if let Command::Network {
-        follow: true,
-        ref filter,
-        ref last,
-        failed,
-        ..
-    } = args.command
-    {
-        follow_network(
-            &mut client,
-            args.json,
-            filter.as_deref(),
-            *last,
-            failed,
-            args.window.as_deref(),
-        )
-        .await?;
+    if let Command::Logs { follow: true, ref level, ref last, .. } = args.command {
+        follow_logs(&mut client, args.json, level.as_deref(), *last, args.window.as_deref()).await?;
+    } else if let Command::Network { follow: true, ref filter, ref last, failed, .. } = args.command {
+        follow_network(&mut client, args.json, filter.as_deref(), *last, failed, args.window.as_deref()).await?;
     }
 
-    let screenshot_path = if let Command::Screenshot { ref path, .. } = args.command {
-        path.clone()
-    } else {
-        None
-    };
+    let screenshot_path = if let Command::Screenshot { ref path, .. } = args.command { path.clone() } else { None };
     let is_screenshot = matches!(args.command, Command::Screenshot { .. });
     let is_ping = matches!(args.command, Command::Ping);
     // Capture output kind before command is consumed by run_command
@@ -123,10 +74,7 @@ async fn main() -> Result<()> {
         if args.json {
             output::format_json(&serde_json::json!({"path": path.display().to_string()}))?;
         } else {
-            println!(
-                "{}",
-                crate::style::success(&format!("Saved to {}", path.display()))
-            );
+            println!("{}", crate::style::success(&format!("Saved to {}", path.display())));
         }
         return Ok(());
     }
@@ -226,10 +174,8 @@ fn format_result(kind: OutputKind, result: &serde_json::Value, emit_json: bool) 
 /// Print the `ping` version handshake: the plugin version embedded in the
 /// running app, the CLI version, and a drift warning when they disagree.
 fn report_ping(result: &Value) {
-    let (summary, warning) = diagnose_versions(
-        env!("CARGO_PKG_VERSION"),
-        result.get("plugin_version").and_then(Value::as_str),
-    );
+    let (summary, warning) =
+        diagnose_versions(env!("CARGO_PKG_VERSION"), result.get("plugin_version").and_then(Value::as_str));
     println!("{}", crate::style::success(&summary));
     if let Some(warning) = warning {
         eprintln!("{}", crate::style::warn(&warning));
@@ -265,11 +211,7 @@ fn diagnose_versions(cli: &str, plugin: Option<&str>) -> (String, Option<String>
 }
 
 async fn follow_logs(
-    client: &mut Client,
-    emit_json: bool,
-    level: Option<&str>,
-    last: Option<usize>,
-    window: Option<&str>,
+    client: &mut Client, emit_json: bool, level: Option<&str>, last: Option<usize>, window: Option<&str>,
 ) -> Result<()> {
     let mut last_seen_id: u64 = 0;
     let mut first_poll = true;
@@ -285,12 +227,7 @@ async fn follow_logs(
             params.insert("last".into(), json!(n));
             first_poll = false;
         }
-        let result = client
-            .call(
-                "console.getLogs",
-                with_window(Some(Value::Object(params)), window),
-            )
-            .await?;
+        let result = client.call("console.getLogs", with_window(Some(Value::Object(params)), window)).await?;
         if let Some(entries) = result.as_array()
             && !entries.is_empty()
         {
@@ -302,23 +239,15 @@ async fn follow_logs(
             } else {
                 print!("{}", output::format_logs(&result));
             }
-            last_seen_id = entries
-                .last()
-                .and_then(|e| e.get("id"))
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(last_seen_id);
+            last_seen_id =
+                entries.last().and_then(|e| e.get("id")).and_then(serde_json::Value::as_u64).unwrap_or(last_seen_id);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
 async fn follow_network(
-    client: &mut Client,
-    emit_json: bool,
-    filter: Option<&str>,
-    last: Option<usize>,
-    failed: bool,
-    window: Option<&str>,
+    client: &mut Client, emit_json: bool, filter: Option<&str>, last: Option<usize>, failed: bool, window: Option<&str>,
 ) -> Result<()> {
     let mut last_seen_id: u64 = 0;
     let mut first_poll = true;
@@ -337,12 +266,7 @@ async fn follow_network(
             params.insert("last".into(), json!(n));
             first_poll = false;
         }
-        let result = client
-            .call(
-                "network.getRequests",
-                with_window(Some(Value::Object(params)), window),
-            )
-            .await?;
+        let result = client.call("network.getRequests", with_window(Some(Value::Object(params)), window)).await?;
         if let Some(entries) = result.as_array()
             && !entries.is_empty()
         {
@@ -353,11 +277,8 @@ async fn follow_network(
             } else {
                 print!("{}", output::format_network(&result));
             }
-            last_seen_id = entries
-                .last()
-                .and_then(|e| e.get("id"))
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(last_seen_id);
+            last_seen_id =
+                entries.last().and_then(|e| e.get("id")).and_then(serde_json::Value::as_u64).unwrap_or(last_seen_id);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -374,45 +295,24 @@ pub(crate) fn with_window(params: Option<Value>, window: Option<&str>) -> Option
     }
 }
 
-async fn run_command(
-    client: &mut Client,
-    command: Command,
-    window: Option<&str>,
-) -> Result<serde_json::Value> {
+async fn run_command(client: &mut Client, command: Command, window: Option<&str>) -> Result<serde_json::Value> {
     match command {
         Command::Mcp => anyhow::bail!("mcp must be handled before run_command"),
         Command::Run { .. } => anyhow::bail!("run must be handled before run_command"),
         Command::Windows => client.call("windows.list", None).await,
         Command::Ping => client.call("ping", with_window(None, window)).await,
         Command::State => client.call("state", with_window(None, window)).await,
-        Command::Snapshot {
-            interactive,
-            selector,
-            depth,
-            save,
-        } => run_snapshot_command(client, interactive, selector, depth, save, window).await,
-        Command::Diff {
-            r#ref: ref_path,
-            interactive,
-            selector,
-            depth,
-        } => run_diff_command(client, ref_path, interactive, selector, depth, window).await,
-        Command::Ipc { command, args } => {
-            run_ipc_command(client, &command, args.as_deref(), window).await
+        Command::Snapshot { interactive, selector, depth, save } => {
+            run_snapshot_command(client, interactive, selector, depth, save, window).await
         }
+        Command::Diff { r#ref: ref_path, interactive, selector, depth } => {
+            run_diff_command(client, ref_path, interactive, selector, depth, window).await
+        }
+        Command::Ipc { command, args } => run_ipc_command(client, &command, args.as_deref(), window).await,
         Command::Screenshot { path, selector } => {
-            client
-                .call(
-                    "screenshot",
-                    with_window(Some(json!({"path": path, "selector": selector})), window),
-                )
-                .await
+            client.call("screenshot", with_window(Some(json!({"path": path, "selector": selector})), window)).await
         }
-        Command::ScreenshotNative {
-            window_id,
-            output,
-            format,
-        } => {
+        Command::ScreenshotNative { window_id, output, format } => {
             client
                 .call(
                     "screenshot_native",
@@ -427,60 +327,35 @@ async fn run_command(
                 )
                 .await
         }
-        Command::Navigate { url } => {
-            client
-                .call("navigate", with_window(Some(json!({"url": url})), window))
-                .await
-        }
+        Command::Navigate { url } => client.call("navigate", with_window(Some(json!({"url": url})), window)).await,
         Command::Url => client.call("url", with_window(None, window)).await,
         Command::Title => client.call("title", with_window(None, window)).await,
-        Command::Wait {
-            target,
-            selector,
-            gone,
-            timeout,
-        } => {
+        Command::Wait { target, selector, gone, timeout } => {
             let params = build_wait_params(target.as_deref(), selector.as_deref(), gone, timeout);
             client.call("wait", with_window(Some(params), window)).await
         }
-        Command::Watch {
-            selector,
-            timeout,
-            stable,
-            require_mutation,
-        } => run_watch_command(client, selector, timeout, stable, require_mutation, window).await,
-        Command::Logs {
-            level,
-            last,
-            clear,
-            follow,
-        } => run_logs_command(client, level, last, clear, follow, window).await,
-        Command::Network {
-            filter,
-            failed,
-            last,
-            clear,
-            follow,
-        } => run_network_command(client, filter, failed, last, clear, follow, window).await,
+        Command::Watch { selector, timeout, stable, require_mutation } => {
+            run_watch_command(client, selector, timeout, stable, require_mutation, window).await
+        }
+        Command::Logs { level, last, clear, follow } => {
+            run_logs_command(client, level, last, clear, follow, window).await
+        }
+        Command::Network { filter, failed, last, clear, follow } => {
+            run_network_command(client, filter, failed, last, clear, follow, window).await
+        }
         Command::Assert(kind) => run_assert_command(client, kind, window).await,
         Command::Storage(storage_args) => run_storage_command(client, storage_args, window).await,
         Command::Forms(args) => run_forms_command(client, args, window).await,
         Command::Drop { target, file } => run_drop_command(client, &target, file, window).await,
         Command::Record { action } => run_record_command(client, action, window).await,
-        Command::Replay { path, export } => {
-            run_replay_command(client, &path, export.as_deref(), window).await
-        }
+        Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), window).await,
         cmd => run_dom_command(client, cmd, window).await,
     }
 }
 
 async fn run_snapshot_command(
-    client: &mut Client,
-    interactive: bool,
-    selector: Option<String>,
-    depth: Option<u8>,
-    save: Option<std::path::PathBuf>,
-    window: Option<&str>,
+    client: &mut Client, interactive: bool, selector: Option<String>, depth: Option<u8>,
+    save: Option<std::path::PathBuf>, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     tracing::info!(
         interactive,
@@ -504,8 +379,7 @@ async fn run_snapshot_command(
         // who later re-load the file still see the original `{"elements": …}`
         // shape that `diff --ref` and the plugin expect.
         let json = serde_json::to_string_pretty(&result)?;
-        std::fs::write(path, &json)
-            .with_context(|| format!("Failed to save snapshot to {}", path.display()))?;
+        std::fs::write(path, &json).with_context(|| format!("Failed to save snapshot to {}", path.display()))?;
         // Embed the saved path in the JSON result so `--json` consumers can
         // recover it without parsing stderr (matches `record stop --output`
         // and `screenshot` conventions; see #80).
@@ -520,11 +394,7 @@ async fn run_snapshot_command(
 }
 
 async fn run_watch_command(
-    client: &mut Client,
-    selector: Option<String>,
-    timeout: u64,
-    stable: u64,
-    require_mutation: bool,
+    client: &mut Client, selector: Option<String>, timeout: u64, stable: u64, require_mutation: bool,
     window: Option<&str>,
 ) -> Result<serde_json::Value> {
     let mut params = serde_json::Map::new();
@@ -536,21 +406,12 @@ async fn run_watch_command(
     if let Some(sel) = selector {
         params.insert("selector".into(), json!(sel));
     }
-    client
-        .call(
-            "watch",
-            with_window(Some(serde_json::Value::Object(params)), window),
-        )
-        .await
+    client.call("watch", with_window(Some(serde_json::Value::Object(params)), window)).await
 }
 
 async fn run_diff_command(
-    client: &mut Client,
-    ref_path: Option<std::path::PathBuf>,
-    interactive: bool,
-    selector: Option<String>,
-    depth: Option<u8>,
-    window: Option<&str>,
+    client: &mut Client, ref_path: Option<std::path::PathBuf>, interactive: bool, selector: Option<String>,
+    depth: Option<u8>, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     let mut params = json!({
         "interactive": interactive,
@@ -558,17 +419,12 @@ async fn run_diff_command(
         "depth": depth,
     });
     if let Some(path) = ref_path {
-        let meta = std::fs::metadata(&path)
-            .with_context(|| format!("Failed to stat snapshot file: {}", path.display()))?;
-        anyhow::ensure!(
-            meta.len() < 50 * 1024 * 1024,
-            "Snapshot file too large (>50 MB): {}",
-            path.display()
-        );
+        let meta =
+            std::fs::metadata(&path).with_context(|| format!("Failed to stat snapshot file: {}", path.display()))?;
+        anyhow::ensure!(meta.len() < 50 * 1024 * 1024, "Snapshot file too large (>50 MB): {}", path.display());
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read snapshot file: {}", path.display()))?;
-        let reference: serde_json::Value =
-            serde_json::from_str(&content).context("Invalid snapshot file format")?;
+        let reference: serde_json::Value = serde_json::from_str(&content).context("Invalid snapshot file format")?;
         anyhow::ensure!(
             reference.get("elements").is_some(),
             "Snapshot file missing \"elements\" key — not a valid snapshot"
@@ -580,21 +436,12 @@ async fn run_diff_command(
 
 fn read_script(reader: &mut impl std::io::Read) -> Result<String> {
     let mut s = String::new();
-    reader
-        .read_to_string(&mut s)
-        .context("reading script from stdin")?;
-    anyhow::ensure!(
-        !s.trim().is_empty(),
-        "script read from stdin is empty or blank"
-    );
+    reader.read_to_string(&mut s).context("reading script from stdin")?;
+    anyhow::ensure!(!s.trim().is_empty(), "script read from stdin is empty or blank");
     Ok(s)
 }
 
-async fn handle_eval(
-    client: &mut Client,
-    script: Option<String>,
-    window: Option<&str>,
-) -> Result<Value> {
+async fn handle_eval(client: &mut Client, script: Option<String>, window: Option<&str>) -> Result<Value> {
     let script = match script.as_deref() {
         None | Some("-") => {
             anyhow::ensure!(
@@ -605,22 +452,12 @@ async fn handle_eval(
         }
         Some(s) => s.to_owned(),
     };
-    client
-        .call("eval", with_window(Some(json!({"script": script})), window))
-        .await
+    client.call("eval", with_window(Some(json!({"script": script})), window)).await
 }
 
-async fn run_dom_command(
-    client: &mut Client,
-    command: Command,
-    window: Option<&str>,
-) -> Result<serde_json::Value> {
+async fn run_dom_command(client: &mut Client, command: Command, window: Option<&str>) -> Result<serde_json::Value> {
     match command {
-        Command::Click { target } => {
-            client
-                .call("click", with_window(Some(target_params(&target)), window))
-                .await
-        }
+        Command::Click { target } => client.call("click", with_window(Some(target_params(&target)), window)).await,
         Command::Fill { target, value } => {
             let mut p = target_params(&target);
             p["value"] = json!(value);
@@ -631,61 +468,30 @@ async fn run_dom_command(
             p["text"] = json!(text);
             client.call("type", with_window(Some(p), window)).await
         }
-        Command::Press { key } => {
-            client
-                .call("press", with_window(Some(json!({"key": key})), window))
-                .await
-        }
+        Command::Press { key } => client.call("press", with_window(Some(json!({"key": key})), window)).await,
         Command::Select { target, value } => {
             let mut p = target_params(&target);
             p["value"] = json!(value);
             client.call("select", with_window(Some(p), window)).await
         }
-        Command::Check { target } => {
-            client
-                .call("check", with_window(Some(target_params(&target)), window))
-                .await
-        }
-        Command::Scroll {
-            direction,
-            amount,
-            r#ref,
-        } => {
+        Command::Check { target } => client.call("check", with_window(Some(target_params(&target)), window)).await,
+        Command::Scroll { direction, amount, r#ref } => {
             client
                 .call(
                     "scroll",
-                    with_window(
-                        Some(json!({"direction": direction, "amount": amount, "ref": r#ref})),
-                        window,
-                    ),
+                    with_window(Some(json!({"direction": direction, "amount": amount, "ref": r#ref})), window),
                 )
                 .await
         }
-        Command::Text { target } => {
-            client
-                .call("text", with_window(Some(target_params(&target)), window))
-                .await
-        }
+        Command::Text { target } => client.call("text", with_window(Some(target_params(&target)), window)).await,
         Command::Html { target } => {
             let params = target.map(|t| target_params(&t));
             client.call("html", with_window(params, window)).await
         }
-        Command::Value { target } => {
-            client
-                .call("value", with_window(Some(target_params(&target)), window))
-                .await
-        }
-        Command::Attrs { target } => {
-            client
-                .call("attrs", with_window(Some(target_params(&target)), window))
-                .await
-        }
+        Command::Value { target } => client.call("value", with_window(Some(target_params(&target)), window)).await,
+        Command::Attrs { target } => client.call("attrs", with_window(Some(target_params(&target)), window)).await,
         Command::Eval { script } => handle_eval(client, script, window).await,
-        Command::Drag {
-            source,
-            target,
-            offset,
-        } => {
+        Command::Drag { source, target, offset } => {
             let mut p = json!({"source": target_params(&source)});
             if let Some(t) = target {
                 p["target"] = target_params(&t);
@@ -706,8 +512,7 @@ async fn run_dom_command(
 
 /// Extract a string from a JSON value, bailing if not a string.
 fn require_str(val: &serde_json::Value) -> Result<&str> {
-    val.as_str()
-        .ok_or_else(|| anyhow::anyhow!("expected string response from server"))
+    val.as_str().ok_or_else(|| anyhow::anyhow!("expected string response from server"))
 }
 
 /// Extract a bool field from a JSON object, bailing if missing.
@@ -723,16 +528,10 @@ fn assert_fail(msg: &str) -> ! {
     std::process::exit(1)
 }
 
-async fn run_assert_command(
-    client: &mut Client,
-    kind: AssertKind,
-    window: Option<&str>,
-) -> Result<serde_json::Value> {
+async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Option<&str>) -> Result<serde_json::Value> {
     match kind {
         AssertKind::Text { target, expected } => {
-            let result = client
-                .call("text", with_window(Some(target_params(&target)), window))
-                .await?;
+            let result = client.call("text", with_window(Some(target_params(&target)), window)).await?;
             let actual = require_str(&result)?;
             if actual != expected {
                 assert_fail(&format!("expected text \"{expected}\", got \"{actual}\""));
@@ -740,9 +539,7 @@ async fn run_assert_command(
         }
         AssertKind::Visible { target } => {
             let visible = require_bool_field(
-                &client
-                    .call("visible", with_window(Some(target_params(&target)), window))
-                    .await?,
+                &client.call("visible", with_window(Some(target_params(&target)), window)).await?,
                 "visible",
             )?;
             if !visible {
@@ -751,9 +548,7 @@ async fn run_assert_command(
         }
         AssertKind::Hidden { target } => {
             let visible = require_bool_field(
-                &client
-                    .call("visible", with_window(Some(target_params(&target)), window))
-                    .await?,
+                &client.call("visible", with_window(Some(target_params(&target)), window)).await?,
                 "visible",
             )?;
             if visible {
@@ -761,21 +556,14 @@ async fn run_assert_command(
             }
         }
         AssertKind::Value { target, expected } => {
-            let result = client
-                .call("value", with_window(Some(target_params(&target)), window))
-                .await?;
+            let result = client.call("value", with_window(Some(target_params(&target)), window)).await?;
             let actual = require_str(&result)?;
             if actual != expected {
                 assert_fail(&format!("expected value \"{expected}\", got \"{actual}\""));
             }
         }
         AssertKind::Count { selector, expected } => {
-            let result = client
-                .call(
-                    "count",
-                    with_window(Some(json!({"selector": selector})), window),
-                )
-                .await?;
+            let result = client.call("count", with_window(Some(json!({"selector": selector})), window)).await?;
             let actual = result
                 .get("count")
                 .and_then(serde_json::Value::as_u64)
@@ -786,9 +574,7 @@ async fn run_assert_command(
         }
         AssertKind::Checked { target } => {
             let checked = require_bool_field(
-                &client
-                    .call("checked", with_window(Some(target_params(&target)), window))
-                    .await?,
+                &client.call("checked", with_window(Some(target_params(&target)), window)).await?,
                 "checked",
             )?;
             if !checked {
@@ -796,23 +582,17 @@ async fn run_assert_command(
             }
         }
         AssertKind::Contains { target, expected } => {
-            let result = client
-                .call("text", with_window(Some(target_params(&target)), window))
-                .await?;
+            let result = client.call("text", with_window(Some(target_params(&target)), window)).await?;
             let actual = require_str(&result)?;
             if !actual.contains(&expected) {
-                assert_fail(&format!(
-                    "text does not contain \"{expected}\", got \"{actual}\""
-                ));
+                assert_fail(&format!("text does not contain \"{expected}\", got \"{actual}\""));
             }
         }
         AssertKind::Url { expected } => {
             let result = client.call("url", with_window(None, window)).await?;
             let actual = require_str(&result)?;
             if !actual.contains(&expected) {
-                assert_fail(&format!(
-                    "URL does not contain \"{expected}\", got \"{actual}\""
-                ));
+                assert_fail(&format!("URL does not contain \"{expected}\", got \"{actual}\""));
             }
         }
     }
@@ -820,38 +600,20 @@ async fn run_assert_command(
 }
 
 async fn run_ipc_command(
-    client: &mut Client,
-    command: &str,
-    args: Option<&str>,
-    window: Option<&str>,
+    client: &mut Client, command: &str, args: Option<&str>, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     let parsed_args: Option<serde_json::Value> = args.map(serde_json::from_str).transpose()?;
-    client
-        .call(
-            "ipc",
-            with_window(
-                Some(json!({"command": command, "args": parsed_args})),
-                window,
-            ),
-        )
-        .await
+    client.call("ipc", with_window(Some(json!({"command": command, "args": parsed_args})), window)).await
 }
 
 async fn run_logs_command(
-    client: &mut Client,
-    level: Option<String>,
-    last: Option<usize>,
-    clear: bool,
-    follow: bool,
-    window: Option<&str>,
+    client: &mut Client, level: Option<String>, last: Option<usize>, clear: bool, follow: bool, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     if follow {
         anyhow::bail!("follow mode must be handled before run_command");
     }
     if clear {
-        return client
-            .call("console.clear", with_window(None, window))
-            .await;
+        return client.call("console.clear", with_window(None, window)).await;
     }
     let mut params = serde_json::Map::new();
     if let Some(l) = level {
@@ -860,30 +622,18 @@ async fn run_logs_command(
     if let Some(n) = last {
         params.insert("last".into(), json!(n));
     }
-    client
-        .call(
-            "console.getLogs",
-            with_window(Some(serde_json::Value::Object(params)), window),
-        )
-        .await
+    client.call("console.getLogs", with_window(Some(serde_json::Value::Object(params)), window)).await
 }
 
 async fn run_network_command(
-    client: &mut Client,
-    filter: Option<String>,
-    failed: bool,
-    last: Option<usize>,
-    clear: bool,
-    follow: bool,
+    client: &mut Client, filter: Option<String>, failed: bool, last: Option<usize>, clear: bool, follow: bool,
     window: Option<&str>,
 ) -> Result<serde_json::Value> {
     if follow {
         anyhow::bail!("follow mode must be handled before run_command");
     }
     if clear {
-        return client
-            .call("network.clear", with_window(None, window))
-            .await;
+        return client.call("network.clear", with_window(None, window)).await;
     }
     let mut params = serde_json::Map::new();
     if let Some(f) = filter {
@@ -895,64 +645,32 @@ async fn run_network_command(
     if let Some(n) = last {
         params.insert("last".into(), json!(n));
     }
-    client
-        .call(
-            "network.getRequests",
-            with_window(Some(serde_json::Value::Object(params)), window),
-        )
-        .await
+    client.call("network.getRequests", with_window(Some(serde_json::Value::Object(params)), window)).await
 }
 
-async fn run_forms_command(
-    client: &mut Client,
-    args: FormsArgs,
-    window: Option<&str>,
-) -> Result<serde_json::Value> {
+async fn run_forms_command(client: &mut Client, args: FormsArgs, window: Option<&str>) -> Result<serde_json::Value> {
     let params = args.selector.map(|s| json!({"selector": s}));
     client.call("forms.dump", with_window(params, window)).await
 }
 
 async fn run_storage_command(
-    client: &mut Client,
-    args: StorageArgs,
-    window: Option<&str>,
+    client: &mut Client, args: StorageArgs, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     let session = args.session;
     match args.action {
         StorageAction::Get { key } => {
-            client
-                .call(
-                    "storage.get",
-                    with_window(Some(json!({"key": key, "session": session})), window),
-                )
-                .await
+            client.call("storage.get", with_window(Some(json!({"key": key, "session": session})), window)).await
         }
         StorageAction::Set { key, value } => {
             client
-                .call(
-                    "storage.set",
-                    with_window(
-                        Some(json!({"key": key, "value": value, "session": session})),
-                        window,
-                    ),
-                )
+                .call("storage.set", with_window(Some(json!({"key": key, "value": value, "session": session})), window))
                 .await
         }
         StorageAction::List => {
-            client
-                .call(
-                    "storage.list",
-                    with_window(Some(json!({"session": session})), window),
-                )
-                .await
+            client.call("storage.list", with_window(Some(json!({"session": session})), window)).await
         }
         StorageAction::Clear => {
-            client
-                .call(
-                    "storage.clear",
-                    with_window(Some(json!({"session": session})), window),
-                )
-                .await
+            client.call("storage.clear", with_window(Some(json!({"session": session})), window)).await
         }
     }
 }
@@ -961,35 +679,20 @@ const MAX_DROP_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB per file
 const MAX_TOTAL_DROP_SIZE: usize = 100 * 1024 * 1024; // 100 MB total base64 payload
 
 pub(crate) async fn run_drop_command(
-    client: &mut Client,
-    target: &str,
-    file: Vec<std::path::PathBuf>,
-    window: Option<&str>,
+    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     let mut p = target_params(target);
     let mut files = Vec::new();
     let mut total_encoded = 0usize;
     for path in &file {
-        let meta = std::fs::metadata(path)
-            .with_context(|| format!("Failed to stat file: {}", path.display()))?;
+        let meta = std::fs::metadata(path).with_context(|| format!("Failed to stat file: {}", path.display()))?;
         anyhow::ensure!(meta.is_file(), "Not a regular file: {}", path.display());
-        anyhow::ensure!(
-            meta.len() <= MAX_DROP_FILE_SIZE,
-            "File too large (>50 MB): {}",
-            path.display()
-        );
-        let data = std::fs::read(path)
-            .with_context(|| format!("Failed to read file: {}", path.display()))?;
+        anyhow::ensure!(meta.len() <= MAX_DROP_FILE_SIZE, "File too large (>50 MB): {}", path.display());
+        let data = std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
         total_encoded += encoded.len();
-        anyhow::ensure!(
-            total_encoded <= MAX_TOTAL_DROP_SIZE,
-            "Total drop payload exceeds 100 MB limit"
-        );
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+        anyhow::ensure!(total_encoded <= MAX_TOTAL_DROP_SIZE, "Total drop payload exceeds 100 MB limit");
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let mime = mime_from_ext(path);
         files.push(json!({"name": name, "type": mime, "data": encoded}));
     }
@@ -1016,10 +719,7 @@ pub(crate) fn target_params(raw: &str) -> serde_json::Value {
 /// - With neither target nor selector, only `gone`/`timeout` are sent and the
 ///   bridge `waitFor` rejects up-front (issue #74).
 pub(crate) fn build_wait_params(
-    target: Option<&str>,
-    selector: Option<&str>,
-    gone: bool,
-    timeout: u64,
+    target: Option<&str>, selector: Option<&str>, gone: bool, timeout: u64,
 ) -> serde_json::Value {
     match (selector, target) {
         (Some(s), _) => json!({ "selector": s, "gone": gone, "timeout": timeout }),
@@ -1037,10 +737,7 @@ pub(crate) fn build_wait_params(
 }
 
 fn mime_from_ext(path: &std::path::Path) -> &'static str {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     match ext.as_deref() {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
@@ -1062,13 +759,9 @@ fn mime_from_ext(path: &std::path::Path) -> &'static str {
 
 /// Decode a base64 data URL and write the PNG file.
 fn save_screenshot(result: &serde_json::Value, path: &std::path::Path) -> Result<()> {
-    let data_url = result
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("Screenshot result is not a string"))?;
+    let data_url = result.as_str().ok_or_else(|| anyhow::anyhow!("Screenshot result is not a string"))?;
 
-    let base64_data = data_url
-        .strip_prefix("data:image/png;base64,")
-        .unwrap_or(data_url);
+    let base64_data = data_url.strip_prefix("data:image/png;base64,").unwrap_or(data_url);
 
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data)
@@ -1078,17 +771,11 @@ fn save_screenshot(result: &serde_json::Value, path: &std::path::Path) -> Result
     Ok(())
 }
 
-async fn run_record_command(
-    client: &mut Client,
-    action: RecordAction,
-    window: Option<&str>,
-) -> Result<Value> {
+async fn run_record_command(client: &mut Client, action: RecordAction, window: Option<&str>) -> Result<Value> {
     match action {
         RecordAction::Start => client.call("record.start", with_window(None, window)).await,
         RecordAction::Stop { output } => {
-            let result = client
-                .call("record.stop", with_window(None, window))
-                .await?;
+            let result = client.call("record.stop", with_window(None, window)).await?;
             let entries = result
                 .get("entries")
                 .and_then(|e| e.as_array())
@@ -1102,19 +789,12 @@ async fn run_record_command(
                 "count": entries.len()
             }))
         }
-        RecordAction::Status => {
-            client
-                .call("record.status", with_window(None, window))
-                .await
-        }
+        RecordAction::Status => client.call("record.status", with_window(None, window)).await,
     }
 }
 
 pub(crate) async fn run_replay_command(
-    client: &mut Client,
-    path: &std::path::Path,
-    export: Option<&str>,
-    window: Option<&str>,
+    client: &mut Client, path: &std::path::Path, export: Option<&str>, window: Option<&str>,
 ) -> Result<Value> {
     let entries = read_replay_entries(path)?;
 
@@ -1128,14 +808,8 @@ pub(crate) async fn run_replay_command(
     let mut skipped = 0;
 
     for (i, entry) in entries.iter().enumerate() {
-        let action = entry
-            .get("action")
-            .and_then(|a| a.as_str())
-            .unwrap_or("unknown");
-        let timestamp = entry
-            .get("timestamp")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let action = entry.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+        let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_u64).unwrap_or(0);
 
         let delta = timestamp.saturating_sub(prev_ts);
         if delta > 0 && i > 0 {
@@ -1145,10 +819,7 @@ pub(crate) async fn run_replay_command(
 
         if !is_replayable(action) {
             skipped += 1;
-            eprintln!(
-                "{}",
-                crate::output::format_replay_step(i + 1, total, action, "SKIP")
-            );
+            eprintln!("{}", crate::output::format_replay_step(i + 1, total, action, "SKIP"));
             continue;
         }
 
@@ -1173,10 +844,7 @@ pub(crate) async fn run_replay_command(
         } else {
             "FAIL"
         };
-        eprintln!(
-            "{}",
-            crate::output::format_replay_step(i + 1, total, action, status)
-        );
+        eprintln!("{}", crate::output::format_replay_step(i + 1, total, action, status));
     }
 
     let executed = total - skipped;
@@ -1191,8 +859,8 @@ pub(crate) async fn run_replay_command(
 }
 
 fn read_replay_entries(path: &std::path::Path) -> Result<Vec<serde_json::Value>> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read recording file: {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read recording file: {}", path.display()))?;
     serde_json::from_str(&content).context("Invalid recording file format")
 }
 
@@ -1213,14 +881,8 @@ fn export_shell_script(entries: &[Value]) -> String {
     let mut prev_ts: u64 = 0;
 
     for (i, entry) in entries.iter().enumerate() {
-        let action = entry
-            .get("action")
-            .and_then(|a| a.as_str())
-            .unwrap_or("unknown");
-        let timestamp = entry
-            .get("timestamp")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let action = entry.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+        let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_u64).unwrap_or(0);
 
         let delta = timestamp.saturating_sub(prev_ts);
         if delta > 0 && i > 0 {
@@ -1286,10 +948,9 @@ fn resolve_export_target(val: Option<&Value>) -> Option<String> {
     if let Some(s) = obj.get("selector").and_then(|s| s.as_str()) {
         return Some(shell_escape(s));
     }
-    if let (Some(x), Some(y)) = (
-        obj.get("x").and_then(serde_json::Value::as_i64),
-        obj.get("y").and_then(serde_json::Value::as_i64),
-    ) {
+    if let (Some(x), Some(y)) =
+        (obj.get("x").and_then(serde_json::Value::as_i64), obj.get("y").and_then(serde_json::Value::as_i64))
+    {
         return Some(format!("{x},{y}"));
     }
     None
@@ -1326,10 +987,7 @@ fn entry_to_cli_command(action: &str, entry: &Value) -> String {
         }
         "check" => format!("tauri-hasgard check {target}"),
         "scroll" => {
-            let dir = entry
-                .get("direction")
-                .and_then(|d| d.as_str())
-                .unwrap_or("down");
+            let dir = entry.get("direction").and_then(|d| d.as_str()).unwrap_or("down");
             let mut cmd = format!("tauri-hasgard scroll {}", shell_escape(dir));
             if let Some(amt) = entry.get("amount").and_then(serde_json::Value::as_i64) {
                 let _ = write!(cmd, " {amt}");
@@ -1374,11 +1032,8 @@ fn entry_to_cli_command(action: &str, entry: &Value) -> String {
 }
 
 async fn run_scenario_command(
-    scenario_path: &std::path::Path,
-    junit: Option<&std::path::Path>,
-    no_fail_fast: bool,
-    explicit_socket: Option<PathBuf>,
-    window: Option<&str>,
+    scenario_path: &std::path::Path, junit: Option<&std::path::Path>, no_fail_fast: bool,
+    explicit_socket: Option<PathBuf>, window: Option<&str>,
 ) -> Result<()> {
     let loaded = scenario::load_scenario(scenario_path)?;
 
@@ -1387,11 +1042,7 @@ async fn run_scenario_command(
         .or_else(|| loaded.connect.as_ref().and_then(|c| c.socket.clone()))
         .map_or_else(|| resolve_socket(None), Ok)?;
 
-    let connect_timeout = loaded
-        .connect
-        .as_ref()
-        .and_then(|c| c.timeout_ms)
-        .map(std::time::Duration::from_millis);
+    let connect_timeout = loaded.connect.as_ref().and_then(|c| c.timeout_ms).map(std::time::Duration::from_millis);
     let mut client = match connect_timeout {
         Some(t) => tokio::time::timeout(t, Client::connect(&socket))
             .await
@@ -1404,12 +1055,9 @@ async fn run_scenario_command(
     let report = match global_ms {
         Some(ms) => {
             let t = std::time::Duration::from_millis(ms);
-            tokio::time::timeout(
-                t,
-                scenario::run_scenario(&mut client, &loaded, window, fail_fast_override),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("scenario exceeded global timeout of {ms}ms"))??
+            tokio::time::timeout(t, scenario::run_scenario(&mut client, &loaded, window, fail_fast_override))
+                .await
+                .map_err(|_| anyhow::anyhow!("scenario exceeded global timeout of {ms}ms"))??
         }
         None => scenario::run_scenario(&mut client, &loaded, window, fail_fast_override).await?,
     };
@@ -1455,9 +1103,7 @@ pub(crate) fn resolve_socket(explicit: Option<PathBuf>) -> Result<PathBuf> {
 #[cfg(windows)]
 fn resolve_socket_windows() -> Result<PathBuf> {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-    use windows::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
+    use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     fn is_pid_alive(pid: u32) -> bool {
         let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
@@ -1465,8 +1111,7 @@ fn resolve_socket_windows() -> Result<PathBuf> {
             Ok(h) => {
                 let alive = unsafe {
                     let mut exit_code: u32 = 0;
-                    GetExitCodeProcess(h, &raw mut exit_code).is_ok()
-                        && exit_code == STILL_ACTIVE.0 as u32
+                    GetExitCodeProcess(h, &raw mut exit_code).is_ok() && exit_code == STILL_ACTIVE.0 as u32
                 };
                 unsafe {
                     let _ = CloseHandle(h);
@@ -1484,18 +1129,14 @@ fn resolve_socket_windows() -> Result<PathBuf> {
         created_at: u64,
     }
 
-    let local_app_data = std::env::var_os("LOCALAPPDATA")
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "LOCALAPPDATA environment variable is not set or empty. \
+    let local_app_data = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).ok_or_else(|| {
+        anyhow::anyhow!(
+            "LOCALAPPDATA environment variable is not set or empty. \
                  Is a Tauri app running?"
-            )
-        })?;
+        )
+    })?;
 
-    let instances_dir = PathBuf::from(local_app_data)
-        .join("tauri-hasgard")
-        .join("instances");
+    let instances_dir = PathBuf::from(local_app_data).join("tauri-hasgard").join("instances");
 
     if !instances_dir.exists() {
         anyhow::bail!(
@@ -1538,9 +1179,9 @@ fn resolve_socket_windows() -> Result<PathBuf> {
         }
     }
 
-    newest.map(|(_, pipe)| pipe).ok_or_else(|| {
-        anyhow::anyhow!("No active tauri-hasgard instance found. Is a Tauri app running?")
-    })
+    newest
+        .map(|(_, pipe)| pipe)
+        .ok_or_else(|| anyhow::anyhow!("No active tauri-hasgard instance found. Is a Tauri app running?"))
 }
 
 #[cfg(not(windows))]
@@ -1552,9 +1193,7 @@ fn newest_socket_in_dir(dir: &Path) -> Option<PathBuf> {
         .filter(|p| {
             p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
                 n.starts_with("tauri-hasgard-")
-                    && std::path::Path::new(n)
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("sock"))
+                    && std::path::Path::new(n).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sock"))
             })
         })
         .filter(|p| {
@@ -1565,11 +1204,8 @@ fn newest_socket_in_dir(dir: &Path) -> Option<PathBuf> {
         })
         .collect();
 
-    candidates.sort_by_key(|p| {
-        std::fs::metadata(p)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-    });
+    candidates
+        .sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH));
 
     candidates.pop()
 }
@@ -1606,10 +1242,7 @@ mod tests {
 
     #[test]
     fn test_mime_from_ext_png() {
-        assert_eq!(
-            mime_from_ext(std::path::Path::new("photo.png")),
-            "image/png"
-        );
+        assert_eq!(mime_from_ext(std::path::Path::new("photo.png")), "image/png");
     }
 
     #[test]
@@ -1620,31 +1253,19 @@ mod tests {
 
     #[test]
     fn test_mime_from_ext_unknown_defaults_to_octet_stream() {
-        assert_eq!(
-            mime_from_ext(std::path::Path::new("data.bin")),
-            "application/octet-stream"
-        );
+        assert_eq!(mime_from_ext(std::path::Path::new("data.bin")), "application/octet-stream");
     }
 
     #[test]
     fn test_mime_from_ext_no_extension() {
-        assert_eq!(
-            mime_from_ext(std::path::Path::new("Makefile")),
-            "application/octet-stream"
-        );
+        assert_eq!(mime_from_ext(std::path::Path::new("Makefile")), "application/octet-stream");
     }
 
     #[test]
     fn test_mime_from_ext_case_insensitive() {
-        assert_eq!(
-            mime_from_ext(std::path::Path::new("PHOTO.PNG")),
-            "image/png"
-        );
+        assert_eq!(mime_from_ext(std::path::Path::new("PHOTO.PNG")), "image/png");
         assert_eq!(mime_from_ext(std::path::Path::new("file.PnG")), "image/png");
-        assert_eq!(
-            mime_from_ext(std::path::Path::new("doc.PDF")),
-            "application/pdf"
-        );
+        assert_eq!(mime_from_ext(std::path::Path::new("doc.PDF")), "application/pdf");
     }
 
     #[test]
@@ -1664,10 +1285,7 @@ mod tests {
     fn test_with_window_injects_into_existing_object() {
         let params = Some(json!({"selector": "#btn"}));
         let result = with_window(params, Some("settings"));
-        assert_eq!(
-            result,
-            Some(json!({"selector": "#btn", "window": "settings"}))
-        );
+        assert_eq!(result, Some(json!({"selector": "#btn", "window": "settings"})));
     }
 
     #[test]
@@ -1680,8 +1298,7 @@ mod tests {
     #[cfg(unix)]
     #[serial]
     fn test_resolve_socket_finds_socket_in_xdg_runtime_dir() {
-        let dir =
-            std::env::temp_dir().join(format!("tauri-hasgard-xdg-cli-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tauri-hasgard-xdg-cli-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create xdg test dir");
         let sock = dir.join("tauri-hasgard-myapp.sock");
         // Create a dummy file that looks like a socket name.
@@ -1702,16 +1319,11 @@ mod tests {
     #[cfg(unix)]
     #[serial]
     fn test_resolve_socket_prefers_xdg_runtime_dir_over_tmp() {
-        let dir = std::env::temp_dir().join(format!(
-            "tauri-hasgard-xdg-precedence-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("tauri-hasgard-xdg-precedence-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create xdg test dir");
         let xdg_sock = dir.join("tauri-hasgard-xdg.sock");
-        let tmp_sock = std::path::PathBuf::from(format!(
-            "/tmp/tauri-hasgard-newer-tmp-test-{}.sock",
-            std::process::id()
-        ));
+        let tmp_sock =
+            std::path::PathBuf::from(format!("/tmp/tauri-hasgard-newer-tmp-test-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&tmp_sock);
         std::fs::write(&xdg_sock, b"").expect("create xdg socket file");
         std::fs::write(&tmp_sock, b"").expect("create newer tmp socket file");
@@ -1732,10 +1344,8 @@ mod tests {
     #[cfg(unix)]
     #[serial]
     fn test_resolve_socket_falls_back_to_tmp_when_xdg_unset() {
-        let tmp_sock = std::path::PathBuf::from(format!(
-            "/tmp/tauri-hasgard-fallback-test-{}.sock",
-            std::process::id()
-        ));
+        let tmp_sock =
+            std::path::PathBuf::from(format!("/tmp/tauri-hasgard-fallback-test-{}.sock", std::process::id()));
         // Remove then recreate to ensure this file has the newest mtime.
         let _ = std::fs::remove_file(&tmp_sock);
         std::fs::write(&tmp_sock, b"").expect("create dummy socket in /tmp");
@@ -1748,15 +1358,10 @@ mod tests {
         // Assert the result is a valid tauri-hasgard socket path, not an exact path,
         // to avoid flakiness if other sockets exist in /tmp with newer mtime.
         let found = result.expect("socket found in /tmp");
-        let name = found
-            .file_name()
-            .and_then(|n| n.to_str())
-            .expect("socket has a filename");
+        let name = found.file_name().and_then(|n| n.to_str()).expect("socket has a filename");
         assert!(
             name.starts_with("tauri-hasgard-")
-                && std::path::Path::new(name)
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("sock")),
+                && std::path::Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sock")),
             "expected a tauri-hasgard-*.sock path, got: {found:?}"
         );
     }
@@ -1811,10 +1416,7 @@ mod tests {
     #[cfg(windows)]
     #[serial]
     fn test_resolve_socket_windows_picks_newest_instance() {
-        let dir = std::env::temp_dir().join(format!(
-            "tauri-hasgard-reg-newest-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("tauri-hasgard-reg-newest-test-{}", std::process::id()));
         let instances_dir = dir.join("tauri-hasgard").join("instances");
         std::fs::create_dir_all(&instances_dir).expect("create reg test dir");
 
@@ -1849,19 +1451,13 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
 
-        assert_eq!(
-            result.expect("pipe found"),
-            std::path::PathBuf::from(r"\\.\pipe\tauri-hasgard-new")
-        );
+        assert_eq!(result.expect("pipe found"), std::path::PathBuf::from(r"\\.\pipe\tauri-hasgard-new"));
     }
 
     #[test]
     fn test_read_script_valid() {
         let mut reader = std::io::Cursor::new(b"document.title");
-        assert_eq!(
-            read_script(&mut reader).expect("read_script succeeds"),
-            "document.title"
-        );
+        assert_eq!(read_script(&mut reader).expect("read_script succeeds"), "document.title");
     }
 
     #[test]
@@ -1883,28 +1479,19 @@ mod tests {
     #[test]
     fn test_build_wait_params_positional_css_selector_routes_to_selector() {
         let p = build_wait_params(Some("#trigger"), None, false, 1000);
-        assert_eq!(
-            p,
-            json!({"selector": "#trigger", "gone": false, "timeout": 1000})
-        );
+        assert_eq!(p, json!({"selector": "#trigger", "gone": false, "timeout": 1000}));
     }
 
     #[test]
     fn test_build_wait_params_positional_class_selector_routes_to_selector() {
         let p = build_wait_params(Some(".btn-primary"), None, false, 5000);
-        assert_eq!(
-            p,
-            json!({"selector": ".btn-primary", "gone": false, "timeout": 5000})
-        );
+        assert_eq!(p, json!({"selector": ".btn-primary", "gone": false, "timeout": 5000}));
     }
 
     #[test]
     fn test_build_wait_params_positional_attr_selector_routes_to_selector() {
         let p = build_wait_params(Some("[data-test=foo]"), None, false, 1000);
-        assert_eq!(
-            p,
-            json!({"selector": "[data-test=foo]", "gone": false, "timeout": 1000})
-        );
+        assert_eq!(p, json!({"selector": "[data-test=foo]", "gone": false, "timeout": 1000}));
     }
 
     #[test]
@@ -1916,10 +1503,7 @@ mod tests {
     #[test]
     fn test_build_wait_params_explicit_selector_flag_wins_over_positional() {
         let p = build_wait_params(Some("@e1"), Some("#real"), false, 1000);
-        assert_eq!(
-            p,
-            json!({"selector": "#real", "gone": false, "timeout": 1000})
-        );
+        assert_eq!(p, json!({"selector": "#real", "gone": false, "timeout": 1000}));
     }
 
     #[test]
@@ -1934,10 +1518,7 @@ mod tests {
         // `document.querySelector("100,200")` raises a `SyntaxError`
         // instead of the bridge silently waiting on a `MutationObserver`.
         let p = build_wait_params(Some("100,200"), None, false, 1000);
-        assert_eq!(
-            p,
-            json!({"selector": "100,200", "gone": false, "timeout": 1000})
-        );
+        assert_eq!(p, json!({"selector": "100,200", "gone": false, "timeout": 1000}));
     }
 
     #[test]

@@ -17,7 +17,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -59,7 +59,7 @@ jobs:
             archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -89,7 +89,7 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/tauri-hasgard.exe" $package
           Copy-Item LICENSE,NOTICE.md $package
           Compress-Archive -Path $package -DestinationPath $archive
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.target }}
           path: tauri-hasgard-*.${{ matrix.archive }}
@@ -99,8 +99,8 @@ jobs:
     needs: cli
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: cli-*
           path: dist
@@ -111,13 +111,13 @@ jobs:
       - uses: actions/attest@v4
         with:
           subject-path: dist/tauri-hasgard-*
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
             dist/tauri-hasgard-*
             dist/SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: dist
@@ -126,7 +126,7 @@ jobs:
     needs: [native-e2e, validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: crates-auth
@@ -143,11 +143,11 @@ jobs:
     needs: [native-e2e, validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -163,11 +163,11 @@ jobs:
     needs: github-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-assets
           path: dist
@@ -182,12 +182,12 @@ jobs:
             homebrew-tap
             scoop-bucket
           permission-contents: write
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: nyssance/homebrew-tap
           token: ${{ steps.distribution-token.outputs.token }}
           path: homebrew-tap
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: nyssance/scoop-bucket
           token: ${{ steps.distribution-token.outputs.token }}

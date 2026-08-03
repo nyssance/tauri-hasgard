@@ -19,7 +19,5 @@ pub fn run() {
     #[cfg(feature = "hasgard-testing")]
     let builder = builder.plugin(tauri_plugin_hasgard::init());
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("failed to run Hasgard fixture application");
+    builder.run(tauri::generate_context!()).expect("failed to run Hasgard fixture application");
 }

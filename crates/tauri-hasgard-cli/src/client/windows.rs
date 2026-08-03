@@ -30,27 +30,18 @@ pub async fn connect(path: &Path) -> Result<Client> {
             Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY.0.cast_signed()) => {
                 if tokio::time::Instant::now() >= deadline {
                     return Err(e).with_context(|| {
-                        format!(
-                            "Named pipe {} remained busy for {}s",
-                            path.display(),
-                            CONNECT_DEADLINE.as_secs()
-                        )
+                        format!("Named pipe {} remained busy for {}s", path.display(), CONNECT_DEADLINE.as_secs())
                     });
                 }
                 tokio::time::sleep(RETRY_INTERVAL).await;
             }
             Err(e) => {
-                return Err(e)
-                    .with_context(|| format!("Cannot connect to named pipe: {}", path.display()));
+                return Err(e).with_context(|| format!("Cannot connect to named pipe: {}", path.display()));
             }
         }
     };
     let (reader, writer) = tokio::io::split(client);
-    Ok(Client {
-        reader: BufReader::new(reader),
-        writer,
-        next_id: 1,
-    })
+    Ok(Client { reader: BufReader::new(reader), writer, next_id: 1 })
 }
 
 #[cfg(test)]
@@ -70,9 +61,7 @@ mod tests {
     }
 
     fn mock_server(path: &str) -> tokio::task::JoinHandle<()> {
-        let server = ServerOptions::new()
-            .create(path)
-            .expect("create named pipe server");
+        let server = ServerOptions::new().create(path).expect("create named pipe server");
         tokio::spawn(async move {
             server.connect().await.expect("server accept");
             let (reader, mut writer) = tokio::io::split(server);
@@ -83,11 +72,7 @@ mod tests {
                 let resp = if req.method == "ping" {
                     Response::success(req.id, serde_json::json!({"status": "ok"}))
                 } else {
-                    Response::error(
-                        serde_json::Value::Number(req.id.into()),
-                        -32601,
-                        "Method not found",
-                    )
+                    Response::error(serde_json::Value::Number(req.id.into()), -32601, "Method not found")
                 };
                 let mut bytes = serde_json::to_vec(&resp).expect("serialize response");
                 bytes.push(b'\n');
@@ -105,9 +90,7 @@ mod tests {
                 Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
             }
         }
-        Client::connect(path)
-            .await
-            .expect("Failed to connect after retries")
+        Client::connect(path).await.expect("Failed to connect after retries")
     }
 
     #[tokio::test]
@@ -125,9 +108,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_null_result_is_success() {
         let pipe = unique_pipe_path();
-        let server = ServerOptions::new()
-            .create(&pipe)
-            .expect("create named pipe server");
+        let server = ServerOptions::new().create(&pipe).expect("create named pipe server");
         let handle = tokio::spawn(async move {
             server.connect().await.expect("server accept");
             let (reader, mut writer) = tokio::io::split(server);
@@ -151,9 +132,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_missing_result_is_success() {
         let pipe = unique_pipe_path();
-        let server = ServerOptions::new()
-            .create(&pipe)
-            .expect("create named pipe server");
+        let server = ServerOptions::new().create(&pipe).expect("create named pipe server");
         let handle = tokio::spawn(async move {
             server.connect().await.expect("server accept");
             let (reader, mut writer) = tokio::io::split(server);
@@ -182,12 +161,7 @@ mod tests {
         let mut client = connect_with_retry(Path::new(&pipe)).await;
         let result = client.call("nonexistent", None).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .expect_err("call returns error")
-                .to_string()
-                .contains("-32601")
-        );
+        assert!(result.expect_err("call returns error").to_string().contains("-32601"));
 
         handle.abort();
     }

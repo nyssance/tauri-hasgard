@@ -19,12 +19,7 @@ static SOCK_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_socket_path(tag: &str) -> PathBuf {
     let n = SOCK_COUNTER.fetch_add(1, Ordering::Relaxed);
-    PathBuf::from(format!(
-        "/tmp/tauri-hasgard-it-{}-{}-{}.sock",
-        tag,
-        std::process::id(),
-        n
-    ))
+    PathBuf::from(format!("/tmp/tauri-hasgard-it-{}-{}-{}.sock", tag, std::process::id(), n))
 }
 
 /// Spawn a one-shot mock server that answers one `snapshot` request with a fixed
@@ -83,44 +78,27 @@ fn snapshot_save_json_stdout_is_pure_parseable_json() {
     // hang the test indefinitely.
     if !output.status.success() {
         let _ = std::fs::remove_file(&socket);
-        panic!(
-            "binary exited with non-zero status: stderr={}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        panic!("binary exited with non-zero status: stderr={}", String::from_utf8_lossy(&output.stderr));
     }
     handle.join().expect("mock server join");
     let _ = std::fs::remove_file(&socket);
 
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|e| {
-        panic!(
-            "stdout is not parseable JSON (issue #80): {e}\n--- stdout ---\n{stdout}\n--- end ---"
-        )
+        panic!("stdout is not parseable JSON (issue #80): {e}\n--- stdout ---\n{stdout}\n--- end ---")
     });
 
-    let path_in_json = parsed
-        .get("path")
-        .and_then(|v| v.as_str())
-        .expect("JSON should expose saved file path");
-    assert_eq!(
-        path_in_json,
-        save_path.to_str().expect("save path is UTF-8")
-    );
+    let path_in_json = parsed.get("path").and_then(|v| v.as_str()).expect("JSON should expose saved file path");
+    assert_eq!(path_in_json, save_path.to_str().expect("save path is UTF-8"));
 
-    let elements = parsed
-        .get("elements")
-        .and_then(|v| v.as_array())
-        .expect("snapshot elements must remain in JSON");
+    let elements = parsed.get("elements").and_then(|v| v.as_array()).expect("snapshot elements must remain in JSON");
     assert_eq!(elements.len(), 2);
 
     assert!(save_path.exists(), "save file should exist");
     let written = std::fs::read_to_string(&save_path).expect("read written file");
     let parsed_file: serde_json::Value = serde_json::from_str(&written).expect("file is JSON");
     assert!(parsed_file.get("elements").is_some());
-    assert!(
-        parsed_file.get("path").is_none(),
-        "saved file must not contain the injected `path` key"
-    );
+    assert!(parsed_file.get("path").is_none(), "saved file must not contain the injected `path` key");
 }
 
 /// Regression guard for the second half of #80: any `tracing` log line emitted
@@ -153,18 +131,13 @@ fn snapshot_save_json_stdout_clean_with_rust_log_info() {
     // leave the mock server blocked on accept() and hang the test.
     if !output.status.success() {
         let _ = std::fs::remove_file(&socket);
-        panic!(
-            "binary exited with non-zero status: stderr={}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        panic!("binary exited with non-zero status: stderr={}", String::from_utf8_lossy(&output.stderr));
     }
     handle.join().expect("mock server join");
     let _ = std::fs::remove_file(&socket);
 
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     serde_json::from_str::<serde_json::Value>(&stdout).unwrap_or_else(|e| {
-        panic!(
-            "stdout polluted by tracing logs (issue #80): {e}\n--- stdout ---\n{stdout}\n--- end ---"
-        )
+        panic!("stdout polluted by tracing logs (issue #80): {e}\n--- stdout ---\n{stdout}\n--- end ---")
     });
 }
