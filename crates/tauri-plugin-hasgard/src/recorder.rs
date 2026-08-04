@@ -97,7 +97,23 @@ impl Recorder {
 
 /// Returns `true` for methods that should be captured during recording.
 fn is_recordable(method: &str) -> bool {
-    matches!(method, "click" | "fill" | "type" | "press" | "select" | "check" | "scroll" | "drag" | "drop" | "navigate")
+    matches!(
+        method,
+        "click"
+            | "dblclick"
+            | "fill"
+            | "type"
+            | "press"
+            | "select"
+            | "check"
+            | "scroll"
+            | "drag"
+            | "drop"
+            | "navigate"
+            | "hover"
+            | "focus"
+            | "blur"
+    )
 }
 
 #[cfg(test)]

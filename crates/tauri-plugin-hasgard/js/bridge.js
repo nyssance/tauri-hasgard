@@ -428,17 +428,40 @@
     return el;
   }
 
+  // `index` selects among *all* selector matches, so an ordinal locator
+  // (`nth`/`first`/`last`) resolves in the same round trip that acts on the
+  // element. Counting first and indexing second would let the DOM change in
+  // between and silently act on a different node. A negative index counts back
+  // from the end, which is what makes `last()` a single call.
+  function selectorAt(selector, index) {
+    var matches = document.querySelectorAll(selector);
+    var position = index < 0 ? matches.length + index : index;
+    var el = matches[position];
+    if (!el) {
+      throw new Error(
+        "No element at index " + index + " for selector: " + selector + " (" + matches.length + " matched)"
+      );
+    }
+    return el;
+  }
+
   function resolveTarget(params) {
     if (params.ref) return requireEl(params.ref);
     if (params.selector) {
+      if (params.index != null) {
+        if (typeof params.index !== "number" || !Number.isInteger(params.index)) {
+          throw new Error("index must be an integer");
+        }
+        return selectorAt(params.selector, params.index);
+      }
       var el = document.querySelector(params.selector);
       if (!el) throw new Error("No element matches selector: " + params.selector);
       return el;
     }
     if (params.x != null && params.y != null) {
-      var el = document.elementFromPoint(params.x, params.y);
-      if (!el) throw new Error("No element at (" + params.x + "," + params.y + ")");
-      return el;
+      var pointEl = document.elementFromPoint(params.x, params.y);
+      if (!pointEl) throw new Error("No element at (" + params.x + "," + params.y + ")");
+      return pointEl;
     }
     throw new Error("No ref, selector, or coordinates provided");
   }
@@ -599,18 +622,101 @@
     return { ok: true };
   }
 
+  // Without `checked` this toggles, which is the documented CLI contract
+  // ("Toggle a checkbox"). With an explicit `checked` it drives the box to that
+  // state and is a no-op when it is already there, which is what a Playwright
+  // `check()`/`uncheck()` promises. A toggle cannot express either of those:
+  // running it twice undoes itself, so a retry silently inverts the result.
   function check(params) {
     const el = resolveTarget(params);
-    el.checked = !el.checked;
+    if (params.checked != null) {
+      if (typeof params.checked !== "boolean") {
+        throw new Error("check: 'checked' must be a boolean");
+      }
+      if (el.checked === params.checked) return { ok: true };
+      el.checked = params.checked;
+    } else {
+      el.checked = !el.checked;
+    }
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true };
+  }
+
+  function disabled(params) {
+    const el = resolveTarget(params);
+    const aria = typeof el.getAttribute === "function" ? el.getAttribute("aria-disabled") : null;
+    return { disabled: !!el.disabled || aria === "true" };
+  }
+
+  function boundingBox(params) {
+    const rect = resolveTarget(params).getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  }
+
+  function focus(params) {
+    const el = resolveTarget(params);
+    if (typeof el.focus !== "function") throw new Error("focus: element is not focusable");
+    el.focus();
+    return { ok: true };
+  }
+
+  function blur(params) {
+    const el = resolveTarget(params);
+    if (typeof el.blur !== "function") throw new Error("blur: element cannot be blurred");
+    el.blur();
+    return { ok: true };
+  }
+
+  function hover(params) {
+    const el = resolveTarget(params);
+    const rect = el.getBoundingClientRect();
+    const x = params.x != null ? params.x : rect.left + rect.width / 2;
+    const y = params.y != null ? params.y : rect.top + rect.height / 2;
+    const init = { clientX: x, clientY: y, button: 0, buttons: 0, view: window };
+    const mouseInit = Object.assign({ bubbles: true, cancelable: true, composed: true }, init);
+
+    dispatchPointerEvent(el, "pointerover", init);
+    // `pointerenter`/`mouseenter` do not bubble, matching the real event model.
+    dispatchPointerEvent(el, "pointerenter", Object.assign({}, init, { bubbles: false }));
+    el.dispatchEvent(new MouseEvent("mouseover", mouseInit));
+    el.dispatchEvent(new MouseEvent("mouseenter", Object.assign({}, mouseInit, { bubbles: false })));
+    dispatchPointerEvent(el, "pointermove", init);
+    el.dispatchEvent(new MouseEvent("mousemove", mouseInit));
+    return { ok: true };
+  }
+
+  function dblclick(params) {
+    const el = resolveTarget(params);
+    click(params);
+    click(params);
+    const rect = el.getBoundingClientRect();
+    const x = params.x != null ? params.x : rect.left + rect.width / 2;
+    const y = params.y != null ? params.y : rect.top + rect.height / 2;
+    el.dispatchEvent(
+      new MouseEvent("dblclick", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX: x,
+        clientY: y,
+        button: 0,
+        buttons: 0,
+        detail: 2,
+        view: window
+      })
+    );
     return { ok: true };
   }
 
   function scroll(options) {
     const dir = (options && options.direction) || "down";
     const amount = (options && options.amount) || 300;
-    const ref = options && options.ref;
-    const target = ref ? requireEl(ref) : window;
+    // Route through `resolveTarget` rather than `ref` alone so a selector or
+    // point locator can scroll its own element; with `ref`-only, every
+    // selector-based caller silently scrolled the document instead.
+    const hasTarget =
+      options && (options.ref || options.selector || (options.x != null && options.y != null));
+    const target = hasTarget ? resolveTarget(options) : window;
 
     if (dir === "top") {
       if (target === window) {
@@ -1265,6 +1371,12 @@
     visible: visible,
     count: count,
     checked: checked,
+    disabled: disabled,
+    boundingBox: boundingBox,
+    focus: focus,
+    blur: blur,
+    hover: hover,
+    dblclick: dblclick,
     watch: watch,
     drag: drag,
     drop: drop,

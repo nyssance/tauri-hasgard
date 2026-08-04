@@ -130,7 +130,8 @@ pub(crate) async fn dispatch(
             data: None,
         }),
         "click" | "fill" | "type" | "select" | "check" | "scroll" | "drag" | "drop" | "text" | "html" | "value"
-        | "attrs" | "eval" | "ipc" | "navigate" | "url" | "title" | "visible" | "count" | "checked" => {
+        | "attrs" | "eval" | "ipc" | "navigate" | "url" | "title" | "visible" | "count" | "checked" | "disabled"
+        | "boundingBox" | "focus" | "blur" | "hover" | "dblclick" => {
             handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
         }
         // `state` is a bridge-derived method (url/title/ready), but the dispatch
