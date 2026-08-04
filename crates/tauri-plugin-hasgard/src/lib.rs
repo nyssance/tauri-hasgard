@@ -21,7 +21,7 @@ use eval::EvalEngine;
 #[cfg(any(unix, windows))]
 use recorder::Recorder;
 #[cfg(any(unix, windows))]
-use server::{EvalFn, FocusFn, ListWindowsFn};
+use server::{EvalFn, ListWindowsFn, PressHooksRef};
 #[cfg(any(unix, windows))]
 use std::sync::Arc;
 #[cfg(any(unix, windows))]
@@ -62,7 +62,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
                 let eval_fn = make_eval_fn(app);
                 let list_fn = make_list_fn(app);
-                let focus_fn = make_focus_fn(app);
+                let press_hooks = make_press_hooks(app);
 
                 let recorder = Recorder::new();
 
@@ -82,7 +82,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                         engine,
                         Some(eval_fn),
                         Some(list_fn),
-                        Some(focus_fn),
+                        Some(press_hooks),
                         recorder,
                     ));
                 }
@@ -98,7 +98,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                     engine,
                     Some(eval_fn),
                     Some(list_fn),
-                    Some(focus_fn),
+                    Some(press_hooks),
                     recorder,
                 ));
 
@@ -140,40 +140,58 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> EvalFn {
     })
 }
 
-/// Create a focus function that requests OS focus for a webview window.
+/// Create the host hooks the `press` path needs: window focus, plus a runner
+/// that executes a closure on the application's main thread.
 ///
 /// Resolution mirrors `make_eval_fn`: explicit label first, otherwise `main`.
 #[cfg(all(any(unix, windows), debug_assertions))]
-fn make_focus_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> FocusFn {
-    let handle = app.clone();
-    Arc::new(move |window: Option<&str>| {
-        let target = if let Some(label) = window {
-            handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?
-        } else {
-            handle.get_webview_window("main").ok_or_else(|| "Window 'main' not found".to_owned())?
-        };
-        target.set_focus().map_err(|e| e.to_string())?;
+fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef {
+    let focus_handle = app.clone();
+    let main_handle = app.clone();
+    Arc::new(crate::server::PressHooks {
+        focus: Box::new(move |window: Option<&str>| {
+            let target = if let Some(label) = window {
+                focus_handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?
+            } else {
+                focus_handle.get_webview_window("main").ok_or_else(|| "Window 'main' not found".to_owned())?
+            };
+            target.set_focus().map_err(|e| e.to_string())?;
 
-        #[cfg(windows)]
-        {
-            use std::sync::mpsc;
-            use std::time::Duration;
-            use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
+            #[cfg(windows)]
+            {
+                use std::sync::mpsc;
+                use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
 
-            let (sender, receiver) = mpsc::sync_channel(1);
-            target
-                .with_webview(move |webview| {
-                    let result = unsafe { webview.controller().MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) }
-                        .map_err(|error| error.to_string());
-                    sender.send(result).expect("focus result receiver must exist");
+                let (sender, receiver) = mpsc::sync_channel(1);
+                target
+                    .with_webview(move |webview| {
+                        let result =
+                            unsafe { webview.controller().MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) }
+                                .map_err(|error| error.to_string());
+                        sender.send(result).expect("focus result receiver must exist");
+                    })
+                    .map_err(|error| error.to_string())?;
+                receiver
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .map_err(|error| format!("WebView focus timed out: {error}"))??;
+            }
+
+            Ok(())
+        }),
+        on_main_thread: Box::new(move |task: Box<dyn FnOnce() + Send>| {
+            let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+            main_handle
+                .run_on_main_thread(move || {
+                    task();
+                    // A closed receiver means the caller timed out and gave up;
+                    // the work still ran, so there is nothing to report.
+                    let _ = done_tx.send(());
                 })
-                .map_err(|error| error.to_string())?;
-            receiver
-                .recv_timeout(Duration::from_secs(2))
-                .map_err(|error| format!("WebView focus timed out: {error}"))??;
-        }
-
-        Ok(())
+                .map_err(|error| format!("could not reach the main thread: {error}"))?;
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .map_err(|error| format!("main-thread task did not finish: {error}"))
+        }),
     })
 }
 

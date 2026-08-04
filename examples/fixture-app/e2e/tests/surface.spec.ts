@@ -177,3 +177,43 @@ test("captures the native window without being told its id", async ({ window }, 
     expect(shot.byte_size).toBeGreaterThan(1_000)
   }
 })
+
+// A plain character is the case that used to abort the entire host application:
+// enigo's layout lookup calls TSMGetInputSourceProperty, which asserts it is on
+// the main dispatch queue and raises SIGTRAP anywhere else. Named keys like Tab
+// carry fixed keycodes and never take that path, which is why the crash stayed
+// invisible until a character was pressed.
+test("delivers a plain character without aborting the host application", async ({ window }) => {
+  test.skip(process.platform === "win32", "WebView2 does not expose this native input path")
+
+  await window.locator("#key-probe").click()
+  await window.evaluate("document.querySelector('#key-log').textContent = ''")
+  await window.press("k")
+
+  // Injection is asynchronous, so wait for the delivered KeyboardEvent.
+  await window.waitForFunction("document.querySelector('#key-log').textContent === 'k'", {
+    timeoutMs: 5_000,
+    pollMs: 25
+  })
+
+  // The app survived and is still serving requests.
+  await expect(window.title()).resolves.toBe("Hasgard fixture")
+})
+
+// A modifier combo holds the modifier down across the main key's own layout
+// lookup, so it runs the longest stretch of injection on the main thread.
+// Shift+k is deliberately chosen over a Cmd combo: OS-level injection lands on
+// whatever window has focus, and a stray Cmd shortcut would fire in whatever
+// application the developer happens to be using.
+test("delivers a modifier combo with the modifier still applied", async ({ window }) => {
+  test.skip(process.platform === "win32", "WebView2 does not expose this native input path")
+
+  await window.locator("#key-probe").click()
+  await window.evaluate("document.querySelector('#key-log').textContent = ''")
+  await window.press("Shift+k")
+
+  await window.waitForFunction("document.querySelector('#key-log').textContent === 'shift+K'", {
+    timeoutMs: 5_000,
+    pollMs: 25
+  })
+})

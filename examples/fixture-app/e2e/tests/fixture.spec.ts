@@ -20,7 +20,12 @@ test("delivers native keyboard input to the focused webview", async ({ window })
   )
   await window.getByRole("textbox", { name: "Display name" }).click()
   await window.press("TAB")
-  await expect(window.evaluate("document.activeElement && document.activeElement.id")).resolves.toBe("save")
+  // OS-level injection is asynchronous: enigo posts the event to the window
+  // server and the app receives it on a later turn of its event loop.
+  await window.waitForFunction("document.activeElement && document.activeElement.id === 'save'", {
+    timeoutMs: 5_000,
+    pollMs: 25
+  })
 })
 
 test("routes commands to a real secondary window without leaking to main", async ({ hasgard, window }) => {

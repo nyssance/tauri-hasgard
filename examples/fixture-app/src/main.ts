@@ -61,6 +61,18 @@ const scroller = probe<HTMLDivElement>("#scroller")
 scroller.style.height = "60px"
 scroller.style.overflow = "auto"
 
+const keyProbe = probe<HTMLInputElement>("#key-probe")
+const keyLog = probe<HTMLParagraphElement>("#key-log")
+keyProbe.addEventListener("keydown", event => {
+  const modifiers = [
+    event.ctrlKey ? "ctrl" : "",
+    event.shiftKey ? "shift" : "",
+    event.altKey ? "alt" : "",
+    event.metaKey ? "meta" : ""
+  ].filter(Boolean)
+  keyLog.textContent = [...modifiers, event.key].join("+")
+})
+
 console.warn("fixture warning marker")
 
 for (let index = 1; index <= 80; index += 1) {

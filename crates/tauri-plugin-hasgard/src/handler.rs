@@ -5,7 +5,7 @@ use crate::key;
 use crate::protocol::{RPC_INTERNAL_ERROR, RpcError};
 use crate::recorder::{RecordEntry, Recorder};
 use crate::screenshot;
-use crate::server::{EvalFn, FocusFn, ListWindowsFn};
+use crate::server::{EvalFn, ListWindowsFn, PressHooksRef};
 
 use std::time::Duration;
 #[cfg(feature = "press")]
@@ -89,10 +89,10 @@ fn inject_plugin_version(result: &mut serde_json::Value) {
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub(crate) async fn dispatch(
     method: &str, params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>,
-    list_fn: Option<&ListWindowsFn>, focus_fn: Option<&FocusFn>, recorder: &Recorder,
+    list_fn: Option<&ListWindowsFn>, press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
 ) -> Result<serde_json::Value, RpcError> {
     #[cfg(not(feature = "press"))]
-    let _ = focus_fn;
+    let _ = press_hooks;
 
     // Save original params before window extraction so the recorder can strip
     // "window" internally.
@@ -123,7 +123,7 @@ pub(crate) async fn dispatch(
         "query" => handle_eval_method("query", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "diff" => handle_diff(params, engine, eval_fn, win).await,
         #[cfg(feature = "press")]
-        "press" => handle_press(params, focus_fn, win).await,
+        "press" => handle_press(params, press_hooks, win).await,
         #[cfg(not(feature = "press"))]
         "press" => Err(RpcError {
             code: -32601,
@@ -289,7 +289,7 @@ async fn handle_diff(
 /// docs (#45, #75, #114).
 #[cfg(feature = "press")]
 async fn handle_press(
-    params: Option<&serde_json::Value>, focus_fn: Option<&FocusFn>, window: Option<&str>,
+    params: Option<&serde_json::Value>, press_hooks: Option<&PressHooksRef>, window: Option<&str>,
 ) -> Result<serde_json::Value, RpcError> {
     let key_str =
         params.and_then(|p| p.get("key")).and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).ok_or_else(
@@ -313,7 +313,7 @@ async fn handle_press(
     // An explicit `--window <label>` with no focus hook installed would
     // otherwise silently drop the focus step and inject into whatever window
     // currently has focus. Reject before taking any lock.
-    if window.is_some() && focus_fn.is_none() {
+    if window.is_some() && press_hooks.is_none() {
         return Err(RpcError {
             code: -32603,
             message: "cannot focus target window: no focus hook installed".to_owned(),
@@ -326,8 +326,8 @@ async fn handle_press(
     // A focuses window X, call B focuses window Y, then both keys land on Y).
     let _order_guard = PRESS_ORDER_LOCK.lock().await;
 
-    if let Some(focus) = focus_fn {
-        match focus(window) {
+    if let Some(hooks) = press_hooks {
+        match (hooks.focus)(window) {
             Ok(()) => {
                 // Only wait if the WM actually accepted the focus request —
                 // a failed focus call won't transfer focus, so sleeping
@@ -351,22 +351,43 @@ async fn handle_press(
     }
 
     let combo = key_str.to_owned();
-    tokio::task::spawn_blocking(move || key::simulate_press(&combo))
-        .await
-        .map_err(|e| {
-            // A JoinError can be a panic, a cancellation, or a runtime
-            // shutdown — reporting every one as "panicked" misleads during
-            // teardown.
-            let message = if e.is_panic() {
-                format!("press task panicked: {e}")
-            } else if e.is_cancelled() {
-                "press task was cancelled".to_owned()
-            } else {
-                format!("press task failed: {e}")
-            };
-            RpcError { code: -32603, message, data: None }
-        })?
-        .map_err(|e| RpcError { code: -32603, message: format!("press failed: {e}"), data: None })?;
+    // Injection must land on the main thread. On macOS the layout lookup for a
+    // plain character reaches `TSMGetInputSourceProperty`, which asserts it is
+    // on the main dispatch queue and aborts the host application with SIGTRAP
+    // otherwise — a crash, not an error the caller could handle. Named keys
+    // like Tab carry fixed keycodes and never take that path, which is why the
+    // bug stayed invisible until a character was pressed.
+    let hooks = press_hooks.cloned();
+    tokio::task::spawn_blocking(move || match hooks {
+        Some(hooks) => {
+            let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+            (hooks.on_main_thread)(Box::new(move || {
+                let _ = result_tx.send(key::simulate_press(&combo));
+            }))
+            .map_err(key::KeyError::EnigoInit)?;
+            result_rx
+                .recv()
+                .unwrap_or_else(|_| Err(key::KeyError::EnigoInit("main-thread press produced no result".to_owned())))
+        }
+        // No host hooks (unit tests, and any embedder that installed none):
+        // there is no main thread to hop to, so run in place.
+        None => key::simulate_press(&combo),
+    })
+    .await
+    .map_err(|e| {
+        // A JoinError can be a panic, a cancellation, or a runtime
+        // shutdown — reporting every one as "panicked" misleads during
+        // teardown.
+        let message = if e.is_panic() {
+            format!("press task panicked: {e}")
+        } else if e.is_cancelled() {
+            "press task was cancelled".to_owned()
+        } else {
+            format!("press task failed: {e}")
+        };
+        RpcError { code: -32603, message, data: None }
+    })?
+    .map_err(|e| RpcError { code: -32603, message: format!("press failed: {e}"), data: None })?;
 
     Ok(serde_json::json!({"ok": true}))
 }

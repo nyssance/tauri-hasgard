@@ -49,6 +49,13 @@
         <p id="delayed">pending</p>
 
         <div id="scroller"><div id="scroller-inner"></div></div>
+
+        <!-- Records what the webview actually received, so a keyboard test can
+             assert the delivered KeyboardEvent instead of a downstream side
+             effect that several different keys could have produced. -->
+        <label for="key-probe">Key probe</label>
+        <input id="key-probe" name="key-probe" />
+        <p id="key-log"></p>
       </section>
       <section aria-label="Unequal turns" id="turns"></section>
     </main>

@@ -1,4 +1,4 @@
-use super::{EvalFn, FocusFn, ListWindowsFn, handle_connection};
+use super::{EvalFn, ListWindowsFn, PressHooksRef, handle_connection};
 
 use crate::error::Error;
 use crate::eval::EvalEngine;
@@ -141,7 +141,7 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
 /// The `_guard` is held for its `Drop` cleanup.
 pub async fn run(
     listener: std::os::unix::net::UnixListener, _guard: SocketGuard, engine: EvalEngine, eval_fn: Option<EvalFn>,
-    list_fn: Option<ListWindowsFn>, focus_fn: Option<FocusFn>, recorder: Recorder,
+    list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) {
     let listener = match UnixListener::from_std(listener) {
         Ok(l) => l,
@@ -150,16 +150,16 @@ pub async fn run(
             return;
         }
     };
-    if let Err(e) = accept_loop(listener, engine, eval_fn, list_fn, focus_fn, recorder).await {
+    if let Err(e) = accept_loop(listener, engine, eval_fn, list_fn, press_hooks, recorder).await {
         tracing::error!("socket server error: {e}");
     }
 }
 
 async fn accept_loop(
     listener: UnixListener, engine: EvalEngine, eval_fn: Option<EvalFn>, list_fn: Option<ListWindowsFn>,
-    focus_fn: Option<FocusFn>, recorder: Recorder,
+    press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) -> Result<(), Error> {
-    let ctx = Arc::new((engine, eval_fn, list_fn, focus_fn, recorder));
+    let ctx = Arc::new((engine, eval_fn, list_fn, press_hooks, recorder));
 
     loop {
         let (stream, _addr) = match listener.accept().await {

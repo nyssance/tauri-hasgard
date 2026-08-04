@@ -1,4 +1,4 @@
-use super::{EvalFn, FocusFn, ListWindowsFn, handle_connection};
+use super::{EvalFn, ListWindowsFn, PressHooksRef, handle_connection};
 
 use crate::error::Error;
 use crate::eval::EvalEngine;
@@ -396,7 +396,7 @@ pub fn bind(pipe_path: &Path) -> Result<(NamedPipeServer, RegistryGuard), Error>
 /// task instead of taking down the host app.
 pub async fn run(
     pipe_path: PathBuf, engine: EvalEngine, eval_fn: Option<EvalFn>, list_fn: Option<ListWindowsFn>,
-    focus_fn: Option<FocusFn>, recorder: Recorder,
+    press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) {
     let (first_server, guard) = match bind(&pipe_path) {
         Ok(bound) => bound,
@@ -406,16 +406,16 @@ pub async fn run(
         }
     };
     let identifier = guard.identifier.clone();
-    if let Err(e) = accept_loop(first_server, &identifier, engine, eval_fn, list_fn, focus_fn, recorder).await {
+    if let Err(e) = accept_loop(first_server, &identifier, engine, eval_fn, list_fn, press_hooks, recorder).await {
         tracing::error!("named pipe server error: {e}");
     }
 }
 
 async fn accept_loop(
     first_server: NamedPipeServer, identifier: &str, engine: EvalEngine, eval_fn: Option<EvalFn>,
-    list_fn: Option<ListWindowsFn>, focus_fn: Option<FocusFn>, recorder: Recorder,
+    list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) -> Result<(), Error> {
-    let ctx = Arc::new((engine, eval_fn, list_fn, focus_fn, recorder));
+    let ctx = Arc::new((engine, eval_fn, list_fn, press_hooks, recorder));
     let mut server = first_server;
     let pipe_path = socket_path(identifier);
 

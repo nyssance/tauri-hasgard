@@ -14,14 +14,33 @@ pub(crate) type EvalFn = Arc<dyn Fn(Option<&str>, String) -> Result<(), String> 
 /// A function that lists all available webview windows and returns their metadata.
 pub(crate) type ListWindowsFn = Arc<dyn Fn() -> Result<serde_json::Value, String> + Send + Sync>;
 
-/// A function that requests focus for a webview window.
-/// `None` means "default window" (same resolution as `EvalFn`).
-/// Used before native key injection so synthesised OS events reach the right window.
-pub(crate) type FocusFn = Arc<dyn Fn(Option<&str>) -> Result<(), String> + Send + Sync>;
+/// Requests focus for a webview window. `None` means "default window" (same
+/// resolution as `EvalFn`).
+pub(crate) type FocusHook = Box<dyn Fn(Option<&str>) -> Result<(), String> + Send + Sync>;
+
+/// Runs a closure on the application's main thread and blocks until it has
+/// finished.
+pub(crate) type MainThreadHook = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> Result<(), String> + Send + Sync>;
+
+/// Host hooks the `press` path needs from the Tauri runtime.
+///
+/// These travel together because native key injection needs both: focus so the
+/// synthesised OS events reach the right window, and a main-thread runner
+/// because the injection itself is not safe anywhere else.
+pub(crate) struct PressHooks {
+    pub(crate) focus: FocusHook,
+    /// macOS keyboard injection reaches `TSMGetInputSourceProperty`, which
+    /// asserts it is on the main dispatch queue and aborts the whole process
+    /// with SIGTRAP when it is not. Running the injection on a worker thread
+    /// therefore crashes the host application rather than returning an error.
+    pub(crate) on_main_thread: MainThreadHook,
+}
+
+pub(crate) type PressHooksRef = Arc<PressHooks>;
 
 pub(crate) async fn handle_connection<S>(
     stream: S, engine: &EvalEngine, eval_fn: Option<&EvalFn>, list_fn: Option<&ListWindowsFn>,
-    focus_fn: Option<&FocusFn>, recorder: &Recorder,
+    press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
 ) -> Result<(), Error>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -63,7 +82,7 @@ where
                 -32600,
                 "Invalid JSON-RPC version (expected \"2.0\")",
             ),
-            Ok(req) => dispatch_request(&req, engine, eval_fn, list_fn, focus_fn, recorder).await,
+            Ok(req) => dispatch_request(&req, engine, eval_fn, list_fn, press_hooks, recorder).await,
             Err(e) => Response::error(serde_json::Value::Null, -32700, format!("Parse error: {e}")),
         };
 
@@ -78,9 +97,9 @@ where
 
 pub(crate) async fn dispatch_request(
     req: &Request, engine: &EvalEngine, eval_fn: Option<&EvalFn>, list_fn: Option<&ListWindowsFn>,
-    focus_fn: Option<&FocusFn>, recorder: &Recorder,
+    press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
 ) -> Response {
-    match handler::dispatch(&req.method, req.params.as_ref(), engine, eval_fn, list_fn, focus_fn, recorder).await {
+    match handler::dispatch(&req.method, req.params.as_ref(), engine, eval_fn, list_fn, press_hooks, recorder).await {
         Ok(result) => Response::success(req.id, result),
         Err(rpc_err) => Response {
             jsonrpc: "2.0".to_owned(),
