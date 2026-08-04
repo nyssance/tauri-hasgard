@@ -17,6 +17,7 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install
+      - run: bun run format:check:web
       - run: bun run typecheck
       - run: bun run test
       - run: bun test crates/tauri-plugin-hasgard/js/*.test.mjs

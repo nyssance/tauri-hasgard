@@ -10,7 +10,9 @@
   "scripts": {
     "build": "bun run --filter '@nyssance/tauri-hasgard' build",
     "format": "cargo fmt && bun run format:web",
-    "format:check": "cargo fmt -- --check && prettier --check .",
+    "format:check": "cargo fmt -- --check && bun run format:check:web",
+    "format:check:imports": "biome check --formatter-enabled=false --linter-enabled=false --only=organizeImports packages/playwright/src examples/fixture-app/src examples/fixture-app/e2e",
+    "format:check:web": "bun run format:check:imports && prettier --check .",
     "format:imports": "biome check --formatter-enabled=false --linter-enabled=false --only=organizeImports --write packages/playwright/src examples/fixture-app/src examples/fixture-app/e2e",
     "format:web": "bun run format:imports && prettier --write .",
     "test": "bun run --filter '@nyssance/tauri-hasgard' test",

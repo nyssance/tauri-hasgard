@@ -1,5 +1,5 @@
-import { createServer, type Server } from "node:net"
 import { rm } from "node:fs/promises"
+import { createServer, type Server } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createInterface } from "node:readline"

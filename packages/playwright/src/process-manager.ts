@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
 import { access, rm } from "node:fs/promises"
 import { createConnection } from "node:net"
 import type { HasgardLaunchConfig } from "./types.js"
