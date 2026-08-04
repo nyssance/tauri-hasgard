@@ -7,7 +7,19 @@ bump may carry breaking changes.
 The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, and
 `@nyssance/tauri-hasgard` — share one version.
 
-## [0.2.0]
+## [0.2.1]
+
+Supersedes `v0.2.0`, which was tagged but published nothing: its release run
+failed in the end-to-end gate before any registry job started, so no crate, npm
+package, or GitHub Release for `0.2.0` exists.
+
+### Fixed since the 0.2.0 tag
+
+- Two end-to-end tests asserted behaviour that only holds on one platform:
+  `resolves its own operating-system window id` expected a native id everywhere,
+  though `native_window_id` returns `None` off macOS by design; and
+  `moves focus in and out of a real input` depended on `#search` not already
+  being focused, which an earlier test leaves it.
 
 ### Fixed
 
