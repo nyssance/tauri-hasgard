@@ -458,6 +458,18 @@ async fn handle_eval(client: &mut Client, script: Option<String>, window: Option
 async fn run_dom_command(client: &mut Client, command: Command, window: Option<&str>) -> Result<serde_json::Value> {
     match command {
         Command::Click { target } => client.call("click", with_window(Some(target_params(&target)), window)).await,
+        Command::Dblclick { target } => {
+            client.call("dblclick", with_window(Some(target_params(&target)), window)).await
+        }
+        Command::Hover { target } => client.call("hover", with_window(Some(target_params(&target)), window)).await,
+        Command::Focus { target } => client.call("focus", with_window(Some(target_params(&target)), window)).await,
+        Command::Blur { target } => client.call("blur", with_window(Some(target_params(&target)), window)).await,
+        Command::Disabled { target } => {
+            client.call("disabled", with_window(Some(target_params(&target)), window)).await
+        }
+        Command::BoundingBox { target } => {
+            client.call("boundingBox", with_window(Some(target_params(&target)), window)).await
+        }
         Command::Fill { target, value } => {
             let mut p = target_params(&target);
             p["value"] = json!(value);
@@ -474,7 +486,9 @@ async fn run_dom_command(client: &mut Client, command: Command, window: Option<&
             p["value"] = json!(value);
             client.call("select", with_window(Some(p), window)).await
         }
-        Command::Check { target } => client.call("check", with_window(Some(target_params(&target)), window)).await,
+        Command::Check { target, state } => {
+            client.call("check", with_window(Some(build_check_params(&target, state.as_deref())), window)).await
+        }
         Command::Scroll { direction, amount, r#ref } => {
             client
                 .call(
@@ -698,6 +712,20 @@ pub(crate) async fn run_drop_command(
     }
     p["files"] = json!(files);
     client.call("drop", with_window(Some(p), window)).await
+}
+
+/// Build params for the `check` RPC call.
+///
+/// Without `--state` the payload carries no `checked` key at all, which the
+/// bridge reads as "toggle" — the long-standing CLI contract. With it, the
+/// explicit boolean makes the call idempotent, so a retried command cannot
+/// invert the box the way a repeated toggle does.
+pub(crate) fn build_check_params(target: &str, state: Option<&str>) -> serde_json::Value {
+    let mut params = target_params(target);
+    if let Some(state) = state {
+        params["checked"] = json!(state == "on");
+    }
+    params
 }
 
 pub(crate) fn target_params(raw: &str) -> serde_json::Value {
@@ -1475,6 +1503,24 @@ mod tests {
     }
 
     // ─── build_wait_params (issue #74) ────────────────────────────────────────
+
+    #[test]
+    fn test_build_check_params_without_state_omits_checked_so_the_bridge_toggles() {
+        let params = build_check_params("#agree", None);
+        assert_eq!(params, json!({"selector": "#agree"}));
+        assert!(params.get("checked").is_none(), "no --state must send no `checked` key, not `checked: false`");
+    }
+
+    #[test]
+    fn test_build_check_params_maps_on_and_off_to_an_explicit_boolean() {
+        assert_eq!(build_check_params("#agree", Some("on")), json!({"selector": "#agree", "checked": true}));
+        assert_eq!(build_check_params("#agree", Some("off")), json!({"selector": "#agree", "checked": false}));
+    }
+
+    #[test]
+    fn test_build_check_params_keeps_ref_targets_intact() {
+        assert_eq!(build_check_params("@e3", Some("on")), json!({"ref": "e3", "checked": true}));
+    }
 
     #[test]
     fn test_build_wait_params_positional_css_selector_routes_to_selector() {

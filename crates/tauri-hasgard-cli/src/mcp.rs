@@ -150,7 +150,19 @@ impl HasgardMcpServer {
                 params["value"] = json!(required_string(&args, "value")?);
                 self.call_app_tool("select", Some(params), window).await
             }
-            "check" => self.target_call("check", &args, window).await,
+            "check" => {
+                let mut params = target_params(&required_string(&args, "target")?);
+                if let Some(checked) = optional_bool(&args, "checked")? {
+                    params["checked"] = json!(checked);
+                }
+                self.call_app_tool("check", Some(params), window).await
+            }
+            "dblclick" => self.target_call("dblclick", &args, window).await,
+            "hover" => self.target_call("hover", &args, window).await,
+            "focus" => self.target_call("focus", &args, window).await,
+            "blur" => self.target_call("blur", &args, window).await,
+            "disabled" => self.target_call("disabled", &args, window).await,
+            "bounding_box" => self.target_call("boundingBox", &args, window).await,
             "scroll" => {
                 self.call_app_tool(
                     "scroll",
@@ -564,9 +576,26 @@ fn tool_specs() -> Vec<ToolSpec> {
             idempotent: true,
         },
         ToolSpec {
-            name: "check",
-            description: "Toggle a checkbox or radio element.",
+            name: "blur",
+            description: "Remove keyboard focus from an element target.",
             schema: target_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "bounding_box",
+            description: "Get an element's position and size in viewport pixels.",
+            schema: target_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "check",
+            description: "Set a checkbox or radio element. Pass `checked` to drive it to a state \
+                          (idempotent); omit it to toggle.",
+            schema: check_schema,
             read_only: false,
             destructive: false,
             idempotent: false,
@@ -578,6 +607,22 @@ fn tool_specs() -> Vec<ToolSpec> {
             read_only: false,
             destructive: false,
             idempotent: false,
+        },
+        ToolSpec {
+            name: "dblclick",
+            description: "Double-click an element target by ref, selector, or coordinates.",
+            schema: target_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+        },
+        ToolSpec {
+            name: "disabled",
+            description: "Report whether an element is disabled, by property or aria-disabled.",
+            schema: target_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: true,
         },
         ToolSpec {
             name: "diff",
@@ -620,10 +665,26 @@ fn tool_specs() -> Vec<ToolSpec> {
             idempotent: true,
         },
         ToolSpec {
+            name: "focus",
+            description: "Give keyboard focus to an element target.",
+            schema: target_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
             name: "forms",
             description: "Dump all form fields in the webview document or inside a selector.",
             schema: selector_schema,
             read_only: true,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "hover",
+            description: "Move the pointer over an element target.",
+            schema: target_schema,
+            read_only: false,
             destructive: false,
             idempotent: true,
         },
@@ -1095,6 +1156,19 @@ fn target_schema() -> Arc<JsonObject> {
     object_schema(props([("target", string_prop("Element ref, CSS selector, or x,y coordinates."))]), &["target"])
 }
 
+fn check_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
+            (
+                "checked",
+                bool_prop("Drive the box to this state instead of toggling. Idempotent, so a retry cannot invert it."),
+            ),
+        ]),
+        &["target"],
+    )
+}
+
 fn optional_target_schema() -> Arc<JsonObject> {
     object_schema(props([("target", string_prop("Optional element ref, CSS selector, or x,y coordinates."))]), &[])
 }
@@ -1409,14 +1483,20 @@ mod tests {
             "assert_value",
             "assert_visible",
             "attrs",
+            "blur",
+            "bounding_box",
             "check",
             "click",
+            "dblclick",
             "diff",
+            "disabled",
             "drag",
             "drop",
             "eval",
             "fill",
+            "focus",
             "forms",
+            "hover",
             "html",
             "ipc",
             "logs",

@@ -58,6 +58,18 @@ pub(crate) enum Command {
     },
     /// Click an element.
     Click { target: String },
+    /// Double-click an element.
+    Dblclick { target: String },
+    /// Move the pointer over an element.
+    Hover { target: String },
+    /// Focus an element.
+    Focus { target: String },
+    /// Remove focus from an element.
+    Blur { target: String },
+    /// Report whether an element is disabled.
+    Disabled { target: String },
+    /// Report an element's position and size in viewport pixels.
+    BoundingBox { target: String },
     /// Clear and fill an input with a value.
     Fill { target: String, value: String },
     /// Type text character by character.
@@ -66,8 +78,14 @@ pub(crate) enum Command {
     Press { key: String },
     /// Select an option in a <select>.
     Select { target: String, value: String },
-    /// Toggle a checkbox.
-    Check { target: String },
+    /// Toggle a checkbox, or drive it to a state with --state.
+    Check {
+        target: String,
+        /// Drive the checkbox to `on` or `off` instead of toggling. Idempotent,
+        /// so a retry cannot invert the box the way a repeated toggle does.
+        #[arg(long, value_parser = ["on", "off"])]
+        state: Option<String>,
+    },
     /// Scroll the webview document or an element.
     Scroll {
         direction: String,
