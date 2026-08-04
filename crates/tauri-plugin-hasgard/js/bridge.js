@@ -124,6 +124,82 @@
     return { cleared: true };
   }
 
+  // --- Modal dialogs -------------------------------------------------------
+  //
+  // `alert`/`confirm`/`prompt` block the webview's main thread until a human
+  // clicks. Under automation nobody does, so the app freezes, the bridge stops
+  // answering, and every in-flight call dies on a timeout that names the wrong
+  // cause. Intercepting them is what makes an app that calls `confirm()`
+  // testable at all.
+  //
+  // The default is to dismiss, matching Playwright: a test that never mentions
+  // dialogs should not be silently agreeing to things. Every dialog is recorded
+  // either way, so a test can assert on what the app tried to ask.
+  const _dialogs = [];
+  let _dialogIdCounter = 0;
+  const _dialogPolicy = { action: "dismiss", promptText: null };
+
+  function recordDialog(type, message, defaultValue, accepted, returned) {
+    const entry = {
+      id: ++_dialogIdCounter,
+      timestamp: Date.now(),
+      type: type,
+      message: message == null ? "" : String(message),
+      accepted: accepted,
+    };
+    if (defaultValue !== undefined) entry.defaultValue = String(defaultValue);
+    if (returned !== undefined && returned !== null) entry.returned = String(returned);
+    _dialogs.push(entry);
+    if (_dialogs.length > MAX_LOGS) _dialogs.shift();
+    return entry;
+  }
+
+  window.alert = function (message) {
+    // An alert has one button, so "dismiss" and "accept" are the same act; it is
+    // recorded as accepted because the page's only possible outcome is that the
+    // user acknowledged it.
+    recordDialog("alert", message, undefined, true, undefined);
+  };
+
+  window.confirm = function (message) {
+    const accepted = _dialogPolicy.action === "accept";
+    recordDialog("confirm", message, undefined, accepted, undefined);
+    return accepted;
+  };
+
+  window.prompt = function (message, defaultValue) {
+    const accepted = _dialogPolicy.action === "accept";
+    // Accepting with no configured text submits the page's own default, exactly
+    // as pressing OK on an untouched prompt would.
+    const returned = accepted
+      ? (_dialogPolicy.promptText != null ? _dialogPolicy.promptText : (defaultValue == null ? "" : defaultValue))
+      : null;
+    recordDialog("prompt", message, defaultValue, accepted, returned);
+    return returned;
+  };
+
+  function dialogs() {
+    return { dialogs: _dialogs.slice(), policy: { action: _dialogPolicy.action, promptText: _dialogPolicy.promptText } };
+  }
+
+  function clearDialogs() {
+    _dialogs.length = 0;
+    return { cleared: true };
+  }
+
+  function handleDialogs(params) {
+    const action = params && params.action;
+    if (action !== "accept" && action !== "dismiss") {
+      throw new Error('dialog action must be "accept" or "dismiss", got: ' + String(action).slice(0, 64));
+    }
+    _dialogPolicy.action = action;
+    // `promptText` is only meaningful for accept; keeping a stale value around
+    // after switching to dismiss would resurface it on the next accept.
+    _dialogPolicy.promptText =
+      action === "accept" && params.promptText != null ? String(params.promptText) : null;
+    return { action: _dialogPolicy.action, promptText: _dialogPolicy.promptText };
+  }
+
   function bodySize(body) {
     if (!body) return 0;
     if (typeof body === "string") return body.length;
@@ -355,10 +431,18 @@
   // the same node. Registration appends to `idMap`: only `snapshot` resets it,
   // which keeps the documented "refs are valid until the next snapshot"
   // contract true for query-issued refs as well.
-  function describeElement(node, role, depth) {
-    refCounter++;
-    const ref = "e" + refCounter;
-    idMap.set(ref, node);
+  //
+  // `existingRef` re-describes a node under the ref it already holds. `filter`
+  // uses it because its input refs are registered by definition: minting new
+  // ones would grow `idMap` on every link of a filter chain and make the same
+  // element answer to a different name after each refinement.
+  function describeElement(node, role, depth, existingRef) {
+    let ref = existingRef;
+    if (!ref) {
+      refCounter++;
+      ref = "e" + refCounter;
+      idMap.set(ref, node);
+    }
 
     const entry = { ref: ref, role: role, depth: depth };
     const name = getName(node);
@@ -427,7 +511,10 @@
     return { elements: elements };
   }
 
-  var QUERY_DIMENSIONS = ["text", "label", "placeholder", "testid", "alt", "title"];
+  // `selector` is a dimension so that every locator kind — CSS, role, or
+  // text-ish — can be resolved down to refs by one code path. `filter` then
+  // refines any of them uniformly instead of needing a per-kind implementation.
+  var QUERY_DIMENSIONS = ["text", "label", "placeholder", "testid", "alt", "title", "selector"];
 
   function normalizeForMatch(value) {
     return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
@@ -475,7 +562,8 @@
     return texts;
   }
 
-  function queryCandidates(by) {
+  function queryCandidates(by, value) {
+    if (by === "selector") return document.querySelectorAll(value);
     if (by === "placeholder") return document.querySelectorAll("[placeholder]");
     if (by === "testid") return document.querySelectorAll("[data-testid]");
     if (by === "alt") return document.querySelectorAll("[alt]");
@@ -485,6 +573,8 @@
   }
 
   function queryMatches(el, by, value, exact) {
+    // `querySelectorAll` already applied the predicate for this dimension.
+    if (by === "selector") return true;
     if (by === "placeholder") return matchesQuery(el.getAttribute("placeholder"), value, exact);
     if (by === "alt") return matchesQuery(el.getAttribute("alt"), value, exact);
     if (by === "title") return matchesQuery(el.getAttribute("title"), value, exact);
@@ -508,7 +598,7 @@
     var exact = !!params.exact;
 
     var matched = [];
-    var candidates = queryCandidates(by);
+    var candidates = queryCandidates(by, params.value);
     for (var i = 0; i < candidates.length; i++) {
       if (queryMatches(candidates[i], by, params.value, exact)) matched.push(candidates[i]);
     }
@@ -527,6 +617,44 @@
     return {
       elements: matched.map(function (el) {
         return describeElement(el, getRole(el) || "generic", elementDepth(el));
+      })
+    };
+  }
+
+  // Refine an already-resolved set of refs by their rendered text.
+  //
+  // Filtering by ref rather than re-running the original locator keeps this one
+  // implementation valid for every locator kind, and keeps `snapshot` free of a
+  // per-element text field that would bloat every unrelated call.
+  //
+  // `hasText` keeps an element whose subtree text matches; `hasNotText` drops
+  // it. Both may be supplied — an element must satisfy each to survive, which
+  // is what makes `filter({hasText}).filter({hasNotText})` compose.
+  function filterElements(params) {
+    var refs = (params && params.refs) || [];
+    if (!Array.isArray(refs)) throw new Error("filter requires a 'refs' array");
+    var exact = !!(params && params.exact);
+    var hasText = params ? params.hasText : null;
+    var hasNotText = params ? params.hasNotText : null;
+    if (hasText == null && hasNotText == null) {
+      throw new Error("filter requires 'hasText' or 'hasNotText'");
+    }
+
+    var kept = [];
+    for (var i = 0; i < refs.length; i++) {
+      // A stale ref means the DOM moved under the caller between resolution and
+      // refinement. Dropping it silently would turn that race into a wrong
+      // answer, so surface it the same way acting on a stale ref would.
+      var el = requireEl(refs[i]);
+      var text = el.textContent;
+      if (hasText != null && !matchesQuery(text, hasText, exact)) continue;
+      if (hasNotText != null && matchesQuery(text, hasNotText, exact)) continue;
+      kept.push({ el: el, ref: refs[i] });
+    }
+
+    return {
+      elements: kept.map(function (entry) {
+        return describeElement(entry.el, getRole(entry.el) || "generic", elementDepth(entry.el), entry.ref);
       })
     };
   }
@@ -928,23 +1056,92 @@
     var rect = el.getBoundingClientRect();
     var x = rect.left + rect.width / 2;
     var y = rect.top + rect.height / 2;
-    var dt = typeof DataTransfer === "function" ? new DataTransfer() : new ClipboardEvent("").clipboardData;
-
-    if (params.files) {
-      for (var i = 0; i < params.files.length; i++) {
-        var f = params.files[i];
-        var binary = atob(f.data);
-        var bytes = new Uint8Array(binary.length);
-        for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-        var file = new File([bytes], f.name, { type: f.type || "application/octet-stream" });
-        dt.items.add(file);
-      }
-    }
+    var dt = buildFileList(params.files);
 
     el.dispatchEvent(new DragEvent("dragenter", { clientX: x, clientY: y, dataTransfer: dt, bubbles: true, cancelable: true }));
     el.dispatchEvent(new DragEvent("dragover", { clientX: x, clientY: y, dataTransfer: dt, bubbles: true, cancelable: true }));
     el.dispatchEvent(new DragEvent("drop", { clientX: x, clientY: y, dataTransfer: dt, bubbles: true, cancelable: true }));
     return { ok: true };
+  }
+
+  // Turn `{name, data}` payloads (data is base64) into real `File` objects.
+  // Shared by `drop` and `setInputFiles` so both produce identical `FileList`
+  // contents for the same input.
+  function buildFileList(files) {
+    var dt = typeof DataTransfer === "function" ? new DataTransfer() : new ClipboardEvent("").clipboardData;
+    for (var i = 0; i < (files || []).length; i++) {
+      var f = files[i];
+      var binary = atob(f.data);
+      var bytes = new Uint8Array(binary.length);
+      for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+      dt.items.add(new File([bytes], f.name, { type: f.type || "application/octet-stream" }));
+    }
+    return dt;
+  }
+
+  // Populate an `<input type="file">` without a native file chooser, which a
+  // headless-less webview gives no way to drive.
+  //
+  // `input.files` is settable from a `DataTransfer`'s `FileList` — the same
+  // mechanism a real drop uses — so the page sees a genuine `FileList` and its
+  // `change` handler cannot tell this from a user's pick. An empty array clears
+  // the selection, which is how Playwright spells "deselect everything".
+  function setInputFiles(params) {
+    var el = resolveTarget(params);
+    if (el.tagName !== "INPUT" || String(el.type).toLowerCase() !== "file") {
+      // Assigning `.files` to anything else silently no-ops, so the caller would
+      // get `ok: true` and an unchanged page.
+      throw new Error(
+        "setInputFiles requires an <input type=\"file\">, got: " +
+          String(el.tagName).toLowerCase() +
+          (el.type ? '[type="' + String(el.type).slice(0, 32) + '"]' : "")
+      );
+    }
+    var files = (params && params.files) || [];
+    if (!el.multiple && files.length > 1) {
+      // The browser would keep only the last file; failing loudly beats
+      // silently dropping the caller's other files.
+      throw new Error("setInputFiles got " + files.length + " files but the input is not [multiple]");
+    }
+    el.files = buildFileList(files).files;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true, count: el.files.length };
+  }
+
+  // Scroll by wheel, reproducing the browser's own two-step: the page sees a
+  // `wheel` event first and may cancel it; only if it does not does the scroll
+  // actually happen.
+  //
+  // A synthetic `WheelEvent` alone would fire listeners but never move the
+  // scrollport (untrusted events do not drive default actions), so a caller
+  // testing an infinite-scroll list would see handlers run and nothing load.
+  // Applying the scroll ourselves — and only when the event was not
+  // `preventDefault`ed — keeps both halves of the contract.
+  function wheel(params) {
+    var hasTarget =
+      params && (params.ref || params.selector || (params.x != null && params.y != null));
+    var el = hasTarget ? resolveTarget(params) : document.scrollingElement || document.documentElement;
+    var deltaX = (params && params.deltaX) || 0;
+    var deltaY = (params && params.deltaY) || 0;
+    var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+
+    var notCancelled = el.dispatchEvent(
+      new WheelEvent("wheel", {
+        deltaX: deltaX,
+        deltaY: deltaY,
+        deltaMode: 0,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window
+      })
+    );
+
+    if (notCancelled) el.scrollBy(deltaX, deltaY);
+    return { ok: true, defaultPrevented: !notCancelled };
   }
 
   function text(params) {
@@ -1525,6 +1722,7 @@
   window.__HASGARD__ = {
     snapshot: snapshot,
     query: query,
+    filter: filterElements,
     resolve: resolve,
     click: click,
     fill: fill,
@@ -1559,6 +1757,11 @@
     watch: watch,
     drag: drag,
     drop: drop,
+    setInputFiles: setInputFiles,
+    wheel: wheel,
+    dialogs: dialogs,
+    clearDialogs: clearDialogs,
+    handleDialogs: handleDialogs,
     storageGet: storageGet,
     storageSet: storageSet,
     storageList: storageList,

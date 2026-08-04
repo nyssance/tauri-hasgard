@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     build_wait_params, client::Client, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
-    target_params, with_window,
+    run_set_input_files_command, target_params, with_window,
 };
 
 #[derive(Debug, Clone)]
@@ -233,6 +233,22 @@ impl HasgardMcpServer {
                 self.call_app_tool("drag", Some(params), window).await
             }
             "drop" => self.call_drop_tool(args, window).await,
+            "set_input_files" => self.call_set_input_files_tool(args, window).await,
+            // `clear` routes to `fill` with an empty value so the two cannot
+            // drift on which events they fire.
+            "clear" => {
+                let mut params = target_params(&required_string(&args, "target")?);
+                params["value"] = json!("");
+                self.call_app_tool("fill", Some(params), window).await
+            }
+            "wheel" => {
+                let mut params =
+                    optional_string(&args, "target")?.map_or_else(|| json!({}), |target| target_params(&target));
+                params["deltaX"] = json!(optional_number(&args, "delta_x")?.unwrap_or(0.0));
+                params["deltaY"] = json!(optional_number(&args, "delta_y")?.unwrap_or(0.0));
+                self.call_app_tool("wheel", Some(params), window).await
+            }
+            "dialog" => self.call_dialog_tool(args, window).await,
             "text" => self.target_call("text", &args, window).await,
             "html" => {
                 let params = optional_string(&args, "target")?.map(|target| target_params(&target));
@@ -415,6 +431,42 @@ impl HasgardMcpServer {
             Ok(result) => tool_success(result),
             Err(err) => tool_error(err),
         })
+    }
+
+    async fn call_set_input_files_tool(
+        &self, args: JsonObject, window: Option<String>,
+    ) -> Result<CallToolResult, McpError> {
+        let target = required_string(&args, "target")?;
+        // Unlike `drop`, an empty list is meaningful: it deselects.
+        let files: Vec<PathBuf> = required_string_array(&args, "files")?.into_iter().map(PathBuf::from).collect();
+        let mut client = match self.connect_client().await {
+            Ok(client) => client,
+            Err(err) => return Ok(tool_error(err)),
+        };
+        Ok(match run_set_input_files_command(&mut client, &target, files, window.as_deref()).await {
+            Ok(result) => tool_success(result),
+            Err(err) => tool_error(err),
+        })
+    }
+
+    async fn call_dialog_tool(&self, args: JsonObject, window: Option<String>) -> Result<CallToolResult, McpError> {
+        let action = required_string(&args, "action")?;
+        let (method, params) = match action.as_str() {
+            "accept" => {
+                let mut params = json!({"action": "accept"});
+                if let Some(text) = optional_string(&args, "prompt_text")? {
+                    params["promptText"] = json!(text);
+                }
+                ("dialog.handle", Some(params))
+            }
+            "dismiss" => ("dialog.handle", Some(json!({"action": "dismiss"}))),
+            "list" => ("dialog.list", None),
+            "clear" => ("dialog.clear", None),
+            other => {
+                return Err(invalid_params(format!("'action' must be accept, dismiss, list, or clear, got: {other}")));
+            }
+        };
+        self.call_app_tool(method, params, window).await
     }
 
     async fn call_replay_tool(&self, args: JsonObject, window: Option<String>) -> Result<CallToolResult, McpError> {
@@ -688,6 +740,40 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "drag",
             description: "Drag an element to another target or by an offset.",
             schema: drag_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+        },
+        ToolSpec {
+            name: "clear",
+            description: "Empty an input, firing the same events as fill.",
+            schema: target_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "dialog",
+            description: "Inspect or set how modal dialogs (alert/confirm/prompt) are answered. \
+                          The policy is standing, not per-dialog, and defaults to dismiss.",
+            schema: dialog_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "set_input_files",
+            description: "Attach local files to an <input type=\"file\">. An empty list clears the selection.",
+            schema: set_input_files_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "wheel",
+            description: "Scroll by wheel, letting the page cancel it as a real wheel would. \
+                          Omit target to scroll the page.",
+            schema: wheel_schema,
             read_only: false,
             destructive: false,
             idempotent: false,
@@ -1159,6 +1245,13 @@ fn optional_u8(args: &JsonObject, name: &str) -> Result<Option<u8>, McpError> {
     }
 }
 
+fn optional_number(args: &JsonObject, name: &str) -> Result<Option<f64>, McpError> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value.as_f64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be a number"))),
+    }
+}
+
 fn optional_bool(args: &JsonObject, name: &str) -> Result<Option<bool>, McpError> {
     match args.get(name) {
         None | Some(Value::Null) => Ok(None),
@@ -1337,6 +1430,37 @@ fn drop_schema() -> Arc<JsonObject> {
             ("files", array_string_prop("Local file paths to drop.")),
         ]),
         &["target", "files"],
+    )
+}
+
+fn set_input_files_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("target", string_prop("The <input type=\"file\"> ref, selector, or coordinates.")),
+            ("files", array_string_prop("Local file paths to attach. Empty clears the selection.")),
+        ]),
+        &["target", "files"],
+    )
+}
+
+fn wheel_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("target", string_prop("Scrollport ref or selector. Omit to scroll the page.")),
+            ("delta_x", number_prop("Horizontal scroll delta in pixels.")),
+            ("delta_y", number_prop("Vertical scroll delta in pixels.")),
+        ]),
+        &[],
+    )
+}
+
+fn dialog_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("action", string_prop("One of: accept, dismiss, list, clear.")),
+            ("prompt_text", string_prop("Text submitted to a prompt when action is accept.")),
+        ]),
+        &["action"],
     )
 }
 
@@ -1521,6 +1645,10 @@ fn integer_prop(description: &str) -> Value {
     json!({"type": "integer", "description": description})
 }
 
+fn number_prop(description: &str) -> Value {
+    json!({"type": "number", "description": description})
+}
+
 fn array_string_prop(description: &str) -> Value {
     json!({"type": "array", "items": {"type": "string"}, "description": description})
 }
@@ -1568,8 +1696,10 @@ mod tests {
             "blur",
             "bounding_box",
             "check",
+            "clear",
             "click",
             "dblclick",
+            "dialog",
             "diff",
             "disabled",
             "drag",
@@ -1595,6 +1725,7 @@ mod tests {
             "screenshot_native",
             "scroll",
             "select",
+            "set_input_files",
             "snapshot",
             "state",
             "storage_clear",
@@ -1608,6 +1739,7 @@ mod tests {
             "value",
             "wait",
             "watch",
+            "wheel",
             "windows",
         ];
         assert_eq!(names, expected);

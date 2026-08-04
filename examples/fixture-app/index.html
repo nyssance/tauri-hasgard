@@ -56,6 +56,37 @@
         <label for="key-probe">Key probe</label>
         <input id="key-probe" name="key-probe" />
         <p id="key-log"></p>
+
+        <!-- A real <input type=file>: its change handler reads back the
+             FileList, so a test can prove the page saw genuine File objects
+             rather than a shape that merely looks like one. -->
+        <label for="upload">Attachment</label>
+        <input id="upload" name="upload" type="file" />
+        <p id="upload-log">none</p>
+        <label for="uploads">Attachments</label>
+        <input id="uploads" name="uploads" type="file" multiple />
+        <p id="uploads-log">none</p>
+
+        <!-- Two wheel targets: one that lets the scroll happen, one that
+             cancels it. Only the pair distinguishes "the event fired" from
+             "the scroll actually moved". -->
+        <div id="wheel-scroller"><div id="wheel-inner"></div></div>
+        <div id="wheel-blocked"><div id="wheel-blocked-inner"></div></div>
+        <p id="wheel-log">0</p>
+
+        <!-- Modal dialogs. Unintercepted, each of these freezes the webview
+             and every later bridge call dies on an unrelated timeout. -->
+        <button id="ask-confirm" type="button">Ask confirm</button>
+        <button id="ask-prompt" type="button">Ask prompt</button>
+        <button id="ask-alert" type="button">Ask alert</button>
+        <p id="dialog-answer">none</p>
+
+        <!-- Same tag, same class: reachable only by refining on text. -->
+        <ul id="tickets">
+          <li class="ticket">Ticket 1 — open</li>
+          <li class="ticket">Ticket 2 — closed</li>
+          <li class="ticket">Ticket 3 — open</li>
+        </ul>
       </section>
       <section aria-label="Unequal turns" id="turns"></section>
     </main>

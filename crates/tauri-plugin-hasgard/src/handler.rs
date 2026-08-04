@@ -120,7 +120,7 @@ pub(crate) async fn dispatch(
             engine.store_snapshot(&result);
             Ok(result)
         }
-        "query" => handle_eval_method("query", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "query" | "filter" => handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "diff" => handle_diff(params, engine, eval_fn, win).await,
         #[cfg(feature = "press")]
         "press" => handle_press(params, press_hooks, win).await,
@@ -132,7 +132,7 @@ pub(crate) async fn dispatch(
         }),
         "click" | "fill" | "type" | "select" | "check" | "scroll" | "drag" | "drop" | "text" | "html" | "value"
         | "attrs" | "eval" | "ipc" | "navigate" | "url" | "title" | "visible" | "count" | "checked" | "disabled"
-        | "boundingBox" | "focus" | "blur" | "hover" | "dblclick" => {
+        | "boundingBox" | "focus" | "blur" | "hover" | "dblclick" | "setInputFiles" | "wheel" => {
             handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
         }
         // `state` is a bridge-derived method (url/title/ready), but the dispatch
@@ -165,6 +165,9 @@ pub(crate) async fn dispatch(
         "storage.list" => handle_eval_method("storageList", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "storage.clear" => handle_eval_method("storageClear", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "forms.dump" => handle_eval_method("formDump", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "dialog.list" => handle_eval_method("dialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "dialog.clear" => handle_eval_method("clearDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "dialog.handle" => handle_eval_method("handleDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "record.start" => {
             recorder.start();
             Ok(serde_json::json!({"status": "recording"}))

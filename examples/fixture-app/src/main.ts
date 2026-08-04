@@ -73,6 +73,58 @@ keyProbe.addEventListener("keydown", event => {
   keyLog.textContent = [...modifiers, event.key].join("+")
 })
 
+// Read the FileList back out of the input so a test can assert the page saw
+// real File objects — names and sizes — rather than a lookalike shape.
+const describeFiles = (input: HTMLInputElement): string => {
+  const files = Array.from(input.files ?? [])
+  if (files.length === 0) return "none"
+  return files.map(file => `${file.name}:${file.size}`).join(",")
+}
+const upload = probe<HTMLInputElement>("#upload")
+const uploadLog = probe<HTMLParagraphElement>("#upload-log")
+upload.addEventListener("change", () => {
+  uploadLog.textContent = describeFiles(upload)
+})
+const uploads = probe<HTMLInputElement>("#uploads")
+const uploadsLog = probe<HTMLParagraphElement>("#uploads-log")
+uploads.addEventListener("change", () => {
+  uploadsLog.textContent = describeFiles(uploads)
+})
+
+const wheelLog = probe<HTMLParagraphElement>("#wheel-log")
+let wheelEvents = 0
+const sizeScroller = (id: string, innerId: string): HTMLDivElement => {
+  probe<HTMLDivElement>(innerId).style.height = "800px"
+  const box = probe<HTMLDivElement>(id)
+  box.style.height = "60px"
+  box.style.overflow = "auto"
+  box.addEventListener("wheel", () => {
+    wheelEvents += 1
+    wheelLog.textContent = String(wheelEvents)
+  })
+  return box
+}
+sizeScroller("#wheel-scroller", "#wheel-inner")
+// Cancels the wheel, so the event is observed but the scroll must not happen —
+// the pair is what separates "listener ran" from "scrollport moved".
+sizeScroller("#wheel-blocked", "#wheel-blocked-inner").addEventListener("wheel", event => {
+  event.preventDefault()
+})
+
+const dialogAnswer = probe<HTMLParagraphElement>("#dialog-answer")
+probe<HTMLButtonElement>("#ask-confirm").addEventListener("click", () => {
+  dialogAnswer.textContent = `confirm:${window.confirm("Delete the record?")}`
+})
+probe<HTMLButtonElement>("#ask-prompt").addEventListener("click", () => {
+  dialogAnswer.textContent = `prompt:${window.prompt("New name?", "untitled")}`
+})
+probe<HTMLButtonElement>("#ask-alert").addEventListener("click", () => {
+  window.alert("Record saved")
+  // Reached only if the alert returned, which is the point: an unintercepted
+  // alert blocks here forever.
+  dialogAnswer.textContent = "alert:returned"
+})
+
 console.warn("fixture warning marker")
 
 for (let index = 1; index <= 80; index += 1) {

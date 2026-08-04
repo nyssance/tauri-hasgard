@@ -74,6 +74,56 @@ export interface DropFile {
   type?: string
 }
 
+/**
+ * A file to hand to the page: either a path on the test machine, which is read
+ * and encoded for you, or an in-memory payload for content that never existed
+ * as a file.
+ */
+export type FileInput = string | DropFile
+
+/** Refinement applied to an existing locator. Both may be combined. */
+export interface FilterOptions {
+  /** Keep only elements whose subtree text matches. */
+  hasText?: string
+  /** Drop elements whose subtree text matches. */
+  hasNotText?: string
+  /** Require a whole-string match instead of a substring one. */
+  exact?: boolean
+}
+
+export type DialogType = "alert" | "confirm" | "prompt"
+
+/** A modal the page opened while the standing policy decided its outcome. */
+export interface DialogRecord {
+  id: number
+  timestamp: number
+  type: DialogType
+  message: string
+  /** Whether the policy accepted it. A one-button `alert` is always accepted. */
+  accepted: boolean
+  /** The page's suggested answer, for `prompt` only. */
+  defaultValue?: string
+  /** What the page received back, for an accepted `prompt`. */
+  returned?: string
+}
+
+/**
+ * How the next dialog will be answered.
+ *
+ * This is a standing policy rather than Playwright's per-event handler: the
+ * bridge must answer synchronously inside the page's `confirm()` call, with no
+ * chance to await a decision from the test process.
+ */
+export interface DialogPolicy {
+  action: "accept" | "dismiss"
+  promptText: string | null
+}
+
+export interface DialogListing {
+  dialogs: DialogRecord[]
+  policy: DialogPolicy
+}
+
 export interface ConsoleLogOptions {
   level?: "log" | "warn" | "error" | "info"
   since?: number

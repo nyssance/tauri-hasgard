@@ -1,12 +1,19 @@
+import { readFile } from "node:fs/promises"
+import { basename } from "node:path"
 import { HasgardRpcClient } from "./rpc-client.js"
 import type {
   BoundingBox,
   ConsoleLogEntry,
   ConsoleLogOptions,
+  DialogListing,
+  DialogPolicy,
+  DialogRecord,
   DiffChange,
   DiffOptions,
   DragOffset,
   DropFile,
+  FileInput,
+  FilterOptions,
   FormEntry,
   FormField,
   FormsDump,
@@ -65,6 +72,23 @@ export const byPoint = (x: number, y: number): HasgardTarget => ({ x, y })
 
 function withWindow(window: string, params?: Record<string, JsonValue>): Record<string, JsonValue> {
   return params ? { ...params, window } : { window }
+}
+
+/**
+ * Normalise file arguments into the base64 payloads the bridge understands.
+ *
+ * Paths are read here, in the test process, rather than in the app: the app may
+ * be sandboxed, and the path the test means is the one on the test machine.
+ */
+async function readFileInputs(files: FileInput | FileInput[]): Promise<DropFile[]> {
+  const list = Array.isArray(files) ? files : [files]
+  return Promise.all(
+    list.map(async entry => {
+      if (typeof entry !== "string") return entry
+      const contents = await readFile(entry)
+      return { name: basename(entry), data: contents.toString("base64") }
+    })
+  )
 }
 
 function targetParams(target: HasgardTarget): Record<string, JsonValue> {
@@ -569,6 +593,52 @@ export class HasgardWindow {
     }
   }
 
+  /**
+   * Scroll the page by wheel.
+   *
+   * The document sees a real `wheel` event first and may cancel it; the scroll
+   * only follows if it does not. Resolves to whether the page cancelled — which
+   * is how you tell "the app intercepted my wheel" from "nothing was
+   * listening". Use the locator method to scroll a nested scrollport.
+   */
+  async wheel(deltaX: number, deltaY: number): Promise<boolean> {
+    const value = expectRecord(await this.call("wheel", { deltaX, deltaY }), "wheel result")
+    return expectBoolean(value.defaultPrevented, "wheel.defaultPrevented")
+  }
+
+  /**
+   * The page's modal dialogs (`alert`, `confirm`, `prompt`).
+   *
+   * These block the webview until answered, so the bridge always answers them —
+   * dismissing by default, as Playwright does. A test that never touches this
+   * namespace still cannot hang on a `confirm()`, and can read back what the
+   * app tried to ask.
+   */
+  readonly dialogs = {
+    /** Answer every subsequent dialog with OK. `promptText` fills a `prompt`. */
+    accept: async (promptText?: string): Promise<DialogPolicy> => {
+      const params: Record<string, JsonValue> = { action: "accept" }
+      if (promptText !== undefined) params.promptText = promptText
+      return parseDialogPolicy(await this.call("dialog.handle", params))
+    },
+    /** Answer every subsequent dialog with Cancel. This is the default. */
+    dismiss: async (): Promise<DialogPolicy> =>
+      parseDialogPolicy(await this.call("dialog.handle", { action: "dismiss" })),
+    /** Every dialog the page has opened so far, oldest first. */
+    list: async (): Promise<DialogListing> => {
+      const value = expectRecord(await this.call("dialog.list"), "dialog.list result")
+      if (!Array.isArray(value.dialogs)) throw new Error("dialog.list.dialogs must be an array")
+      return {
+        dialogs: value.dialogs.map((entry, index) => parseDialogRecord(entry, index)),
+        policy: parseDialogPolicy(value.policy)
+      }
+    },
+    /** Forget the recorded dialogs. Leaves the accept/dismiss policy alone. */
+    clear: async (): Promise<void> => {
+      await this.call("dialog.clear")
+    }
+  }
+
   /** This window's operating-system window id, where the platform exposes one. */
   async nativeId(): Promise<number> {
     const listing = await new HasgardApplication(this.rpc).windows()
@@ -601,10 +671,11 @@ export class HasgardWindow {
   }
 }
 
-type LocatorQuery =
-  | { kind: "selector"; selector: string; index?: number }
-  | { kind: "role"; role: string; query: RoleQuery; index?: number }
-  | { kind: "query"; by: QueryDimension; value: string; query: TextQuery; index?: number }
+type LocatorQuery = (
+  | { kind: "selector"; selector: string }
+  | { kind: "role"; role: string; query: RoleQuery }
+  | { kind: "query"; by: QueryDimension; value: string; query: TextQuery }
+) & { index?: number; filters?: FilterOptions[] }
 
 export class HasgardLocator {
   readonly window: HasgardWindow
@@ -625,6 +696,45 @@ export class HasgardLocator {
 
   async type(text: string): Promise<void> {
     await this.withTarget(target => this.window.call("type", { ...targetParams(target), text }))
+  }
+
+  /** Empty the control, firing `input` and `change` as `fill` does. */
+  async clear(): Promise<void> {
+    await this.fill("")
+  }
+
+  /**
+   * Select files on an `<input type="file">` without a native file chooser,
+   * which an embedded webview gives no way to drive.
+   *
+   * Strings are read from the test machine's disk; `DropFile` payloads let you
+   * supply content that never existed as a file. An empty array deselects.
+   */
+  async setInputFiles(files: FileInput | FileInput[]): Promise<void> {
+    const payloads = await readFileInputs(files)
+    await this.withTarget(target =>
+      this.window.call("setInputFiles", {
+        ...targetParams(target),
+        files: payloads as unknown as JsonValue
+      })
+    )
+  }
+
+  /**
+   * Scroll this element by wheel.
+   *
+   * The page sees a real `wheel` event first and may cancel it; the scroll only
+   * follows if it does not — the same two steps a physical wheel produces.
+   * Resolves to whether the page cancelled.
+   */
+  async wheel(deltaX: number, deltaY: number): Promise<boolean> {
+    return this.withTarget(async target => {
+      const value = expectRecord(
+        await this.window.call("wheel", { ...targetParams(target), deltaX, deltaY }),
+        "wheel result"
+      )
+      return expectBoolean(value.defaultPrevented, "wheel.defaultPrevented")
+    })
   }
 
   async selectOption(value: string): Promise<void> {
@@ -771,8 +881,10 @@ export class HasgardLocator {
   }
 
   async count(): Promise<number> {
+    // The `count` op counts selector matches and knows nothing about text, so
+    // a filtered locator has to resolve its elements to count them.
     const total =
-      this.query.kind === "selector"
+      this.query.kind === "selector" && !this.query.filters?.length
         ? expectNumber(
             expectRecord(await this.window.call("count", { selector: this.query.selector }), "count result").count,
             "count.count"
@@ -784,10 +896,11 @@ export class HasgardLocator {
   }
 
   async waitFor(options: WaitOptions): Promise<void> {
-    // The bridge's `wait` op knows nothing about ordinals, so an indexed
-    // locator has to poll its own count — waiting on the bare selector would
-    // resolve as soon as *any* match appeared, even one before the index.
-    if (this.query.kind === "selector" && this.query.index === undefined) {
+    // The bridge's `wait` op knows nothing about ordinals or text, so an
+    // indexed or filtered locator has to poll its own count — waiting on the
+    // bare selector would resolve as soon as *any* match appeared, even one
+    // the index or filter excludes.
+    if (this.query.kind === "selector" && this.query.index === undefined && !this.query.filters?.length) {
       await this.window.call("wait", {
         selector: this.query.selector,
         gone: options.state === "detached",
@@ -814,6 +927,24 @@ export class HasgardLocator {
     return new HasgardLocator(this.window, { ...this.query, index })
   }
 
+  /**
+   * Narrow this locator to the elements whose text matches.
+   *
+   * Filters accumulate, so `filter({hasText}).filter({hasNotText})` applies
+   * both. Ordering matters against `nth`: filtering happens first, so
+   * `filter({hasText: "x"}).first()` is the first *matching* element, which is
+   * the reading that makes `first()` mean what it says.
+   */
+  filter(options: FilterOptions): HasgardLocator {
+    if (options.hasText === undefined && options.hasNotText === undefined) {
+      throw new Error("filter requires hasText or hasNotText")
+    }
+    return new HasgardLocator(this.window, {
+      ...this.query,
+      filters: [...(this.query.filters ?? []), options]
+    })
+  }
+
   first(): HasgardLocator {
     return this.nth(0)
   }
@@ -823,7 +954,10 @@ export class HasgardLocator {
   }
 
   private async resolveUnique(): Promise<HasgardTarget> {
-    if (this.query.kind === "selector") {
+    // An unfiltered CSS locator resolves inside the same round trip that acts
+    // on it, so the DOM cannot shift in between. A filter needs the elements'
+    // text, which only the general path can read — accept the extra trip.
+    if (this.query.kind === "selector" && !this.query.filters?.length) {
       return this.query.index === undefined
         ? bySelector(this.query.selector)
         : { selector: this.query.selector, index: this.query.index }
@@ -847,15 +981,19 @@ export class HasgardLocator {
   }
 
   private async resolveAll(): Promise<SnapshotElement[]> {
+    return this.applyFilters(await this.resolveBase())
+  }
+
+  private async resolveBase(): Promise<SnapshotElement[]> {
+    // A CSS locator reaches here only once a filter has been applied, and the
+    // `selector` query dimension is what lets it produce refs like any other.
     if (this.query.kind === "selector") {
-      throw new Error("resolveAll is only valid for role and query locators")
+      return this.runQuery({ by: "selector", value: this.query.selector })
     }
     if (this.query.kind === "query") {
       const params: Record<string, JsonValue> = { by: this.query.by, value: this.query.value }
       if (this.query.query.exact !== undefined) params.exact = this.query.query.exact
-      const raw = expectRecord(await this.window.call("query", params), "query result")
-      if (!Array.isArray(raw.elements)) throw new Error("query.elements must be an array")
-      return raw.elements.map((entry, index) => parseSnapshotElement(entry, index))
+      return this.runQuery(params)
     }
     const query = this.query
     const snapshot = await this.window.snapshot()
@@ -868,6 +1006,70 @@ export class HasgardLocator {
       return query.query.exact ? element.name === expected : element.name.includes(expected)
     })
   }
+
+  /**
+   * Apply each accumulated filter, one round trip per filter.
+   *
+   * Filters run server-side rather than against a snapshot because the text a
+   * filter matches on is not carried in snapshot entries — deliberately, so
+   * that every unrelated `snapshot` call stays small.
+   */
+  private async applyFilters(elements: SnapshotElement[]): Promise<SnapshotElement[]> {
+    const filters = this.query.filters ?? []
+    let current = elements
+    for (const filter of filters) {
+      // An empty set cannot survive further narrowing; skip the round trip.
+      if (current.length === 0) return current
+      const params: Record<string, JsonValue> = { refs: current.map(element => element.ref) }
+      if (filter.hasText !== undefined) params.hasText = filter.hasText
+      if (filter.hasNotText !== undefined) params.hasNotText = filter.hasNotText
+      if (filter.exact !== undefined) params.exact = filter.exact
+      current = this.parseElements(await this.window.call("filter", params), "filter")
+    }
+    return current
+  }
+
+  private async runQuery(params: Record<string, JsonValue>): Promise<SnapshotElement[]> {
+    return this.parseElements(await this.window.call("query", params), "query")
+  }
+
+  private parseElements(raw: unknown, source: string): SnapshotElement[] {
+    const value = expectRecord(raw, `${source} result`)
+    if (!Array.isArray(value.elements)) throw new Error(`${source}.elements must be an array`)
+    return value.elements.map((entry, index) => parseSnapshotElement(entry, index))
+  }
+}
+
+function parseDialogPolicy(value: unknown): DialogPolicy {
+  const record = expectRecord(value, "dialog policy")
+  const action = expectString(record.action, "dialog policy.action")
+  if (action !== "accept" && action !== "dismiss") {
+    throw new Error(`dialog policy.action must be "accept" or "dismiss", got ${action}`)
+  }
+  return {
+    action,
+    promptText: record.promptText == null ? null : expectString(record.promptText, "dialog policy.promptText")
+  }
+}
+
+function parseDialogRecord(value: unknown, index: number): DialogRecord {
+  const entry = expectRecord(value, `dialogs[${index}]`)
+  const type = expectString(entry.type, `dialogs[${index}].type`)
+  if (type !== "alert" && type !== "confirm" && type !== "prompt") {
+    throw new Error(`dialogs[${index}].type must be alert, confirm, or prompt, got ${type}`)
+  }
+  const record: DialogRecord = {
+    id: expectNumber(entry.id, `dialogs[${index}].id`),
+    timestamp: expectNumber(entry.timestamp, `dialogs[${index}].timestamp`),
+    type,
+    message: expectString(entry.message, `dialogs[${index}].message`),
+    accepted: expectBoolean(entry.accepted, `dialogs[${index}].accepted`)
+  }
+  if (entry.defaultValue !== undefined) {
+    record.defaultValue = expectString(entry.defaultValue, `dialogs[${index}].defaultValue`)
+  }
+  if (entry.returned !== undefined) record.returned = expectString(entry.returned, `dialogs[${index}].returned`)
+  return record
 }
 
 function parseSnapshotElement(value: unknown, index: number): SnapshotElement {

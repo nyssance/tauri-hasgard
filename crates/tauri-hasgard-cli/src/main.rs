@@ -18,7 +18,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use cli::{AssertKind, Cli, Command, FormsArgs, RecordAction, StorageAction, StorageArgs, Target, parse_target};
+use cli::{
+    AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, StorageAction, StorageArgs, Target, parse_target,
+};
 use client::Client;
 
 #[tokio::main]
@@ -470,6 +472,35 @@ async fn run_dom_command(client: &mut Client, command: Command, window: Option<&
             client.call("dblclick", with_window(Some(target_params(&target)), window)).await
         }
         Command::Hover { target } => client.call("hover", with_window(Some(target_params(&target)), window)).await,
+        // `clear` is `fill ""` rather than its own bridge op so the two cannot
+        // drift on which events they fire.
+        Command::Clear { target } => {
+            let mut params = target_params(&target);
+            params["value"] = json!("");
+            client.call("fill", with_window(Some(params), window)).await
+        }
+        Command::SetInputFiles { target, files } => run_set_input_files_command(client, &target, files, window).await,
+        Command::Wheel { target, delta_x, delta_y } => {
+            let mut params = target.as_deref().map_or_else(|| json!({}), target_params);
+            params["deltaX"] = json!(delta_x);
+            params["deltaY"] = json!(delta_y);
+            client.call("wheel", with_window(Some(params), window)).await
+        }
+        Command::Dialog(action) => {
+            let (method, params) = match action {
+                DialogCommand::Accept { prompt_text } => {
+                    let mut params = json!({"action": "accept"});
+                    if let Some(text) = prompt_text {
+                        params["promptText"] = json!(text);
+                    }
+                    ("dialog.handle", Some(params))
+                }
+                DialogCommand::Dismiss => ("dialog.handle", Some(json!({"action": "dismiss"}))),
+                DialogCommand::List => ("dialog.list", None),
+                DialogCommand::Clear => ("dialog.clear", None),
+            };
+            client.call(method, with_window(params, window)).await
+        }
         Command::Focus { target } => client.call("focus", with_window(Some(target_params(&target)), window)).await,
         Command::Blur { target } => client.call("blur", with_window(Some(target_params(&target)), window)).await,
         Command::Disabled { target } => {
@@ -700,26 +731,44 @@ async fn run_storage_command(
 const MAX_DROP_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB per file
 const MAX_TOTAL_DROP_SIZE: usize = 100 * 1024 * 1024; // 100 MB total base64 payload
 
-pub(crate) async fn run_drop_command(
-    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, window: Option<&str>,
-) -> Result<serde_json::Value> {
-    let mut p = target_params(target);
-    let mut files = Vec::new();
+/// Read local paths into the `{name, type, data}` payloads the bridge turns
+/// back into `File` objects.
+///
+/// Shared by `drop` and `set-input-files` so the two cannot diverge on size
+/// limits, MIME guessing, or what counts as a readable file — a divergence that
+/// would show up as one command accepting a file the other rejects.
+fn encode_files(paths: &[std::path::PathBuf]) -> Result<Vec<serde_json::Value>> {
+    let mut files = Vec::with_capacity(paths.len());
     let mut total_encoded = 0usize;
-    for path in &file {
+    for path in paths {
         let meta = std::fs::metadata(path).with_context(|| format!("Failed to stat file: {}", path.display()))?;
         anyhow::ensure!(meta.is_file(), "Not a regular file: {}", path.display());
         anyhow::ensure!(meta.len() <= MAX_DROP_FILE_SIZE, "File too large (>50 MB): {}", path.display());
         let data = std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
         total_encoded += encoded.len();
-        anyhow::ensure!(total_encoded <= MAX_TOTAL_DROP_SIZE, "Total drop payload exceeds 100 MB limit");
+        anyhow::ensure!(total_encoded <= MAX_TOTAL_DROP_SIZE, "Total file payload exceeds 100 MB limit");
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let mime = mime_from_ext(path);
-        files.push(json!({"name": name, "type": mime, "data": encoded}));
+        files.push(json!({"name": name, "type": mime_from_ext(path), "data": encoded}));
     }
-    p["files"] = json!(files);
+    Ok(files)
+}
+
+pub(crate) async fn run_drop_command(
+    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, window: Option<&str>,
+) -> Result<serde_json::Value> {
+    let mut p = target_params(target);
+    p["files"] = json!(encode_files(&file)?);
     client.call("drop", with_window(Some(p), window)).await
+}
+
+pub(crate) async fn run_set_input_files_command(
+    client: &mut Client, target: &str, files: Vec<std::path::PathBuf>, window: Option<&str>,
+) -> Result<serde_json::Value> {
+    let mut p = target_params(target);
+    // An empty list is meaningful here, unlike for `drop`: it deselects.
+    p["files"] = json!(encode_files(&files)?);
+    client.call("setInputFiles", with_window(Some(p), window)).await
 }
 
 /// Look up the operating-system window id for a Tauri webview label.

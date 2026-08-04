@@ -217,3 +217,142 @@ test("delivers a modifier combo with the modifier still applied", async ({ windo
     pollMs: 25
   })
 })
+
+test("filter narrows a CSS locator that matches several identical elements", async ({ window }) => {
+  // All three <li> share tag and class; only their text separates them, and a
+  // CSS selector cannot express "the one that says open".
+  const tickets = window.locator("#tickets .ticket")
+  await expect(tickets.count()).resolves.toBe(3)
+
+  const open = tickets.filter({ hasText: "open" })
+  await expect(open.count()).resolves.toBe(2)
+  await expect(open.first().textContent()).resolves.toContain("Ticket 1")
+})
+
+test("filters compose, and hasNotText subtracts", async ({ window }) => {
+  const tickets = window.locator("#tickets .ticket")
+  const openButNotFirst = tickets.filter({ hasText: "open" }).filter({ hasNotText: "Ticket 1" })
+
+  await expect(openButNotFirst.count()).resolves.toBe(1)
+  await expect(openButNotFirst.textContent()).resolves.toContain("Ticket 3")
+})
+
+test("filter applies before nth, so first() means the first match", async ({ window }) => {
+  // The alternative reading — index into the unfiltered set, then filter —
+  // would make this resolve to Ticket 1 or to nothing at all.
+  const second = window.locator("#tickets .ticket").filter({ hasText: "open" }).nth(1)
+  await expect(second.textContent()).resolves.toContain("Ticket 3")
+})
+
+test("setInputFiles hands the page a real File the change handler can measure", async ({ window }) => {
+  await window.locator("#upload").setInputFiles({ name: "notes.txt", data: btoa("hello") })
+
+  // The page reports name:size read back off its own FileList.
+  await expect(window.locator("#upload-log").textContent()).resolves.toBe("notes.txt:5")
+})
+
+test("setInputFiles reads a path from the test machine's disk", async ({ window }) => {
+  const { writeFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const { tmpdir } = await import("node:os")
+  const path = join(tmpdir(), `hasgard-fixture-upload-${process.pid}.txt`)
+  await writeFile(path, "twelve bytes")
+
+  await window.locator("#upload").setInputFiles(path)
+
+  await expect(window.locator("#upload-log").textContent()).resolves.toBe(
+    `hasgard-fixture-upload-${process.pid}.txt:12`
+  )
+})
+
+test("setInputFiles clears a selection and rejects overfilling a single-file input", async ({ window }) => {
+  await window.locator("#uploads").setInputFiles([
+    { name: "a.txt", data: btoa("aa") },
+    { name: "b.txt", data: btoa("bbb") }
+  ])
+  await expect(window.locator("#uploads-log").textContent()).resolves.toBe("a.txt:2,b.txt:3")
+
+  await window.locator("#uploads").setInputFiles([])
+  await expect(window.locator("#uploads-log").textContent()).resolves.toBe("none")
+
+  // A browser silently keeps only the last file here; failing loudly is the
+  // difference between a caught mistake and a test that asserts the wrong file.
+  await expect(
+    window.locator("#upload").setInputFiles([
+      { name: "a.txt", data: btoa("aa") },
+      { name: "b.txt", data: btoa("bb") }
+    ])
+  ).rejects.toThrow(/not \[multiple\]/)
+})
+
+test("setInputFiles refuses a target that would silently ignore the assignment", async ({ window }) => {
+  await expect(window.locator("#display-name").setInputFiles([])).rejects.toThrow(/input type="file"/)
+})
+
+test("wheel fires the event and moves the real scrollport", async ({ window }) => {
+  const scroller = window.locator("#wheel-scroller")
+  await expect(window.evaluate("document.querySelector('#wheel-scroller').scrollTop")).resolves.toBe(0)
+
+  const prevented = await scroller.wheel(0, 200)
+
+  expect(prevented).toBe(false)
+  await expect(window.locator("#wheel-log").textContent()).resolves.toBe("1")
+  // The scroll actually happened — a synthetic WheelEvent alone would leave
+  // this at 0 while the listener above still reported a hit.
+  await expect(window.evaluate("document.querySelector('#wheel-scroller').scrollTop")).resolves.toBe(200)
+})
+
+test("wheel reports a cancelled event and leaves the scrollport alone", async ({ window }) => {
+  const blocked = window.locator("#wheel-blocked")
+
+  const prevented = await blocked.wheel(0, 200)
+
+  expect(prevented).toBe(true)
+  await expect(window.evaluate("document.querySelector('#wheel-blocked').scrollTop")).resolves.toBe(0)
+})
+
+test("a confirm() is answered instead of freezing the webview", async ({ window }) => {
+  // Without interception this click never returns and every later call in this
+  // file dies on a timeout blaming the wrong thing.
+  await window.dialogs.clear()
+  await window.locator("#ask-confirm").click()
+
+  await expect(window.locator("#dialog-answer").textContent()).resolves.toBe("confirm:false")
+
+  const listing = await window.dialogs.list()
+  expect(listing.dialogs).toHaveLength(1)
+  expect(listing.dialogs[0]?.message).toBe("Delete the record?")
+  expect(listing.dialogs[0]?.accepted).toBe(false)
+})
+
+test("accept flips confirm and can answer a prompt", async ({ window }) => {
+  await window.dialogs.accept("Renamed")
+  await window.locator("#ask-confirm").click()
+  await expect(window.locator("#dialog-answer").textContent()).resolves.toBe("confirm:true")
+
+  await window.locator("#ask-prompt").click()
+  await expect(window.locator("#dialog-answer").textContent()).resolves.toBe("prompt:Renamed")
+
+  // Restore the default so ordering between tests cannot leak a policy.
+  await window.dialogs.dismiss()
+})
+
+test("an alert returns so the handler after it still runs", async ({ window }) => {
+  await window.dialogs.clear()
+  await window.locator("#ask-alert").click()
+
+  // This line is only reachable because alert() returned.
+  await expect(window.locator("#dialog-answer").textContent()).resolves.toBe("alert:returned")
+  const listing = await window.dialogs.list()
+  expect(listing.dialogs.at(-1)?.type).toBe("alert")
+})
+
+test("clear empties a control through the same path as fill", async ({ window }) => {
+  const input = window.locator("#display-name")
+  await input.fill("Nyssance")
+  await expect(input.inputValue()).resolves.toBe("Nyssance")
+
+  await input.clear()
+
+  await expect(input.inputValue()).resolves.toBe("")
+})

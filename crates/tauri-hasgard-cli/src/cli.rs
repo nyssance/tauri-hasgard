@@ -86,6 +86,27 @@ pub(crate) enum Command {
     BoundingBox { target: String },
     /// Clear and fill an input with a value.
     Fill { target: String, value: String },
+    /// Empty an input, firing the same events as `fill`.
+    Clear { target: String },
+    /// Attach files to an `<input type="file">`, by path on this machine.
+    SetInputFiles {
+        target: String,
+        /// Repeat to attach several files. Omit to clear the selection.
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<std::path::PathBuf>,
+    },
+    /// Scroll by wheel, letting the page cancel it as a real wheel would.
+    Wheel {
+        /// Omit to scroll the page rather than a specific scrollport.
+        target: Option<String>,
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        delta_x: f64,
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        delta_y: f64,
+    },
+    /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
+    #[command(subcommand)]
+    Dialog(DialogCommand),
     /// Type text character by character.
     Type { target: String, text: String },
     /// Press a keyboard key.
@@ -320,6 +341,27 @@ pub(crate) enum StorageAction {
     /// List all key-value pairs.
     List,
     /// Clear all storage.
+    Clear,
+}
+
+/// How modal dialogs are answered.
+///
+/// The bridge must answer `confirm()` synchronously inside the page's own call,
+/// so this is a standing policy rather than a per-dialog prompt. It defaults to
+/// dismiss, which is what keeps an app that confirms from freezing the webview.
+#[derive(Subcommand, Debug)]
+pub(crate) enum DialogCommand {
+    /// Answer subsequent dialogs with OK.
+    Accept {
+        /// Text submitted to a `prompt`. Its own default is used when omitted.
+        #[arg(long)]
+        prompt_text: Option<String>,
+    },
+    /// Answer subsequent dialogs with Cancel. This is the default.
+    Dismiss,
+    /// Show the dialogs the page has opened, and the current policy.
+    List,
+    /// Forget the recorded dialogs, leaving the policy alone.
     Clear,
 }
 

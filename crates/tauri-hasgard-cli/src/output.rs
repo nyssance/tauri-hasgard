@@ -17,6 +17,12 @@ pub(crate) fn format_assert_fail(message: &str) {
 }
 
 /// Print a value as compact text for human consumption.
+/// Render a JSON value for inline display, unquoting strings so `name=a.txt`
+/// reads as a value rather than as JSON embedded in prose.
+fn render_scalar(value: &serde_json::Value) -> String {
+    value.as_str().map_or_else(|| value.to_string(), ToOwned::to_owned)
+}
+
 pub(crate) fn format_text(value: &serde_json::Value) {
     // {error: {message: "...", code: N}} → "✗ <message>"
     if let Some(err) = value.get("error") {
@@ -30,11 +36,46 @@ pub(crate) fn format_text(value: &serde_json::Value) {
         return;
     }
     // {ok: true} → "✓ ok", {found: true} → "✓ found"
+    //
+    // Any sibling fields are appended rather than dropped: `wheel` reports
+    // whether the page cancelled the scroll and `setInputFiles` reports how many
+    // files landed, and collapsing those to a bare "ok" would hide the only part
+    // of the answer the caller could not have predicted.
     for key in ["ok", "found", "cleared"] {
         if value.get(key).and_then(serde_json::Value::as_bool) == Some(true) {
-            println!("{}", crate::style::success(key));
+            let detail = value.as_object().map_or_else(String::new, |fields| {
+                fields
+                    .iter()
+                    .filter(|(name, _)| name.as_str() != key)
+                    .map(|(name, field)| format!("{name}={}", render_scalar(field)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
+            if detail.is_empty() {
+                println!("{}", crate::style::success(key));
+            } else {
+                println!("{}", crate::style::success(&format!("{key} — {detail}")));
+            }
             return;
         }
+    }
+    // {disabled: true} → "✓ disabled" / "✓ enabled"; the bare JSON made the
+    // reader parse a one-bit answer.
+    if let Some(disabled) = value.get("disabled").and_then(serde_json::Value::as_bool)
+        && value.as_object().is_some_and(|fields| fields.len() == 1)
+    {
+        println!("{}", crate::style::success(if disabled { "disabled" } else { "enabled" }));
+        return;
+    }
+    // A bounding box is four numbers that belong on one line, not pretty JSON.
+    if let (Some(x), Some(y), Some(width), Some(height)) = (
+        value.get("x").and_then(serde_json::Value::as_f64),
+        value.get("y").and_then(serde_json::Value::as_f64),
+        value.get("width").and_then(serde_json::Value::as_f64),
+        value.get("height").and_then(serde_json::Value::as_f64),
+    ) {
+        println!("{width}×{height} at ({x}, {y})");
+        return;
     }
     // {status: "ok"} → "✓ ok", {status: "error"} → "✗ error"
     if let Some(status) = value.get("status").and_then(serde_json::Value::as_str) {
