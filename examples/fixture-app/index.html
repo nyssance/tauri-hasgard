@@ -18,6 +18,38 @@
         <h2>Confirm action</h2>
         <button id="close-dialog" type="button">Close</button>
       </dialog>
+      <section aria-label="Probes" id="probes">
+        <!-- Accessible name and visible text deliberately disagree: getName
+             reports "Save profile", so a snapshot-name locator can never reach
+             the word the button actually shows. -->
+        <button id="labelled" type="button" aria-label="Save profile">Submit changes</button>
+
+        <!-- Carries both a <label> and a placeholder. getName stops at the
+             label, so the placeholder is invisible to snapshot-based lookup. -->
+        <label for="search">Search records</label>
+        <input id="search" name="search" placeholder="Type to filter" />
+
+        <input id="agree" name="agree" type="checkbox" />
+        <label for="agree">Agree to terms</label>
+
+        <button id="locked" type="button" disabled>Locked</button>
+        <button id="aria-locked" type="button" aria-disabled="true">Aria locked</button>
+
+        <!-- One test id is a prefix of the other. -->
+        <button id="testid-save" type="button" data-testid="save">Save it</button>
+        <button id="testid-draft" type="button" data-testid="save-draft">Draft it</button>
+
+        <div id="hover-target">Hover target</div>
+        <p id="hover-state">idle</p>
+
+        <div id="dbl-target">Double click target</div>
+        <p id="dbl-count">0</p>
+
+        <p id="focus-state">none</p>
+        <p id="delayed">pending</p>
+
+        <div id="scroller"><div id="scroller-inner"></div></div>
+      </section>
       <section aria-label="Unequal turns" id="turns"></section>
     </main>
     <script type="module" src="/src/main.ts"></script>
