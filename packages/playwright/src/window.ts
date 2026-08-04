@@ -16,6 +16,7 @@ import type {
   NativeScreenshotOptions,
   NetworkRequestEntry,
   NetworkRequestOptions,
+  QueryDimension,
   RecorderEntry,
   RecorderResult,
   RecorderStatus,
@@ -28,6 +29,7 @@ import type {
   StorageEntry,
   StorageListing,
   StorageOptions,
+  TextQuery,
   WaitForFunctionOptions,
   WaitOptions,
   WatchChanges,
@@ -344,6 +346,37 @@ export class HasgardWindow {
     return new HasgardLocator(this, { kind: "role", role, query })
   }
 
+  /**
+   * Locate by visible text. Matching runs in the page against the live DOM, not
+   * against a snapshot's `name`: that field collapses aria-label, alt, `<label>`,
+   * placeholder, and text into one 50-character string, so a button with an
+   * aria-label would never be findable by the text it actually shows.
+   */
+  getByText(text: string, query: TextQuery = {}): HasgardLocator {
+    return new HasgardLocator(this, { kind: "query", by: "text", value: text, query })
+  }
+
+  getByLabel(text: string, query: TextQuery = {}): HasgardLocator {
+    return new HasgardLocator(this, { kind: "query", by: "label", value: text, query })
+  }
+
+  getByPlaceholder(text: string, query: TextQuery = {}): HasgardLocator {
+    return new HasgardLocator(this, { kind: "query", by: "placeholder", value: text, query })
+  }
+
+  getByAltText(text: string, query: TextQuery = {}): HasgardLocator {
+    return new HasgardLocator(this, { kind: "query", by: "alt", value: text, query })
+  }
+
+  getByTitle(text: string, query: TextQuery = {}): HasgardLocator {
+    return new HasgardLocator(this, { kind: "query", by: "title", value: text, query })
+  }
+
+  /** Test ids always match exactly, so `save` cannot select `save-draft`. */
+  getByTestId(testId: string): HasgardLocator {
+    return new HasgardLocator(this, { kind: "query", by: "testid", value: testId, query: {} })
+  }
+
   async snapshot(options: SnapshotOptions = {}): Promise<Snapshot> {
     const raw = expectRecord(
       await this.rpc.call("snapshot", withWindow(this.label, options as Record<string, JsonValue>)),
@@ -550,6 +583,7 @@ export class HasgardWindow {
 type LocatorQuery =
   | { kind: "selector"; selector: string; index?: number }
   | { kind: "role"; role: string; query: RoleQuery; index?: number }
+  | { kind: "query"; by: QueryDimension; value: string; query: TextQuery; index?: number }
 
 export class HasgardLocator {
   readonly window: HasgardWindow
@@ -717,12 +751,12 @@ export class HasgardLocator {
 
   async count(): Promise<number> {
     const total =
-      this.query.kind === "role"
-        ? (await this.resolveAll()).length
-        : expectNumber(
+      this.query.kind === "selector"
+        ? expectNumber(
             expectRecord(await this.window.call("count", { selector: this.query.selector }), "count result").count,
             "count.count"
           )
+        : (await this.resolveAll()).length
     if (this.query.index === undefined) return total
     const position = absoluteIndex(this.query.index, total)
     return position >= 0 && position < total ? 1 : 0
@@ -777,12 +811,12 @@ export class HasgardLocator {
     if (this.query.index !== undefined) {
       const element = elements[absoluteIndex(this.query.index, elements.length)]
       if (!element) {
-        throw new Error(`Role locator has no element at index ${this.query.index} (${elements.length} matched)`)
+        throw new Error(`Locator has no element at index ${this.query.index} (${elements.length} matched)`)
       }
       return byRef(element.ref)
     }
     if (elements.length !== 1) {
-      throw new Error(`Role locator resolved to ${elements.length} elements; expected exactly one`)
+      throw new Error(`Locator resolved to ${elements.length} elements; expected exactly one`)
     }
     return byRef(elements[0]!.ref)
   }
@@ -793,7 +827,14 @@ export class HasgardLocator {
 
   private async resolveAll(): Promise<SnapshotElement[]> {
     if (this.query.kind === "selector") {
-      throw new Error("resolveAll is only valid for role locators")
+      throw new Error("resolveAll is only valid for role and query locators")
+    }
+    if (this.query.kind === "query") {
+      const params: Record<string, JsonValue> = { by: this.query.by, value: this.query.value }
+      if (this.query.query.exact !== undefined) params.exact = this.query.query.exact
+      const raw = expectRecord(await this.window.call("query", params), "query result")
+      if (!Array.isArray(raw.elements)) throw new Error("query.elements must be an array")
+      return raw.elements.map((entry, index) => parseSnapshotElement(entry, index))
     }
     const query = this.query
     const snapshot = await this.window.snapshot()

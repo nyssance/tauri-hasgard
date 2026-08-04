@@ -302,6 +302,81 @@ test("recorder.stop returns the recorded actions with their extra params", async
   expect(result.entries[0]).toEqual({ action: "click", timestamp: 120, ref: "e3" })
 })
 
+test("getByText resolves through the query op, not through a snapshot name", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  call.mockImplementation(async method => {
+    if (method === "query") {
+      return { elements: [{ ref: "e9", role: "button", depth: 2, name: "Save" }] }
+    }
+    if (method === "click") return { ok: true }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+
+  await new HasgardWindow(rpc, "main").getByText("Submit").click()
+
+  expect(call).toHaveBeenNthCalledWith(1, "query", { by: "text", value: "Submit", window: "main" })
+  expect(call).toHaveBeenNthCalledWith(2, "click", { ref: "e9", window: "main" })
+  expect(call).not.toHaveBeenCalledWith("snapshot", expect.anything())
+})
+
+test("each getBy helper selects its own dimension", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ elements: [] })
+  const window = new HasgardWindow(rpc, "main")
+
+  await window.getByLabel("Email").count()
+  await window.getByPlaceholder("Search").count()
+  await window.getByAltText("Logo").count()
+  await window.getByTitle("Close").count()
+  await window.getByTestId("save").count()
+
+  expect(call.mock.calls.map(([, params]) => (params as Record<string, unknown>).by)).toEqual([
+    "label",
+    "placeholder",
+    "alt",
+    "title",
+    "testid"
+  ])
+})
+
+test("exact is forwarded only when set, and getByTestId never sends it", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ elements: [] })
+  const window = new HasgardWindow(rpc, "main")
+
+  await window.getByText("Save", { exact: true }).count()
+  await window.getByText("Save").count()
+  await window.getByTestId("save").count()
+
+  expect(call).toHaveBeenNthCalledWith(1, "query", { by: "text", value: "Save", exact: true, window: "main" })
+  expect(call).toHaveBeenNthCalledWith(2, "query", { by: "text", value: "Save", window: "main" })
+  expect(call).toHaveBeenNthCalledWith(3, "query", { by: "testid", value: "save", window: "main" })
+})
+
+test("an ambiguous text locator refuses to pick one, and nth narrows it", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  call.mockImplementation(async method => {
+    if (method === "query") {
+      return {
+        elements: [
+          { ref: "e1", role: "listitem", depth: 1, name: "Row" },
+          { ref: "e2", role: "listitem", depth: 1, name: "Row" }
+        ]
+      }
+    }
+    if (method === "click") return { ok: true }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+  const window = new HasgardWindow(rpc, "main")
+
+  await expect(window.getByText("Row").click()).rejects.toThrow("resolved to 2 elements")
+
+  await window.getByText("Row").last().click()
+  expect(call).toHaveBeenLastCalledWith("click", { ref: "e2", window: "main" })
+})
+
 test("waitForFunction returns the predicate's own value and forwards the poll interval", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, value: 42 })

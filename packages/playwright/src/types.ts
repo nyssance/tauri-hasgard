@@ -143,6 +143,13 @@ export interface FormsDump {
   truncated: boolean
 }
 
+export type QueryDimension = "text" | "label" | "placeholder" | "testid" | "alt" | "title"
+
+export interface TextQuery {
+  /** Full, case-sensitive match. Whitespace is normalized either way. */
+  exact?: boolean
+}
+
 export interface WaitForFunctionOptions {
   timeoutMs?: number
   /** How often to re-evaluate the expression. Defaults to 50ms in the bridge. */

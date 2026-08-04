@@ -458,6 +458,9 @@ async fn handle_eval(client: &mut Client, script: Option<String>, window: Option
 
 async fn run_dom_command(client: &mut Client, command: Command, window: Option<&str>) -> Result<serde_json::Value> {
     match command {
+        Command::Query { by, value, exact } => {
+            client.call("query", with_window(Some(json!({"by": by, "value": value, "exact": exact})), window)).await
+        }
         Command::Click { target } => client.call("click", with_window(Some(target_params(&target)), window)).await,
         Command::Dblclick { target } => {
             client.call("dblclick", with_window(Some(target_params(&target)), window)).await

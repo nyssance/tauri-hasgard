@@ -56,6 +56,20 @@ pub(crate) enum Command {
         #[arg(short, long)]
         depth: Option<u8>,
     },
+    /// Find elements by text, label, placeholder, test id, alt, or title.
+    ///
+    /// Matching runs against the live DOM, so it sees every naming source
+    /// independently — unlike a snapshot `name`, which collapses them into one
+    /// truncated field.
+    Query {
+        /// Dimension to match on.
+        #[arg(long, value_parser = ["text", "label", "placeholder", "testid", "alt", "title"])]
+        by: String,
+        value: String,
+        /// Require a full, case-sensitive match. Test ids are always exact.
+        #[arg(long)]
+        exact: bool,
+    },
     /// Click an element.
     Click { target: String },
     /// Double-click an element.

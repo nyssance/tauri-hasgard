@@ -133,6 +133,14 @@ impl HasgardMcpServer {
                 }
                 self.call_app_tool("diff", Some(params), window).await
             }
+            "query" => {
+                let params = json!({
+                    "by": required_string(&args, "by")?,
+                    "value": required_string(&args, "value")?,
+                    "exact": optional_bool(&args, "exact")?.unwrap_or(false),
+                });
+                self.call_app_tool("query", Some(params), window).await
+            }
             "click" => self.target_call("click", &args, window).await,
             "fill" => {
                 let mut params = target_params(&required_string(&args, "target")?);
@@ -754,6 +762,16 @@ fn tool_specs() -> Vec<ToolSpec> {
             idempotent: false,
         },
         ToolSpec {
+            name: "query",
+            description: "Find elements by text, label, placeholder, test id, alt, or title. Matches against the \
+                          live DOM, so each naming source is searchable independently rather than through the \
+                          single collapsed `name` a snapshot reports.",
+            schema: query_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
             name: "record_start",
             description: "Start recording app interactions.",
             schema: empty_schema,
@@ -1165,6 +1183,17 @@ fn target_schema() -> Arc<JsonObject> {
     object_schema(props([("target", string_prop("Element ref, CSS selector, or x,y coordinates."))]), &["target"])
 }
 
+fn query_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("by", string_prop("Dimension to match: text, label, placeholder, testid, alt, or title.")),
+            ("value", string_prop("Value to match against the chosen dimension.")),
+            ("exact", bool_prop("Require a full, case-sensitive match. Test ids are always exact regardless.")),
+        ]),
+        &["by", "value"],
+    )
+}
+
 fn check_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -1521,6 +1550,7 @@ mod tests {
             "network",
             "ping",
             "press",
+            "query",
             "record_start",
             "record_status",
             "record_stop",

@@ -120,6 +120,7 @@ pub(crate) async fn dispatch(
             engine.store_snapshot(&result);
             Ok(result)
         }
+        "query" => handle_eval_method("query", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "diff" => handle_diff(params, engine, eval_fn, win).await,
         #[cfg(feature = "press")]
         "press" => handle_press(params, focus_fn, win).await,

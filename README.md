@@ -62,6 +62,17 @@ fn run() {
 }
 ```
 
+Grant the plugin's eval callback permission to every webview Hasgard will control in the relevant Tauri capability file, for example `src-tauri/capabilities/default.json`:
+
+```json
+{
+  "windows": ["*"],
+  "permissions": ["hasgard:default"]
+}
+```
+
+`hasgard:default` grants only the internal `callback` and `__callback` commands used to return WebView evaluation results. Without it, the native server can accept connections, but evaluation, locators, screenshots, and Playwright assertions fail with `hasgard.__callback not allowed`.
+
 The plugin is inert in release builds. In debug builds it creates an application-scoped Unix socket or Windows named pipe and injects the Hasgard bridge into each webview.
 
 ## 2A. Use the CLI or connect an AI through MCP

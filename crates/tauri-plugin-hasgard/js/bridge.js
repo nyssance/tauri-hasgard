@@ -350,6 +350,34 @@
     return role ? INTERACTIVE_ROLES.has(role) : false;
   }
 
+  // Build one wire element and register its ref. `snapshot` and `query` both go
+  // through here so the two can never drift into reporting different shapes for
+  // the same node. Registration appends to `idMap`: only `snapshot` resets it,
+  // which keeps the documented "refs are valid until the next snapshot"
+  // contract true for query-issued refs as well.
+  function describeElement(node, role, depth) {
+    refCounter++;
+    const ref = "e" + refCounter;
+    idMap.set(ref, node);
+
+    const entry = { ref: ref, role: role, depth: depth };
+    const name = getName(node);
+    if (name) entry.name = name;
+    // `value` is an IDL property whose type varies by element: a string for
+    // form controls, but a number for `<li>` (ordinal), `<progress>`, and
+    // `<meter>`. Coerce to string so the wire format matches the plugin's
+    // `SnapshotElement.value: Option<String>` contract (#120).
+    if (node.value !== undefined && node.value !== "") entry.value = String(node.value);
+    if (node.tagName === "INPUT") {
+      var inputType = (node.getAttribute("type") || "text").toLowerCase();
+      if (inputType === "checkbox" || inputType === "radio") {
+        entry.checked = node.checked;
+      }
+    }
+    if (node.disabled) entry.disabled = true;
+    return entry;
+  }
+
   function snapshot(options) {
     const interactive = (options && options.interactive) || false;
     const selector = (options && options.selector) || null;
@@ -387,26 +415,7 @@
       }
 
       if (role) {
-        refCounter++;
-        const ref = "e" + refCounter;
-        idMap.set(ref, node);
-
-        const entry = { ref: ref, role: role, depth: currentDepth };
-        const name = getName(node);
-        if (name) entry.name = name;
-        // `value` is an IDL property whose type varies by element: a string for
-        // form controls, but a number for `<li>` (ordinal), `<progress>`, and
-        // `<meter>`. Coerce to string so the wire format matches the plugin's
-        // `SnapshotElement.value: Option<String>` contract (#120).
-        if (node.value !== undefined && node.value !== "") entry.value = String(node.value);
-        if (node.tagName === "INPUT") {
-          var inputType = (node.getAttribute("type") || "text").toLowerCase();
-          if (inputType === "checkbox" || inputType === "radio") {
-            entry.checked = node.checked;
-          }
-        }
-        if (node.disabled) entry.disabled = true;
-        elements.push(entry);
+        elements.push(describeElement(node, role, currentDepth));
       }
 
       for (const child of node.children) {
@@ -416,6 +425,110 @@
 
     walk(root, 0);
     return { elements: elements };
+  }
+
+  var QUERY_DIMENSIONS = ["text", "label", "placeholder", "testid", "alt", "title"];
+
+  function normalizeForMatch(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  // Playwright's rule: non-exact is a case-insensitive substring, exact is a
+  // case-sensitive equality. Whitespace is normalized on both sides either way.
+  function matchesQuery(actual, wanted, exact) {
+    var a = normalizeForMatch(actual);
+    var w = normalizeForMatch(wanted);
+    if (exact) return a === w;
+    return a.toLowerCase().indexOf(w.toLowerCase()) !== -1;
+  }
+
+  function elementDepth(node) {
+    var depth = 0;
+    var current = node.parentElement;
+    while (current && current !== document.body) {
+      depth++;
+      current = current.parentElement;
+    }
+    return depth;
+  }
+
+  // The accessible label of a form control, from every source Playwright's
+  // getByLabel consults. Deliberately *not* getName(): that collapses six
+  // sources into one and truncates to 50 characters, so a control carrying both
+  // an aria-label and a <label> becomes findable by only one of them.
+  function labelTextsOf(el) {
+    var texts = [];
+    var aria = el.getAttribute && el.getAttribute("aria-label");
+    if (aria) texts.push(aria);
+    var labelledBy = el.getAttribute && el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      labelledBy.split(/\s+/).forEach(function (id) {
+        var ref = document.getElementById(id);
+        if (ref) texts.push(ref.textContent || "");
+      });
+    }
+    if (el.labels) {
+      for (var i = 0; i < el.labels.length; i++) {
+        texts.push(el.labels[i].textContent || "");
+      }
+    }
+    return texts;
+  }
+
+  function queryCandidates(by) {
+    if (by === "placeholder") return document.querySelectorAll("[placeholder]");
+    if (by === "testid") return document.querySelectorAll("[data-testid]");
+    if (by === "alt") return document.querySelectorAll("[alt]");
+    if (by === "title") return document.querySelectorAll("[title]");
+    if (by === "label") return document.querySelectorAll("input, textarea, select, button, meter, output, progress");
+    return document.querySelectorAll("*");
+  }
+
+  function queryMatches(el, by, value, exact) {
+    if (by === "placeholder") return matchesQuery(el.getAttribute("placeholder"), value, exact);
+    if (by === "alt") return matchesQuery(el.getAttribute("alt"), value, exact);
+    if (by === "title") return matchesQuery(el.getAttribute("title"), value, exact);
+    // A test id is an identifier, not prose: substring matching on it invites
+    // "save" quietly selecting "save-draft", so this dimension is always exact.
+    if (by === "testid") return normalizeForMatch(el.getAttribute("data-testid")) === normalizeForMatch(value);
+    if (by === "label") {
+      return labelTextsOf(el).some(function (text) {
+        return matchesQuery(text, value, exact);
+      });
+    }
+    return matchesQuery(el.textContent, value, exact);
+  }
+
+  function query(params) {
+    var by = params && params.by;
+    if (QUERY_DIMENSIONS.indexOf(by) === -1) {
+      throw new Error("query: 'by' must be one of " + QUERY_DIMENSIONS.join(", ") + ", got: " + String(by).slice(0, 64));
+    }
+    if (params.value == null) throw new Error("query requires a 'value'");
+    var exact = !!params.exact;
+
+    var matched = [];
+    var candidates = queryCandidates(by);
+    for (var i = 0; i < candidates.length; i++) {
+      if (queryMatches(candidates[i], by, params.value, exact)) matched.push(candidates[i]);
+    }
+
+    // Text matching walks every element, so an ancestor matches whenever its
+    // descendant does — <html> and <body> would match everything. Keep only the
+    // innermost matches, which is the element a user would point at.
+    if (by === "text" && matched.length > 1) {
+      matched = matched.filter(function (el) {
+        return !matched.some(function (other) {
+          return other !== el && el.contains(other);
+        });
+      });
+    }
+
+    return {
+      elements: matched.map(function (el) {
+        return describeElement(el, getRole(el) || "generic", elementDepth(el));
+      })
+    };
   }
 
   function resolve(ref) {
@@ -1410,6 +1523,7 @@
 
   window.__HASGARD__ = {
     snapshot: snapshot,
+    query: query,
     resolve: resolve,
     click: click,
     fill: fill,
