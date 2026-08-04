@@ -65,6 +65,14 @@ test("dispatches hover and dblclick that the page's own listeners accept", async
 })
 
 test("moves focus in and out of a real input", async ({ window }) => {
+  // Start from a known-unfocused state. An earlier test fills #search — it
+  // carries the "Type to filter" placeholder — and `fill` focuses the control.
+  // Calling `.focus()` on the already-focused element fires no focus event, so
+  // the probe would keep whatever it last said and this test would read a stale
+  // answer. That is exactly how it failed on one macOS runner and not another.
+  await window.evaluate("(document.activeElement?.blur(), document.querySelector('#focus-state').textContent = 'none')")
+  await expect(window.locator("#focus-state").textContent()).resolves.toBe("none")
+
   await window.locator("#search").focus()
   await expect(window.locator("#focus-state").textContent()).resolves.toBe("focused")
   await window.locator("#search").blur()
@@ -153,9 +161,21 @@ test("reports the page title and URL without a full state read", async ({ window
   await expect(window.url()).resolves.toBe("tauri://localhost")
 })
 
+// `nativeId` is present only where native capture exists, so a client can tell
+// "this platform cannot capture natively" from "this window has no id". Both
+// halves of that contract are asserted, rather than skipping the platforms that
+// take the other branch — skipping is how the missing-id case went unnoticed
+// until CI ran it.
 test("resolves its own operating-system window id", async ({ hasgard, window }) => {
   const listing = await hasgard.windows()
   const main = listing.find(entry => entry.label === "main")
+
+  if (process.platform !== "darwin") {
+    expect(main?.nativeId).toBeUndefined()
+    await expect(window.nativeId()).rejects.toThrow(/no native window id/)
+    return
+  }
+
   expect(main?.nativeId).toBeGreaterThan(0)
   await expect(window.nativeId()).resolves.toBe(main?.nativeId)
 })
