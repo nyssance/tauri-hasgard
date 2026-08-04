@@ -351,26 +351,28 @@ async fn handle_press(
     }
 
     let combo = key_str.to_owned();
-    // Injection must land on the main thread. On macOS the layout lookup for a
-    // plain character reaches `TSMGetInputSourceProperty`, which asserts it is
-    // on the main dispatch queue and aborts the host application with SIGTRAP
-    // otherwise — a crash, not an error the caller could handle. Named keys
-    // like Tab carry fixed keycodes and never take that path, which is why the
-    // bug stayed invisible until a character was pressed.
+    // Injection goes through the host's runner, which decides the thread: on
+    // macOS the layout lookup for a plain character reaches
+    // `TSMGetInputSourceProperty`, which asserts it is on the main dispatch
+    // queue and aborts the host application with SIGTRAP otherwise — a crash,
+    // not an error the caller could handle. Named keys like Tab carry fixed
+    // keycodes and never take that path, which is why the bug stayed invisible
+    // until a character was pressed. Other platforms inject from any thread and
+    // their runner says so; that choice lives in `make_press_hooks`, not here.
     let hooks = press_hooks.cloned();
     tokio::task::spawn_blocking(move || match hooks {
         Some(hooks) => {
             let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
-            (hooks.on_main_thread)(Box::new(move || {
+            (hooks.run_injection)(Box::new(move || {
                 let _ = result_tx.send(key::simulate_press(&combo));
             }))
             .map_err(key::KeyError::EnigoInit)?;
             result_rx
                 .recv()
-                .unwrap_or_else(|_| Err(key::KeyError::EnigoInit("main-thread press produced no result".to_owned())))
+                .unwrap_or_else(|_| Err(key::KeyError::EnigoInit("native key injection produced no result".to_owned())))
         }
         // No host hooks (unit tests, and any embedder that installed none):
-        // there is no main thread to hop to, so run in place.
+        // there is no runner to defer to, so inject in place.
         None => key::simulate_press(&combo),
     })
     .await

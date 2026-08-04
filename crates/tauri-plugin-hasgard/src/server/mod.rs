@@ -18,22 +18,21 @@ pub(crate) type ListWindowsFn = Arc<dyn Fn() -> Result<serde_json::Value, String
 /// resolution as `EvalFn`).
 pub(crate) type FocusHook = Box<dyn Fn(Option<&str>) -> Result<(), String> + Send + Sync>;
 
-/// Runs a closure on the application's main thread and blocks until it has
-/// finished.
-pub(crate) type MainThreadHook = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> Result<(), String> + Send + Sync>;
+/// Runs a native key-injection closure on whichever thread the host platform
+/// requires, and blocks until it has finished.
+pub(crate) type InjectionRunner = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> Result<(), String> + Send + Sync>;
 
 /// Host hooks the `press` path needs from the Tauri runtime.
 ///
 /// These travel together because native key injection needs both: focus so the
-/// synthesised OS events reach the right window, and a main-thread runner
-/// because the injection itself is not safe anywhere else.
+/// synthesised OS events reach the right window, and a runner that places the
+/// injection on a thread where it is actually safe to perform.
 pub(crate) struct PressHooks {
     pub(crate) focus: FocusHook,
-    /// macOS keyboard injection reaches `TSMGetInputSourceProperty`, which
-    /// asserts it is on the main dispatch queue and aborts the whole process
-    /// with SIGTRAP when it is not. Running the injection on a worker thread
-    /// therefore crashes the host application rather than returning an error.
-    pub(crate) on_main_thread: MainThreadHook,
+    /// Which thread is required is a per-platform answer, so the choice lives
+    /// in the hook rather than in the caller: macOS must hop to the main
+    /// thread, and the other backends must not (see `make_press_hooks`).
+    pub(crate) run_injection: InjectionRunner,
 }
 
 pub(crate) type PressHooksRef = Arc<PressHooks>;

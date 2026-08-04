@@ -609,6 +609,7 @@
 
   function click(params) {
     const el = resolveTarget(params);
+    el.scrollIntoView({ behavior: "instant", block: "center", inline: "center" });
     const rect = el.getBoundingClientRect();
     const x = params.x != null ? params.x : rect.left + rect.width / 2;
     const y = params.y != null ? params.y : rect.top + rect.height / 2;

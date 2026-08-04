@@ -147,6 +147,9 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> EvalFn {
 #[cfg(all(any(unix, windows), debug_assertions))]
 fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef {
     let focus_handle = app.clone();
+    // Only the macOS runner hops threads; elsewhere this handle would be an
+    // unused-variable warning.
+    #[cfg(target_os = "macos")]
     let main_handle = app.clone();
     Arc::new(crate::server::PressHooks {
         focus: Box::new(move |window: Option<&str>| {
@@ -178,7 +181,12 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
 
             Ok(())
         }),
-        on_main_thread: Box::new(move |task: Box<dyn FnOnce() + Send>| {
+        // macOS is the only backend that constrains which thread may inject.
+        // Its layout lookup reaches `TSMGetInputSourceProperty`, which asserts
+        // it is on the main dispatch queue and aborts the whole process with
+        // SIGTRAP when it is not — a crash, not a recoverable error.
+        #[cfg(target_os = "macos")]
+        run_injection: Box::new(move |task: Box<dyn FnOnce() + Send>| {
             let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
             main_handle
                 .run_on_main_thread(move || {
@@ -191,6 +199,16 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
             done_rx
                 .recv_timeout(std::time::Duration::from_secs(10))
                 .map_err(|error| format!("main-thread task did not finish: {error}"))
+        }),
+        // Windows' `SendInput` and the Linux X11/libei backends inject from any
+        // thread, so the hop would buy nothing and cost something: it would
+        // stall the UI thread for the length of the combo, and on Linux the
+        // portal handshake inside `Enigo::new` can need the main loop to turn —
+        // which is precisely what blocking on it prevents. Run in place.
+        #[cfg(not(target_os = "macos"))]
+        run_injection: Box::new(|task: Box<dyn FnOnce() + Send>| {
+            task();
+            Ok(())
         }),
     })
 }
@@ -295,6 +313,10 @@ mod tests {
     fn bridge_click_dispatches_pointer_sequence() {
         let js = super::BRIDGE_JS;
         let js_normalized: String = js.lines().collect::<Vec<_>>().join("\n");
+        let scroll_idx = js
+            .find(r#"el.scrollIntoView({ behavior: "instant", block: "center", inline: "center" })"#)
+            .expect("click must scroll the target into view");
+        let rect_idx = js.find("const rect = el.getBoundingClientRect()").expect("click must measure the target");
         let pointer_down_idx = js
             .find(r#"dispatchPointerEvent(el, "pointerdown""#)
             .expect("click must dispatch pointerdown for Radix triggers");
@@ -306,7 +328,9 @@ mod tests {
         let click_idx = js.find(r#"dispatchPointerEvent(el, "click""#).expect("click must dispatch as a pointer event");
 
         assert!(
-            pointer_down_idx < mouse_down_idx
+            scroll_idx < rect_idx
+                && rect_idx < pointer_down_idx
+                && pointer_down_idx < mouse_down_idx
                 && mouse_down_idx < pointer_up_idx
                 && pointer_up_idx < mouse_up_idx
                 && mouse_up_idx < click_idx,
