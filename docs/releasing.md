@@ -29,8 +29,24 @@ Add the release's entry to `CHANGELOG.md` before tagging.
 After CI passes, create and push the tag:
 
 ```bash
-git tag -s v0.2.1 -m "tauri-hasgard v0.2.1"
+git tag -a v0.2.1 -m "tauri-hasgard v0.2.1"
 git push origin v0.2.1
+```
+
+An annotated tag, not a signed one. This previously said `-s`, which no release
+has ever used — every published tag is unsigned, so the instruction only
+produced a failed command for anyone without a signing key. Tag signatures are
+not what this project's supply-chain guarantee rests on: the release workflow
+issues GitHub provenance attestations over the built artifacts, which cover what
+was actually shipped rather than who moved a ref. Sign the tag too if you have a
+key configured, but nothing downstream checks it.
+
+If a tag ends up on the wrong commit, move it rather than deleting and
+recreating:
+
+```bash
+git tag -d v0.2.1 && git tag -a v0.2.1 -m "tauri-hasgard v0.2.1" <commit>
+git push origin --force v0.2.1
 ```
 
 The release workflow validates the version, tests the workspace, publishes both Rust crates and the
