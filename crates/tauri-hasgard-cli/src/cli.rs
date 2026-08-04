@@ -156,6 +156,14 @@ pub(crate) enum Command {
         target: Option<String>,
         #[arg(long)]
         selector: Option<String>,
+        /// Wait until a JavaScript expression returns a truthy value, and print
+        /// that value. Polled, so predicates that flip without a DOM mutation
+        /// are caught; a predicate that throws fails the command.
+        #[arg(long, conflicts_with_all = ["selector", "gone"])]
+        expression: Option<String>,
+        /// How often to re-evaluate --expression, in ms.
+        #[arg(long, requires = "expression")]
+        poll: Option<u64>,
         #[arg(long)]
         gone: bool,
         #[arg(long, default_value = "10000")]

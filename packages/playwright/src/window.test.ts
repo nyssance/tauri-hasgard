@@ -302,6 +302,33 @@ test("recorder.stop returns the recorded actions with their extra params", async
   expect(result.entries[0]).toEqual({ action: "click", timestamp: 120, ref: "e3" })
 })
 
+test("waitForFunction returns the predicate's own value and forwards the poll interval", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, value: 42 })
+
+  const value = await new HasgardWindow(rpc, "main").waitForFunction<number>("window.rows.length", {
+    timeoutMs: 3_000,
+    pollMs: 25
+  })
+
+  expect(value).toBe(42)
+  expect(call).toHaveBeenCalledWith("wait", {
+    expression: "window.rows.length",
+    timeout: 3_000,
+    poll: 25,
+    window: "main"
+  })
+})
+
+test("waitForFunction omits timing options so the bridge keeps its own defaults", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, value: true })
+
+  await new HasgardWindow(rpc, "main").waitForFunction("ready")
+
+  expect(call).toHaveBeenCalledWith("wait", { expression: "ready", window: "main" })
+})
+
 test("check and uncheck drive an explicit state rather than toggling", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({ ok: true })

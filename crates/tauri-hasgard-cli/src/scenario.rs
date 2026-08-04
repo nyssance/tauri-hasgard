@@ -255,7 +255,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             }
             let target_from_ref = step.step_ref.as_deref().map(|r| format!("@{r}"));
             let target = step.target.as_deref().or(target_from_ref.as_deref());
-            let params = build_wait_params(target, step.selector.as_deref(), step.gone.unwrap_or(false), timeout);
+            let params =
+                build_wait_params(target, step.selector.as_deref(), None, None, step.gone.unwrap_or(false), timeout);
             client.call("wait", with_window(Some(params), window)).await
         }
         "watch" => {

@@ -242,9 +242,18 @@ impl HasgardMcpServer {
             "wait" => {
                 let target = optional_string(&args, "target")?;
                 let selector = optional_string(&args, "selector")?;
+                let expression = optional_string(&args, "expression")?;
+                let poll = optional_u64(&args, "poll")?;
                 let gone = optional_bool(&args, "gone")?.unwrap_or(false);
                 let timeout = optional_u64(&args, "timeout")?.unwrap_or(10_000);
-                let params = build_wait_params(target.as_deref(), selector.as_deref(), gone, timeout);
+                let params = build_wait_params(
+                    target.as_deref(),
+                    selector.as_deref(),
+                    expression.as_deref(),
+                    poll,
+                    gone,
+                    timeout,
+                );
                 self.call_app_tool("wait", Some(params), window).await
             }
             "watch" => {
@@ -1317,6 +1326,14 @@ fn wait_schema() -> Arc<JsonObject> {
         props([
             ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
             ("selector", string_prop("CSS selector to wait for.")),
+            (
+                "expression",
+                string_prop(
+                    "JavaScript expression to poll until it returns a truthy value, which is then returned. \
+                     Catches conditions that flip without a DOM mutation. Cannot be combined with selector or gone.",
+                ),
+            ),
+            ("poll", integer_prop("How often to re-evaluate `expression`, in milliseconds.")),
             ("gone", bool_prop("Wait for the element to disappear.")),
             ("timeout", integer_prop("Timeout in milliseconds.")),
         ]),

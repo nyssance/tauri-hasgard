@@ -1023,9 +1023,66 @@
     return /\bawait\b/.test(stripped);
   }
 
+  // A predicate can flip without any DOM mutation — a timer firing, a fetch
+  // resolving, a store updating — so this polls instead of reusing waitFor's
+  // MutationObserver, which would hang on exactly those cases. A throwing
+  // predicate rejects rather than being retried: swallowing the error would
+  // turn a genuine bug into a timeout with no clue what happened.
+  function waitForExpression(expression, timeout, poll) {
+    return new Promise(function (res, rej) {
+      var settled = false;
+      var poller = null;
+
+      function stop() {
+        settled = true;
+        clearTimeout(timer);
+        if (poller !== null) clearInterval(poller);
+      }
+
+      function finish(value) {
+        if (settled) return;
+        stop();
+        res({ found: true, value: serializeArg(value) });
+      }
+
+      function fail(err) {
+        if (settled) return;
+        stop();
+        rej(new Error("wait expression threw: " + (err && err.message ? err.message : String(err))));
+      }
+
+      var timer = setTimeout(function () {
+        if (settled) return;
+        stop();
+        rej(new Error("Timeout waiting for expression: " + String(expression).slice(0, 200)));
+      }, timeout);
+
+      function attempt() {
+        var value;
+        try {
+          value = (0, eval)(expression);
+        } catch (e) {
+          fail(e);
+          return;
+        }
+        if (value && typeof value.then === "function") {
+          value.then(function (resolved) {
+            if (resolved) finish(resolved);
+          }, fail);
+          return;
+        }
+        if (value) finish(value);
+      }
+
+      attempt();
+      if (!settled) poller = setInterval(attempt, poll);
+    });
+  }
+
   function waitFor(options) {
     var selector = options && options.selector;
     var ref = options && options.ref;
+    var expression = options && options.expression;
     var gone = (options && options.gone) || false;
     // Use a `!= null` check (matching `watch` below) rather than `|| 10000` so
     // an explicit `timeout: 0` resolves immediately instead of silently
@@ -1034,10 +1091,17 @@
     // instead of the bridge's own rejection.
     var timeout = (options && options.timeout != null) ? options.timeout : 10000;
 
-    if (!selector && !ref) {
+    if (!selector && !ref && !expression) {
       return Promise.reject(
-        new Error("waitFor requires 'selector' or 'ref' (use --selector for CSS, @id for snapshot ref)")
+        new Error(
+          "waitFor requires 'selector', 'ref', or 'expression' (use --selector for CSS, @id for snapshot ref)"
+        )
       );
+    }
+
+    if (expression) {
+      var poll = (options && options.poll != null) ? options.poll : 50;
+      return waitForExpression(expression, timeout, poll);
     }
 
     return new Promise(function (res, rej) {

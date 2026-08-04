@@ -330,8 +330,9 @@ async fn run_command(client: &mut Client, command: Command, window: Option<&str>
         Command::Navigate { url } => client.call("navigate", with_window(Some(json!({"url": url})), window)).await,
         Command::Url => client.call("url", with_window(None, window)).await,
         Command::Title => client.call("title", with_window(None, window)).await,
-        Command::Wait { target, selector, gone, timeout } => {
-            let params = build_wait_params(target.as_deref(), selector.as_deref(), gone, timeout);
+        Command::Wait { target, selector, expression, poll, gone, timeout } => {
+            let params =
+                build_wait_params(target.as_deref(), selector.as_deref(), expression.as_deref(), poll, gone, timeout);
             client.call("wait", with_window(Some(params), window)).await
         }
         Command::Watch { selector, timeout, stable, require_mutation } => {
@@ -747,8 +748,18 @@ pub(crate) fn target_params(raw: &str) -> serde_json::Value {
 /// - With neither target nor selector, only `gone`/`timeout` are sent and the
 ///   bridge `waitFor` rejects up-front (issue #74).
 pub(crate) fn build_wait_params(
-    target: Option<&str>, selector: Option<&str>, gone: bool, timeout: u64,
+    target: Option<&str>, selector: Option<&str>, expression: Option<&str>, poll: Option<u64>, gone: bool, timeout: u64,
 ) -> serde_json::Value {
+    // An expression wait has no element to observe, so `gone` is meaningless
+    // here and clap rejects the combination up front. Send only what the
+    // bridge's expression branch reads.
+    if let Some(expression) = expression {
+        let mut params = json!({ "expression": expression, "timeout": timeout });
+        if let Some(poll) = poll {
+            params["poll"] = json!(poll);
+        }
+        return params;
+    }
     match (selector, target) {
         (Some(s), _) => json!({ "selector": s, "gone": gone, "timeout": timeout }),
         (None, Some(t)) => match parse_target(t) {
@@ -1505,6 +1516,29 @@ mod tests {
     // ─── build_wait_params (issue #74) ────────────────────────────────────────
 
     #[test]
+    fn test_build_wait_params_expression_sends_no_selector_or_gone() {
+        let p = build_wait_params(None, None, Some("window.ready === true"), None, false, 3000);
+        assert_eq!(p, json!({"expression": "window.ready === true", "timeout": 3000}));
+        assert!(p.get("gone").is_none(), "an expression wait has no element, so `gone` must not be sent");
+    }
+
+    #[test]
+    fn test_build_wait_params_expression_carries_poll_interval_only_when_given() {
+        let with_poll = build_wait_params(None, None, Some("x"), Some(25), false, 3000);
+        assert_eq!(with_poll["poll"], json!(25));
+        let without = build_wait_params(None, None, Some("x"), None, false, 3000);
+        assert!(without.get("poll").is_none(), "no --poll must leave the bridge default in place");
+    }
+
+    #[test]
+    fn test_build_wait_params_expression_wins_over_a_positional_target() {
+        let p = build_wait_params(Some("#ignored"), None, Some("x"), None, false, 1000);
+        assert!(p.get("selector").is_none());
+        assert!(p.get("ref").is_none());
+        assert_eq!(p["expression"], json!("x"));
+    }
+
+    #[test]
     fn test_build_check_params_without_state_omits_checked_so_the_bridge_toggles() {
         let params = build_check_params("#agree", None);
         assert_eq!(params, json!({"selector": "#agree"}));
@@ -1524,37 +1558,37 @@ mod tests {
 
     #[test]
     fn test_build_wait_params_positional_css_selector_routes_to_selector() {
-        let p = build_wait_params(Some("#trigger"), None, false, 1000);
+        let p = build_wait_params(Some("#trigger"), None, None, None, false, 1000);
         assert_eq!(p, json!({"selector": "#trigger", "gone": false, "timeout": 1000}));
     }
 
     #[test]
     fn test_build_wait_params_positional_class_selector_routes_to_selector() {
-        let p = build_wait_params(Some(".btn-primary"), None, false, 5000);
+        let p = build_wait_params(Some(".btn-primary"), None, None, None, false, 5000);
         assert_eq!(p, json!({"selector": ".btn-primary", "gone": false, "timeout": 5000}));
     }
 
     #[test]
     fn test_build_wait_params_positional_attr_selector_routes_to_selector() {
-        let p = build_wait_params(Some("[data-test=foo]"), None, false, 1000);
+        let p = build_wait_params(Some("[data-test=foo]"), None, None, None, false, 1000);
         assert_eq!(p, json!({"selector": "[data-test=foo]", "gone": false, "timeout": 1000}));
     }
 
     #[test]
     fn test_build_wait_params_at_prefix_routes_to_ref() {
-        let p = build_wait_params(Some("@e1"), None, false, 1000);
+        let p = build_wait_params(Some("@e1"), None, None, None, false, 1000);
         assert_eq!(p, json!({"ref": "e1", "gone": false, "timeout": 1000}));
     }
 
     #[test]
     fn test_build_wait_params_explicit_selector_flag_wins_over_positional() {
-        let p = build_wait_params(Some("@e1"), Some("#real"), false, 1000);
+        let p = build_wait_params(Some("@e1"), Some("#real"), None, None, false, 1000);
         assert_eq!(p, json!({"selector": "#real", "gone": false, "timeout": 1000}));
     }
 
     #[test]
     fn test_build_wait_params_no_target_no_selector_yields_empty_payload() {
-        let p = build_wait_params(None, None, true, 2000);
+        let p = build_wait_params(None, None, None, None, true, 2000);
         assert_eq!(p, json!({"gone": true, "timeout": 2000}));
     }
 
@@ -1563,13 +1597,13 @@ mod tests {
         // wait does not act on coordinates; pass through verbatim so
         // `document.querySelector("100,200")` raises a `SyntaxError`
         // instead of the bridge silently waiting on a `MutationObserver`.
-        let p = build_wait_params(Some("100,200"), None, false, 1000);
+        let p = build_wait_params(Some("100,200"), None, None, None, false, 1000);
         assert_eq!(p, json!({"selector": "100,200", "gone": false, "timeout": 1000}));
     }
 
     #[test]
     fn test_build_wait_params_propagates_gone_flag() {
-        let p = build_wait_params(Some("#x"), None, true, 500);
+        let p = build_wait_params(Some("#x"), None, None, None, true, 500);
         assert_eq!(p, json!({"selector": "#x", "gone": true, "timeout": 500}));
     }
 
@@ -1577,7 +1611,7 @@ mod tests {
     fn test_build_wait_params_empty_ref_at_alone_drops_to_no_target() {
         // `@` strips to an empty ref. We omit it so the bridge `waitFor`
         // rejects immediately instead of hanging on `MutationObserver`.
-        let p = build_wait_params(Some("@"), None, false, 1000);
+        let p = build_wait_params(Some("@"), None, None, None, false, 1000);
         assert_eq!(p, json!({"gone": false, "timeout": 1000}));
     }
 }

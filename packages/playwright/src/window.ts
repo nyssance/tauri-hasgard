@@ -28,6 +28,7 @@ import type {
   StorageEntry,
   StorageListing,
   StorageOptions,
+  WaitForFunctionOptions,
   WaitOptions,
   WatchChanges,
   WatchNode,
@@ -410,6 +411,20 @@ export class HasgardWindow {
       removed: expectArray(value.removed, "diff.removed").map(parseSnapshotElement),
       changed: expectArray(value.changed, "diff.changed").map(parseDiffChange)
     }
+  }
+
+  /**
+   * Poll a JavaScript expression in the webview until it returns a truthy
+   * value, and return that value. The expression is polled rather than driven
+   * by DOM mutations, so predicates that flip on a timer or a resolved fetch
+   * are caught too. A predicate that throws rejects instead of being retried.
+   */
+  async waitForFunction<T = JsonValue>(expression: string, options: WaitForFunctionOptions = {}): Promise<T> {
+    const params: Record<string, JsonValue> = { expression }
+    if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
+    if (options.pollMs !== undefined) params.poll = options.pollMs
+    const value = expectRecord(await this.rpc.call("wait", withWindow(this.label, params)), "wait result")
+    return value.value as T
   }
 
   /** Observe DOM mutations until they settle, or reject when nothing changes. */

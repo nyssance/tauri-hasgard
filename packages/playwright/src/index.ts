@@ -37,6 +37,7 @@ export type {
   StorageEntry,
   StorageListing,
   StorageOptions,
+  WaitForFunctionOptions,
   WaitOptions,
   WatchChanges,
   WatchNode,

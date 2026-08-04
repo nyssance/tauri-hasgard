@@ -143,6 +143,12 @@ export interface FormsDump {
   truncated: boolean
 }
 
+export interface WaitForFunctionOptions {
+  timeoutMs?: number
+  /** How often to re-evaluate the expression. Defaults to 50ms in the bridge. */
+  pollMs?: number
+}
+
 export interface WatchOptions {
   selector?: string
   timeoutMs?: number
