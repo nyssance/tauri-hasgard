@@ -32,6 +32,16 @@ Tests, agents, and local developer tools must observe the same application and i
 
 On macOS and Linux, Hasgard talks to the real WKWebView/WebKitGTK process through the plugin. On Windows, the same protocol remains available while native CDP can still be used separately when a full Chromium `Page` is required.
 
+## Non-goals
+
+**Hasgard has no mocked browser mode.** It will not run your frontend in headless Chromium against a faked `window.__TAURI_INTERNALS__`.
+
+Such a mode is fast and needs no Rust toolchain, but it does not test the application: the webview is Chromium rather than WKWebView or WebKitGTK, and every Tauri command is a hand-written stub. Once the Rust side changes shape, the stubs keep passing. A green run proves that the frontend works in Chromium under assumptions the test author wrote down, which is not what an E2E suite is for.
+
+Frontend logic that genuinely has no native dependency is already well served: point stock `@playwright/test` at your dev server. That path needs nothing from Hasgard, keeps real Playwright tracing and network interception, and stays honestly labelled as a unit-level test.
+
+Hasgard covers the other half — one running application, real native webviews, one protocol.
+
 ## 1. Register the required Tauri plugin
 
 ```sh
