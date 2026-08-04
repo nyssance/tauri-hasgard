@@ -237,11 +237,15 @@ export class HasgardApplication {
     if (!Array.isArray(value.windows)) throw new Error("windows.list.windows must be an array")
     return value.windows.map((entry, index) => {
       const window = expectRecord(entry, `windows[${index}]`)
-      return {
+      const info: WindowInfo = {
         label: expectString(window.label, `windows[${index}].label`),
         url: expectString(window.url, `windows[${index}].url`),
         title: expectString(window.title, `windows[${index}].title`)
       }
+      if (window.native_id !== undefined) {
+        info.nativeId = expectNumber(window.native_id, `windows[${index}].native_id`)
+      }
+      return info
     })
   }
 
@@ -272,32 +276,6 @@ export class HasgardApplication {
 
   window(label: string): HasgardWindow {
     return new HasgardWindow(this.rpc, label)
-  }
-
-  /**
-   * Capture an operating-system window through the native compositor, writing a
-   * PNG to `outputPath`. This is macOS-only and is addressed by OS window id
-   * rather than Tauri webview label — use `HasgardWindow.screenshot` for the
-   * label-routed, in-page render.
-   */
-  async screenshotNative(options: NativeScreenshotOptions): Promise<NativeScreenshot> {
-    const value = expectRecord(
-      await this.rpc.call("screenshot_native", {
-        window_id: options.windowId,
-        output_path: options.outputPath
-      }),
-      "screenshot_native result"
-    )
-    return {
-      output_path: expectString(value.output_path, "screenshot_native.output_path"),
-      window_id: expectNumber(value.window_id, "screenshot_native.window_id"),
-      width: expectNumber(value.width, "screenshot_native.width"),
-      height: expectNumber(value.height, "screenshot_native.height"),
-      scale_factor: expectNumber(value.scale_factor, "screenshot_native.scale_factor"),
-      byte_size: expectNumber(value.byte_size, "screenshot_native.byte_size"),
-      backend: expectString(value.backend, "screenshot_native.backend"),
-      tcc_denied: expectBoolean(value.tcc_denied, "screenshot_native.tcc_denied")
-    }
   }
 
   /**
@@ -557,6 +535,49 @@ export class HasgardWindow {
     const prefix = "data:image/png;base64,"
     if (!dataUrl.startsWith(prefix)) throw new Error("screenshot result is not a PNG data URL")
     return Buffer.from(dataUrl.slice(prefix.length), "base64")
+  }
+
+  /**
+   * Capture this window through the native compositor, writing a PNG to
+   * `outputPath`. macOS only.
+   *
+   * Unlike `screenshot`, which renders the DOM inside the page, this records
+   * what the window server actually shows — so it sees native chrome, layered
+   * content, and anything the DOM renderer cannot reproduce.
+   *
+   * The operating-system window id is resolved from this window's label, so
+   * callers do not have to discover it themselves.
+   */
+  async screenshotNative(options: NativeScreenshotOptions): Promise<NativeScreenshot> {
+    const windowId = options.windowId ?? (await this.nativeId())
+    const value = expectRecord(
+      await this.rpc.call("screenshot_native", {
+        window_id: windowId,
+        output_path: options.outputPath
+      }),
+      "screenshot_native result"
+    )
+    return {
+      output_path: expectString(value.output_path, "screenshot_native.output_path"),
+      window_id: expectNumber(value.window_id, "screenshot_native.window_id"),
+      width: expectNumber(value.width, "screenshot_native.width"),
+      height: expectNumber(value.height, "screenshot_native.height"),
+      scale_factor: expectNumber(value.scale_factor, "screenshot_native.scale_factor"),
+      byte_size: expectNumber(value.byte_size, "screenshot_native.byte_size"),
+      backend: expectString(value.backend, "screenshot_native.backend"),
+      tcc_denied: expectBoolean(value.tcc_denied, "screenshot_native.tcc_denied")
+    }
+  }
+
+  /** This window's operating-system window id, where the platform exposes one. */
+  async nativeId(): Promise<number> {
+    const listing = await new HasgardApplication(this.rpc).windows()
+    const self = listing.find(entry => entry.label === this.label)
+    if (!self) throw new Error(`Window '${this.label}' is no longer open`)
+    if (self.nativeId === undefined) {
+      throw new Error(`Window '${this.label}' has no native window id on this platform`)
+    }
+    return self.nativeId
   }
 
   async call<T>(method: string, params?: Record<string, JsonValue>): Promise<T> {

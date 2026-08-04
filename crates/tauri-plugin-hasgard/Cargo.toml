@@ -51,6 +51,8 @@ windows = { version = "0.62", features = [
 enigo = { version = "0.6.1", features = ["wayland"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder"] }
 core-foundation = "0.10"
 core-graphics = "0.25"
 image = { version = "0.25", default-features = false, features = ["png"] }

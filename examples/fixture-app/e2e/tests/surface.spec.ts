@@ -152,3 +152,28 @@ test("reports the page title and URL without a full state read", async ({ window
   await expect(window.title()).resolves.toBe("Hasgard fixture")
   await expect(window.url()).resolves.toBe("tauri://localhost")
 })
+
+test("resolves its own operating-system window id", async ({ hasgard, window }) => {
+  const listing = await hasgard.windows()
+  const main = listing.find(entry => entry.label === "main")
+  expect(main?.nativeId).toBeGreaterThan(0)
+  await expect(window.nativeId()).resolves.toBe(main?.nativeId)
+})
+
+test("captures the native window without being told its id", async ({ window }, testInfo) => {
+  test.skip(process.platform !== "darwin", "native capture is macOS-only")
+
+  const outputPath = testInfo.outputPath("native.png")
+  const shot = await window.screenshotNative({ outputPath })
+
+  // Screen recording permission is a machine-level grant this suite cannot
+  // make. Without it the capture still reports its metadata, so assert the
+  // resolution path either way and the pixels only when TCC allowed them.
+  expect(shot.window_id).toBeGreaterThan(0)
+  expect(shot.output_path).toBe(outputPath)
+  if (!shot.tcc_denied) {
+    expect(shot.width).toBeGreaterThan(0)
+    expect(shot.height).toBeGreaterThan(0)
+    expect(shot.byte_size).toBeGreaterThan(1_000)
+  }
+})

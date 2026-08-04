@@ -152,8 +152,10 @@ pub(crate) enum Command {
     /// Capture a native window screenshot (PNG) by platform window id.
     #[command(name = "screenshot_native", visible_alias = "screenshot-native")]
     ScreenshotNative {
+        /// Operating-system window id. Resolved from the target window's label
+        /// when omitted; pass it only to capture a window Hasgard does not own.
         #[arg(long)]
-        window_id: u32,
+        window_id: Option<u32>,
         #[arg(long)]
         output: PathBuf,
         #[arg(long, default_value = "png")]
@@ -688,7 +690,7 @@ mod tests {
             "/tmp/out.png",
         ]);
         if let Command::ScreenshotNative { window_id, output, format } = cli.command {
-            assert_eq!(window_id, 42);
+            assert_eq!(window_id, Some(42));
             assert_eq!(output, std::path::PathBuf::from("/tmp/out.png"));
             assert_eq!(format, "png");
         } else {

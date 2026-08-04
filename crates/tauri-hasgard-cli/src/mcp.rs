@@ -88,6 +88,34 @@ impl HasgardMcpServer {
         client.call(method, with_window(params, window.as_deref())).await
     }
 
+    /// Look up the operating-system window id backing a Tauri webview label.
+    ///
+    /// `screenshot_native` captures by OS window id, which an agent cannot
+    /// discover on its own — before `windows.list` reported it, the only way to
+    /// learn one was to fire a deliberately failing capture and read the ids
+    /// back out of the error payload.
+    async fn resolve_native_window_id(&self, window: Option<&str>) -> Result<u32, McpError> {
+        let label = window.unwrap_or("main");
+        let listing = self
+            .call_app("windows.list", None, None)
+            .await
+            .map_err(|error| invalid_params(format!("could not list windows: {error}")))?;
+        listing
+            .get("windows")
+            .and_then(Value::as_array)
+            .and_then(|windows| {
+                windows.iter().find(|entry| entry.get("label").and_then(Value::as_str) == Some(label))
+            })
+            .and_then(|entry| entry.get("native_id"))
+            .and_then(Value::as_u64)
+            .and_then(|id| u32::try_from(id).ok())
+            .ok_or_else(|| {
+                invalid_params(format!(
+                    "window '{label}' has no native window id — it may be closed, or this platform may not support native capture"
+                ))
+            })
+    }
+
     async fn call_app_tool(
         &self, method: &'static str, params: Option<Value>, window: Option<String>,
     ) -> Result<CallToolResult, McpError> {
@@ -231,8 +259,15 @@ impl HasgardMcpServer {
                     .await
             }
             "screenshot_native" => {
+                // Capture is addressed by OS window id, which an agent has no
+                // way to discover. Resolve it from the routed webview label so
+                // the common case needs nothing but an output path.
+                let window_id = match optional_u32(&args, "window_id")? {
+                    Some(id) => id,
+                    None => self.resolve_native_window_id(window.as_deref()).await?,
+                };
                 let mut payload = json!({
-                    "window_id": required_u32(&args, "window_id")?,
+                    "window_id": window_id,
                     "output_path": required_string(&args, "output_path")?,
                 });
                 if let Some(format) = optional_string(&args, "format")? {
@@ -1086,16 +1121,17 @@ fn required_u64(args: &JsonObject, name: &str) -> Result<u64, McpError> {
         .ok_or_else(|| invalid_params(format!("'{name}' is required and must be an integer")))
 }
 
-fn required_u32(args: &JsonObject, name: &str) -> Result<u32, McpError> {
-    let value = required_u64(args, name)?;
-    u32::try_from(value).map_err(|_| invalid_params(format!("'{name}' is out of range for u32")))
-}
-
 fn optional_u64(args: &JsonObject, name: &str) -> Result<Option<u64>, McpError> {
     match args.get(name) {
         None | Some(Value::Null) => Ok(None),
         Some(value) => value.as_u64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be an integer"))),
     }
+}
+
+fn optional_u32(args: &JsonObject, name: &str) -> Result<Option<u32>, McpError> {
+    optional_u64(args, name)?
+        .map(|value| u32::try_from(value).map_err(|_| invalid_params(format!("'{name}' is out of range for u32"))))
+        .transpose()
 }
 
 fn optional_usize(args: &JsonObject, name: &str) -> Result<Option<usize>, McpError> {
@@ -1338,7 +1374,7 @@ fn hasgard_screenshot_schema() -> Arc<JsonObject> {
             ),
             ("format", enum_prop("Image format. v1 accepts only \"png\".", &["png"])),
         ]),
-        &["window_id", "output_path"],
+        &["output_path"],
     )
 }
 
@@ -1654,7 +1690,10 @@ mod tests {
         }
         let required = tool.input_schema.get("required").and_then(Value::as_array).expect("required list present");
         let required: Vec<&str> = required.iter().filter_map(Value::as_str).collect();
-        assert!(required.contains(&"window_id"), "hasgard.screenshot_native must require `window_id`");
+        assert!(
+            !required.contains(&"window_id"),
+            "hasgard.screenshot_native must resolve `window_id` from the window label rather than demanding it"
+        );
         assert!(required.contains(&"output_path"), "hasgard.screenshot_native must require `output_path`");
         // The path-only contract forbids inline byte / base64 fields on either
         // surface — guard against a future revision silently growing one.

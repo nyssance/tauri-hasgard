@@ -313,6 +313,10 @@ async fn run_command(client: &mut Client, command: Command, window: Option<&str>
             client.call("screenshot", with_window(Some(json!({"path": path, "selector": selector})), window)).await
         }
         Command::ScreenshotNative { window_id, output, format } => {
+            let window_id = match window_id {
+                Some(id) => id,
+                None => resolve_native_window_id(client, window).await?,
+            };
             client
                 .call(
                     "screenshot_native",
@@ -716,6 +720,29 @@ pub(crate) async fn run_drop_command(
     }
     p["files"] = json!(files);
     client.call("drop", with_window(Some(p), window)).await
+}
+
+/// Look up the operating-system window id for a Tauri webview label.
+///
+/// `screenshot_native` captures by OS window id, which no caller can discover
+/// on its own; before `windows.list` reported it, the only way to learn one was
+/// to fire a deliberately failing capture and read the ids out of the error.
+async fn resolve_native_window_id(client: &mut Client, window: Option<&str>) -> Result<u32> {
+    let label = window.unwrap_or("main");
+    let listing = client.call("windows.list", None).await?;
+    let windows = listing
+        .get("windows")
+        .and_then(serde_json::Value::as_array)
+        .context("windows.list did not return a window array")?;
+    let entry = windows
+        .iter()
+        .find(|entry| entry.get("label").and_then(serde_json::Value::as_str) == Some(label))
+        .with_context(|| format!("Window '{label}' is not open"))?;
+    entry
+        .get("native_id")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|id| u32::try_from(id).ok())
+        .with_context(|| format!("Window '{label}' has no native window id on this platform"))
 }
 
 /// Build params for the `check` RPC call.

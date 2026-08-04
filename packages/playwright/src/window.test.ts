@@ -264,29 +264,67 @@ test("watch maps millisecond options onto the bridge parameter names", async () 
   })
 })
 
-test("screenshotNative sends the protocol's snake_case fields and is not window-routed", async () => {
+test("screenshotNative resolves the OS window id from the window's own label", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  call.mockImplementation(async method => {
+    if (method === "windows.list") {
+      return {
+        windows: [
+          { label: "main", url: "tauri://localhost", title: "App", native_id: 42 },
+          { label: "settings", url: "tauri://localhost", title: "Settings", native_id: 43 }
+        ]
+      }
+    }
+    return {
+      output_path: "/tmp/shot.png",
+      window_id: 43,
+      width: 800,
+      height: 600,
+      scale_factor: 2,
+      byte_size: 1024,
+      backend: "cgwindow",
+      tcc_denied: false
+    }
+  })
+
+  const shot = await new HasgardWindow(rpc, "settings").screenshotNative({ outputPath: "/tmp/shot.png" })
+
+  expect(shot.backend).toBe("cgwindow")
+  expect(call).toHaveBeenLastCalledWith("screenshot_native", {
+    window_id: 43,
+    output_path: "/tmp/shot.png"
+  })
+})
+
+test("an explicit windowId skips the lookup entirely", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({
-    output_path: "/tmp/shot.png",
-    window_id: 42,
-    width: 800,
-    height: 600,
-    scale_factor: 2,
-    byte_size: 1024,
-    backend: "cgwindow",
+    output_path: "/tmp/x.png",
+    window_id: 7,
+    width: 1,
+    height: 1,
+    scale_factor: 1,
+    byte_size: 1,
+    backend: "screencapture",
     tcc_denied: false
   })
 
-  const shot = await new HasgardApplication(rpc).screenshotNative({
-    outputPath: "/tmp/shot.png",
-    windowId: 42
+  await new HasgardWindow(rpc, "main").screenshotNative({ outputPath: "/tmp/x.png", windowId: 7 })
+
+  expect(call).toHaveBeenCalledTimes(1)
+  expect(call).not.toHaveBeenCalledWith("windows.list", expect.anything())
+})
+
+test("a platform without native window ids says so instead of capturing the wrong window", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  vi.spyOn(rpc, "call").mockResolvedValue({
+    windows: [{ label: "main", url: "tauri://localhost", title: "App" }]
   })
 
-  expect(shot.backend).toBe("cgwindow")
-  expect(call).toHaveBeenCalledWith("screenshot_native", {
-    window_id: 42,
-    output_path: "/tmp/shot.png"
-  })
+  await expect(new HasgardWindow(rpc, "main").screenshotNative({ outputPath: "/tmp/x.png" })).rejects.toThrow(
+    "no native window id on this platform"
+  )
 })
 
 test("recorder.stop returns the recorded actions with their extra params", async () => {

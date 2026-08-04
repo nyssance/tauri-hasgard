@@ -177,6 +177,38 @@ fn make_focus_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> FocusFn {
     })
 }
 
+/// The `CGWindowID` of a webview's host window, which is what
+/// `screenshot_native` captures by.
+///
+/// `NSWindow.windowNumber` *is* the `CGWindowID` for on-screen windows, so this
+/// is an exact lookup. The alternative — matching the CoreGraphics window list
+/// by owner and title — guesses, and guesses wrong as soon as an app opens two
+/// windows with the same title.
+///
+/// Returns `None` rather than an error when the id cannot be read: a window id
+/// is a convenience field on `windows.list`, and failing to read it must not
+/// take down an otherwise valid window listing.
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn native_window_id<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Option<u32> {
+    use objc2_app_kit::NSWindow;
+
+    let ptr = window.ns_window().ok()?;
+    if ptr.is_null() {
+        return None;
+    }
+    // SAFETY: `ns_window()` returns the `NSWindow *` Tauri holds for this
+    // webview, valid for as long as the window is alive — which it is, since we
+    // are iterating the live window map. The pointer is only borrowed for the
+    // duration of this read and never stored.
+    let ns_window: &NSWindow = unsafe { &*ptr.cast::<NSWindow>() };
+    u32::try_from(ns_window.windowNumber()).ok()
+}
+
+#[cfg(all(any(unix, windows), debug_assertions, not(target_os = "macos")))]
+fn native_window_id<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) -> Option<u32> {
+    None
+}
+
 /// Create a list function that enumerates all available webview windows.
 #[cfg(all(any(unix, windows), debug_assertions))]
 fn make_list_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ListWindowsFn {
@@ -190,11 +222,18 @@ fn make_list_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ListWindowsFn {
                 let url = wv.url().map_err(|error| format!("Failed to read URL for window '{label}': {error}"))?;
                 let title =
                     wv.title().map_err(|error| format!("Failed to read title for window '{label}': {error}"))?;
-                Ok(serde_json::json!({
+                let mut entry = serde_json::json!({
                     "label": label,
                     "url": url.to_string(),
                     "title": title,
-                }))
+                });
+                // Present only where native capture exists, so a client can tell
+                // "this platform cannot capture natively" from "this window has
+                // no id" without a second probe.
+                if let Some(native_id) = native_window_id(wv) {
+                    entry["native_id"] = serde_json::json!(native_id);
+                }
+                Ok(entry)
             })
             .collect();
         Ok(serde_json::json!({"windows": list?}))

@@ -34,6 +34,8 @@ export interface WindowInfo {
   label: string
   url: string
   title: string
+  /** Operating-system window id. Present only where native capture exists. */
+  nativeId?: number
 }
 
 export interface WindowState {
@@ -199,8 +201,11 @@ export interface SnapshotDiff {
 export interface NativeScreenshotOptions {
   /** Absolute path; the parent directory must already exist. */
   outputPath: string
-  /** Operating-system window id, not a Tauri webview label. */
-  windowId: number
+  /**
+   * Operating-system window id. Resolved from the window's own label when
+   * omitted; pass it only to capture a window Hasgard does not own.
+   */
+  windowId?: number
 }
 
 export interface NativeScreenshot {
