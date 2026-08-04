@@ -21,11 +21,16 @@ Keep these three versions identical:
 - `version` in `packages/playwright/package.json`.
 - Git tag without its `v` prefix.
 
+The root `package.json` is `private: true` and is not published, so its version
+is deliberately not part of this set.
+
+Add the release's entry to `CHANGELOG.md` before tagging.
+
 After CI passes, create and push the tag:
 
 ```bash
-git tag -s v0.1.2 -m "tauri-hasgard v0.1.2"
-git push origin v0.1.2
+git tag -s v0.2.0 -m "tauri-hasgard v0.2.0"
+git push origin v0.2.0
 ```
 
 The release workflow validates the version, tests the workspace, publishes both Rust crates and the

@@ -567,3 +567,211 @@ test("keeps snapshot and action atomic for concurrent semantic locators in one w
 
   expect(methods).toEqual(["snapshot", "click", "snapshot", "click"])
 })
+
+// --- filter ---------------------------------------------------------------
+//
+// The failure these pin is specific: a CSS locator has a fast path that answers
+// from the selector alone, and a filter makes that answer wrong. Both `count`
+// and `waitFor` took that path when this was first written.
+
+function filterableRpc(matches: string[], surviving: string[]) {
+  const rpc = new HasgardRpcClient("/unused")
+  const seen: string[] = []
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    seen.push(method)
+    if (method === "query") {
+      return { elements: matches.map((ref, depth) => ({ ref, role: "listitem", depth })) }
+    }
+    if (method === "filter") {
+      const refs = (params as { refs: string[] }).refs
+      return {
+        elements: refs.filter(ref => surviving.includes(ref)).map((ref, depth) => ({ ref, role: "listitem", depth }))
+      }
+    }
+    if (method === "count") return { count: matches.length }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+  return { rpc, seen }
+}
+
+test("count on a filtered CSS locator resolves elements instead of counting the selector", async () => {
+  // The `count` op counts selector matches and knows nothing about text, so
+  // taking its fast path here reports every match rather than the surviving one.
+  const { rpc, seen } = filterableRpc(["e1", "e2", "e3"], ["e2"])
+  const window = new HasgardWindow(rpc, "main")
+
+  const total = await window.locator("li").filter({ hasText: "x" }).count()
+
+  expect(total).toBe(1)
+  expect(seen).not.toContain("count")
+})
+
+test("count on an unfiltered CSS locator keeps the single-round-trip fast path", async () => {
+  const { rpc, seen } = filterableRpc(["e1", "e2", "e3"], [])
+  const window = new HasgardWindow(rpc, "main")
+
+  expect(await window.locator("li").count()).toBe(3)
+  expect(seen).toEqual(["count"])
+})
+
+test("waitFor on a filtered locator polls its own count rather than the bare selector", async () => {
+  // Waiting on the selector would resolve as soon as any match appeared, even
+  // one the filter excludes.
+  const { rpc, seen } = filterableRpc(["e1"], ["e1"])
+  const window = new HasgardWindow(rpc, "main")
+
+  await window.locator("li").filter({ hasText: "x" }).waitFor({ state: "attached", timeoutMs: 1_000 })
+
+  expect(seen).not.toContain("wait")
+})
+
+test("filters accumulate so a chain applies every predicate", async () => {
+  const { rpc, seen } = filterableRpc(["e1", "e2"], ["e1", "e2"])
+  const window = new HasgardWindow(rpc, "main")
+
+  await window.locator("li").filter({ hasText: "a" }).filter({ hasNotText: "b" }).count()
+
+  expect(seen.filter(method => method === "filter")).toHaveLength(2)
+})
+
+test("filter stops calling once nothing survives", async () => {
+  const { rpc, seen } = filterableRpc(["e1"], [])
+  const window = new HasgardWindow(rpc, "main")
+
+  expect(await window.locator("li").filter({ hasText: "a" }).filter({ hasText: "b" }).count()).toBe(0)
+  // The second filter has nothing to narrow; issuing it would be a wasted trip.
+  expect(seen.filter(method => method === "filter")).toHaveLength(1)
+})
+
+test("filter applies before nth so first() is the first surviving element", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  let acted: unknown
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    if (method === "query") {
+      return { elements: ["e1", "e2", "e3"].map((ref, depth) => ({ ref, role: "listitem", depth })) }
+    }
+    if (method === "filter") {
+      // e1 is excluded, so the first survivor is e2.
+      return { elements: ["e2", "e3"].map((ref, depth) => ({ ref, role: "listitem", depth })) }
+    }
+    if (method === "text") {
+      acted = params
+      return "second"
+    }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+
+  const text = await new HasgardWindow(rpc, "main").locator("li").filter({ hasText: "x" }).first().textContent()
+
+  // Indexing the unfiltered set first would have acted on e1.
+  expect(acted).toEqual({ ref: "e2", window: "main" })
+  expect(text).toBe("second")
+})
+
+test("filter without a predicate is rejected at the call site", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const window = new HasgardWindow(rpc, "main")
+
+  expect(() => window.locator("li").filter({})).toThrow(/hasText or hasNotText/)
+})
+
+// --- setInputFiles --------------------------------------------------------
+
+test("setInputFiles reads a path into a base64 payload and passes objects through", async () => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const { tmpdir } = await import("node:os")
+  const dir = await mkdtemp(join(tmpdir(), "hasgard-unit-"))
+  const path = join(dir, "note.txt")
+  await writeFile(path, "hello")
+
+  const rpc = new HasgardRpcClient("/unused")
+  let sent: unknown
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    if (method === "setInputFiles") {
+      sent = (params as { files: unknown }).files
+      return { ok: true, count: 2 }
+    }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+
+  await new HasgardWindow(rpc, "main").locator("#upload").setInputFiles([path, { name: "inline.txt", data: "aGk=" }])
+
+  expect(sent).toEqual([
+    { name: "note.txt", data: Buffer.from("hello").toString("base64") },
+    { name: "inline.txt", data: "aGk=" }
+  ])
+})
+
+// --- dialogs --------------------------------------------------------------
+
+test("dialogs.accept sends promptText only when one is supplied", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const sent: unknown[] = []
+  vi.spyOn(rpc, "call").mockImplementation(async (_method, params) => {
+    sent.push(params)
+    return { action: "accept", promptText: null }
+  })
+  const window = new HasgardWindow(rpc, "main")
+
+  await window.dialogs.accept()
+  await window.dialogs.accept("typed")
+
+  expect(sent[0]).toEqual({ action: "accept", window: "main" })
+  expect(sent[1]).toEqual({ action: "accept", promptText: "typed", window: "main" })
+})
+
+test("dialogs.list rejects a policy the bridge could not have produced", async () => {
+  // A malformed policy here means the two sides have drifted; surfacing it
+  // beats handing the caller an object typed as something it is not.
+  const rpc = new HasgardRpcClient("/unused")
+  vi.spyOn(rpc, "call").mockResolvedValue({ dialogs: [], policy: { action: "maybe", promptText: null } })
+
+  await expect(new HasgardWindow(rpc, "main").dialogs.list()).rejects.toThrow(/accept.*dismiss/)
+})
+
+test("dialogs.list parses a prompt record including its default and answer", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  vi.spyOn(rpc, "call").mockResolvedValue({
+    dialogs: [
+      {
+        id: 1,
+        timestamp: 1,
+        type: "prompt",
+        message: "Name?",
+        accepted: true,
+        defaultValue: "untitled",
+        returned: "typed"
+      }
+    ],
+    policy: { action: "accept", promptText: "typed" }
+  })
+
+  const listing = await new HasgardWindow(rpc, "main").dialogs.list()
+
+  expect(listing.dialogs[0]).toEqual({
+    id: 1,
+    timestamp: 1,
+    type: "prompt",
+    message: "Name?",
+    accepted: true,
+    defaultValue: "untitled",
+    returned: "typed"
+  })
+  expect(listing.policy).toEqual({ action: "accept", promptText: "typed" })
+})
+
+// --- clear ----------------------------------------------------------------
+
+test("clear goes through fill so both fire the same events", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const sent: [string, unknown][] = []
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    sent.push([method, params])
+    return { ok: true }
+  })
+
+  await new HasgardWindow(rpc, "main").locator("#name").clear()
+
+  expect(sent).toEqual([["fill", { selector: "#name", value: "", window: "main" }]])
+})
