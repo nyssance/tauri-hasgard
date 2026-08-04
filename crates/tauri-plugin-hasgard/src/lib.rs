@@ -206,20 +206,39 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
 /// Returns `None` rather than an error when the id cannot be read: a window id
 /// is a convenience field on `windows.list`, and failing to read it must not
 /// take down an otherwise valid window listing.
+///
+/// The read hops to the main thread because `NSWindow` is `AppKit`, and `AppKit` is
+/// only safe there. `windows.list` is served from the socket's tokio task, so
+/// messaging the window directly would be an off-main-thread `AppKit` call — the
+/// same mistake that made `press` abort the host process on a plain character.
+/// This one happens not to assert today, which is exactly why it is worth not
+/// relying on. `WebviewWindow::title` already blocks on the main thread the same
+/// way, so this adds no new hazard to the listing path.
 #[cfg(all(target_os = "macos", debug_assertions))]
 fn native_window_id<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Option<u32> {
     use objc2_app_kit::NSWindow;
 
-    let ptr = window.ns_window().ok()?;
-    if ptr.is_null() {
-        return None;
-    }
-    // SAFETY: `ns_window()` returns the `NSWindow *` Tauri holds for this
-    // webview, valid for as long as the window is alive — which it is, since we
-    // are iterating the live window map. The pointer is only borrowed for the
-    // duration of this read and never stored.
-    let ns_window: &NSWindow = unsafe { &*ptr.cast::<NSWindow>() };
-    u32::try_from(ns_window.windowNumber()).ok()
+    let target = window.clone();
+    let (id_tx, id_rx) = std::sync::mpsc::sync_channel(1);
+    window
+        .run_on_main_thread(move || {
+            let id = target.ns_window().ok().filter(|ptr| !ptr.is_null()).and_then(|ptr| {
+                // SAFETY: `ns_window()` returns the `NSWindow *` Tauri holds for
+                // this webview, valid for as long as the window is alive — which
+                // it is, since we are iterating the live window map. The pointer
+                // is only borrowed for the duration of this read, on the thread
+                // that owns it, and never stored.
+                let ns_window: &NSWindow = unsafe { &*ptr.cast::<NSWindow>() };
+                u32::try_from(ns_window.windowNumber()).ok()
+            });
+            // A closed receiver means the listing already gave up waiting; the
+            // id is optional, so there is nothing to report.
+            let _ = id_tx.send(id);
+        })
+        .ok()?;
+    // Bounded so a wedged main thread degrades the listing to "no id" instead
+    // of hanging the whole `windows.list` call.
+    id_rx.recv_timeout(std::time::Duration::from_secs(2)).ok().flatten()
 }
 
 #[cfg(all(any(unix, windows), debug_assertions, not(target_os = "macos")))]
