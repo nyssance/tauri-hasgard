@@ -50,7 +50,7 @@ cargo add tauri-plugin-hasgard
 
 ```toml
 [dependencies]
-tauri-plugin-hasgard = "0.1"
+tauri-plugin-hasgard = "0.2"
 ```
 
 ```rust
@@ -86,7 +86,14 @@ brew install nyssance/tap/tauri-hasgard
 # Windows
 scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
 scoop install nyssance/tauri-hasgard
+
+# Linux, or any platform with a Rust toolchain
+cargo install tauri-hasgard-cli
 ```
+
+The Homebrew formula lives in `nyssance/tap`, not in homebrew-core, so the
+`nyssance/tap/` prefix is required. Prebuilt archives for all six supported
+targets are attached to each [GitHub Release](https://github.com/nyssance/tauri-hasgard/releases).
 
 Use it directly:
 
