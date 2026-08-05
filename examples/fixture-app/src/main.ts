@@ -187,6 +187,10 @@ probe<HTMLButtonElement>("#do-xhr").addEventListener("click", () => {
   xhr.send()
 })
 
+probe<HTMLButtonElement>("#net-reset").addEventListener("click", () => {
+  netLog.textContent = "none"
+})
+
 const dialogAnswer = probe<HTMLParagraphElement>("#dialog-answer")
 probe<HTMLButtonElement>("#ask-confirm").addEventListener("click", () => {
   dialogAnswer.textContent = `confirm:${window.confirm("Delete the record?")}`

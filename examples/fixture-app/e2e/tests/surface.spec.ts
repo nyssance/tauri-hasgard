@@ -4,6 +4,7 @@
 // real engine behaves — event dispatch, label association, computed geometry,
 // and storage all differ from a hand-built stub in ways a unit test cannot see.
 
+import type { HasgardWindow } from "@nyssance/tauri-hasgard"
 import { expect, test } from "../fixtures.js"
 
 test("finds a button by the text it shows, not the accessible name that outranks it", async ({ window }) => {
@@ -478,43 +479,48 @@ test("a missing frame names the frame, not the element", async ({ window }) => {
   )
 })
 
+/**
+ * Fire a network probe and wait for the page to report the answer.
+ *
+ * The click only starts an async request, so reading `#net-log` straight after
+ * it returns whatever the previous test left there. Resetting first and then
+ * waiting for the log to move is what makes each of these independent.
+ */
+async function probeNetwork(window: HasgardWindow, button: "#do-fetch" | "#do-xhr"): Promise<string> {
+  await window.locator("#net-reset").click()
+  await window.locator(button).click()
+  await window.waitForFunction('document.querySelector("#net-log").textContent !== "none"', { timeoutMs: 5_000 })
+  return window.locator("#net-log").textContent()
+}
+
 test("a fulfilled route answers the page without a backend", async ({ window }) => {
   await window.routes.clear()
   await window.routes.fulfill({ pattern: "**/api/user", status: 503, body: "down" })
 
-  await window.locator("#do-fetch").click()
-
-  await expect(window.locator("#net-log").textContent()).resolves.toBe("fetch:503:down")
+  expect(await probeNetwork(window, "#do-fetch")).toBe("fetch:503:down")
 })
 
 test("an aborted route fails the request the way a dropped connection does", async ({ window }) => {
   await window.routes.clear()
   await window.routes.abort({ pattern: "**/api/**" })
 
-  await window.locator("#do-fetch").click()
-
-  await expect(window.locator("#net-log").textContent()).resolves.toBe("fetch:error:TypeError")
+  expect(await probeNetwork(window, "#do-fetch")).toBe("fetch:error:TypeError")
 })
 
 test("XHR is routed too, not just fetch", async ({ window }) => {
   await window.routes.clear()
   await window.routes.fulfill({ pattern: "**/api/user", status: 418, body: "teapot" })
 
-  await window.locator("#do-xhr").click()
-
-  await expect(window.locator("#net-log").textContent()).resolves.toBe("xhr:418:teapot")
+  expect(await probeNetwork(window, "#do-xhr")).toBe("xhr:418:teapot")
 })
 
 test("times lets the first call fail and the next one through", async ({ window }) => {
   await window.routes.clear()
   await window.routes.fulfill({ pattern: "**/api/user", status: 500, body: "once", times: 1 })
 
-  await window.locator("#do-fetch").click()
-  await expect(window.locator("#net-log").textContent()).resolves.toBe("fetch:500:once")
-
-  // The second call is no longer matched; the dev server answers it.
-  await window.locator("#do-fetch").click()
-  await expect(window.locator("#net-log").textContent()).resolves.not.toBe("fetch:500:once")
+  expect(await probeNetwork(window, "#do-fetch")).toBe("fetch:500:once")
+  // The second call is no longer matched, so whatever answers it is not the rule.
+  expect(await probeNetwork(window, "#do-fetch")).not.toBe("fetch:500:once")
 
   const listing = await window.routes.list()
   expect(listing.routes[0]?.used).toBe(1)
@@ -526,7 +532,5 @@ test("clear lets traffic through again", async ({ window }) => {
   const { removed } = await window.routes.clear()
   expect(removed).toBeGreaterThan(0)
 
-  await window.locator("#do-fetch").click()
-
-  await expect(window.locator("#net-log").textContent()).resolves.not.toContain("blocked")
+  expect(await probeNetwork(window, "#do-fetch")).not.toContain("blocked")
 })
