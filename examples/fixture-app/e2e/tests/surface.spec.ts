@@ -532,5 +532,8 @@ test("clear lets traffic through again", async ({ window }) => {
   const { removed } = await window.routes.clear()
   expect(removed).toBeGreaterThan(0)
 
-  expect(await probeNetwork(window, "#do-fetch")).not.toContain("blocked")
+  // Against the exact response the rule produced, not a substring of it: an
+  // unrouted request here gets the app's own index.html, which contains plenty
+  // of words the stub body might have shared.
+  expect(await probeNetwork(window, "#do-fetch")).not.toBe("fetch:500:blocked")
 })

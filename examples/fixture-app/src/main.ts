@@ -170,7 +170,9 @@ const netLog = probe<HTMLParagraphElement>("#net-log")
 probe<HTMLButtonElement>("#do-fetch").addEventListener("click", async () => {
   try {
     const response = await fetch("/api/user")
-    netLog.textContent = `fetch:${response.status}:${await response.text()}`
+    // Truncated: an unrouted request gets the SPA fallback, and logging a whole
+    // index.html into the DOM makes every failure here unreadable.
+    netLog.textContent = `fetch:${response.status}:${(await response.text()).slice(0, 40)}`
   } catch (error) {
     netLog.textContent = `fetch:error:${error instanceof Error ? error.name : "unknown"}`
   }
