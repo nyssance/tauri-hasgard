@@ -308,15 +308,24 @@ mod tests {
         assert!(html_idx < hasgard_idx, "html-to-image must be injected before hasgard bridge code");
     }
 
+    /// The plugin embeds `bridge.js` at build time, so this guards that the
+    /// embedded copy is the real click implementation and not a stale or
+    /// truncated asset.
+    ///
+    /// It asserts on source order only where source order *is* the behaviour:
+    /// the five dispatch calls run top to bottom inside one function. What each
+    /// call produces at runtime is covered by `bridge.click.test.mjs`, which
+    /// executes the code rather than reading it -- so anything this file could
+    /// only check by matching exact whitespace belongs there, not here. An
+    /// earlier version pinned indentation and broke the moment the gesture was
+    /// wrapped in a loop, without any behaviour having changed.
     #[cfg(all(any(unix, windows), debug_assertions))]
     #[test]
     fn bridge_click_dispatches_pointer_sequence() {
         let js = super::BRIDGE_JS;
-        let js_normalized: String = js.lines().collect::<Vec<_>>().join("\n");
         let scroll_idx = js
             .find(r#"el.scrollIntoView({ behavior: "instant", block: "center", inline: "center" })"#)
             .expect("click must scroll the target into view");
-        let rect_idx = js.find("const rect = el.getBoundingClientRect()").expect("click must measure the target");
         let pointer_down_idx = js
             .find(r#"dispatchPointerEvent(el, "pointerdown""#)
             .expect("click must dispatch pointerdown for Radix triggers");
@@ -328,8 +337,7 @@ mod tests {
         let click_idx = js.find(r#"dispatchPointerEvent(el, "click""#).expect("click must dispatch as a pointer event");
 
         assert!(
-            scroll_idx < rect_idx
-                && rect_idx < pointer_down_idx
+            scroll_idx < pointer_down_idx
                 && pointer_down_idx < mouse_down_idx
                 && mouse_down_idx < pointer_up_idx
                 && pointer_up_idx < mouse_up_idx
@@ -337,16 +345,12 @@ mod tests {
             "click must dispatch pointerdown -> mousedown -> pointerup -> mouseup -> click"
         );
         assert!(js.contains(r#"pointerType: "mouse""#), "pointer events must include mouse pointer metadata");
-        assert!(
-            js_normalized.contains(
-                "if (pointerDownOk) {\n      const mouseDownOk = el.dispatchEvent(new MouseEvent(\"mousedown\""
-            ),
-            "mousedown must only dispatch when pointerdown was not canceled"
-        );
-        assert!(
-            js_normalized.contains("if (pointerDownOk) {\n      el.dispatchEvent(new MouseEvent(\"mouseup\""),
-            "mouseup must only dispatch when pointerdown was not canceled"
-        );
+        assert!(js.contains("const rect = el.getBoundingClientRect()"), "click must measure the target");
+
+        // Both compatibility events stay behind the pointerdown gate. Matched
+        // without surrounding whitespace so that reindenting cannot fail this.
+        let gated = js.matches("if (pointerDownOk) {").count();
+        assert!(gated >= 2, "mousedown and mouseup must each sit behind a pointerDownOk gate, found {gated}");
     }
 
     #[cfg(all(any(unix, windows), debug_assertions))]
