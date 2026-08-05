@@ -27,7 +27,7 @@ tracing.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-base64 = "0.22.1"
+base64 = "0.23.0"
 owo-colors = { version = "4.3.0", features = ["supports-colors"] }
 indicatif = "0.18"
 rmcp = { version = "3.0.1", default-features = false, features = ["server", "transport-io"] }
