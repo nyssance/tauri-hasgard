@@ -256,6 +256,7 @@ impl HasgardMcpServer {
                 self.call_app_tool("wheel", Some(params), window).await
             }
             "dialog" => self.call_dialog_tool(args, window).await,
+            "route" => self.call_route_tool(args, window).await,
             "text" => self.target_call("text", &args, window).await,
             "html" => {
                 let params = optional_string(&args, "target")?.map(|target| target_params(&target));
@@ -473,6 +474,42 @@ impl HasgardMcpServer {
             "clear" => ("dialog.clear", None),
             other => {
                 return Err(invalid_params(format!("'action' must be accept, dismiss, list, or clear, got: {other}")));
+            }
+        };
+        self.call_app_tool(method, params, window).await
+    }
+
+    async fn call_route_tool(&self, args: JsonObject, window: Option<String>) -> Result<CallToolResult, McpError> {
+        let action = required_string(&args, "action")?;
+        let (method, params) = match action.as_str() {
+            "fulfill" | "abort" => {
+                let mut params = json!({
+                    "pattern": required_string(&args, "pattern")?,
+                    "action": action,
+                });
+                if action == "fulfill" {
+                    if let Some(status) = optional_u32(&args, "status")? {
+                        params["status"] = json!(status);
+                    }
+                    if let Some(body) = optional_string(&args, "body")? {
+                        params["body"] = json!(body);
+                    }
+                    if let Some(content_type) = optional_string(&args, "content_type")? {
+                        params["contentType"] = json!(content_type);
+                    }
+                }
+                if let Some(verb) = optional_string(&args, "method")? {
+                    params["method"] = json!(verb);
+                }
+                if let Some(times) = optional_u32(&args, "times")? {
+                    params["times"] = json!(times);
+                }
+                ("route.add", Some(params))
+            }
+            "list" => ("route.list", None),
+            "clear" => ("route.clear", None),
+            other => {
+                return Err(invalid_params(format!("'action' must be fulfill, abort, list, or clear, got: {other}")));
             }
         };
         self.call_app_tool(method, params, window).await
@@ -761,6 +798,14 @@ fn tool_specs() -> Vec<ToolSpec> {
             read_only: false,
             destructive: false,
             idempotent: true,
+        },
+        ToolSpec {
+            name: "route",
+            description: "Shape what the page's own fetch and XHR requests receive, without a real backend.                           Rules match a URL glob in registration order, first match wins.",
+            schema: route_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
         },
         ToolSpec {
             name: "dialog",
@@ -1617,6 +1662,27 @@ fn dialog_schema() -> Arc<JsonObject> {
     )
 }
 
+fn route_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("action", enum_prop("What to do.", &["fulfill", "abort", "list", "clear"])),
+            (
+                "pattern",
+                string_prop(
+                    "URL glob, required for fulfill and abort. `*` stays inside one path segment, \
+                     `**` crosses separators, and the pattern must match the whole URL.",
+                ),
+            ),
+            ("status", integer_prop("HTTP status for fulfill. Defaults to 200.")),
+            ("body", string_prop("Response body for fulfill.")),
+            ("content_type", string_prop("Response content type for fulfill. Defaults to text/plain.")),
+            ("method", string_prop("Restrict to one HTTP verb. Any verb matches when omitted.")),
+            ("times", integer_prop("Stop matching after this many requests, letting later ones through.")),
+        ]),
+        &["action"],
+    )
+}
+
 fn eval_schema() -> Arc<JsonObject> {
     object_schema(props([("script", string_prop("JavaScript to evaluate."))]), &["script"])
 }
@@ -1874,6 +1940,7 @@ mod tests {
             "record_status",
             "record_stop",
             "replay",
+            "route",
             "screenshot",
             "screenshot_native",
             "scroll",
@@ -2444,5 +2511,26 @@ mod frame_args_tests {
         let properties = schema["properties"].as_object().expect("valid arguments must build params");
         assert_eq!(properties["frame"]["type"], json!("array"));
         assert_eq!(properties["frame"]["items"]["type"], json!("string"));
+    }
+}
+
+/// The `route` tool's action dispatch.
+#[cfg(test)]
+mod route_schema_tests {
+    use super::*;
+
+    #[test]
+    fn the_schema_lists_exactly_the_actions_the_handler_accepts() {
+        // An advertised action the handler rejects sends models down a path that
+        // always fails; an accepted one the schema hides is never discovered.
+        let schema = route_schema();
+        let properties = schema["properties"].as_object().expect("schema properties must be an object");
+        assert_eq!(properties["action"]["enum"], json!(["fulfill", "abort", "list", "clear"]));
+    }
+
+    #[test]
+    fn pattern_is_not_required_at_the_schema_level_because_list_and_clear_omit_it() {
+        let schema = route_schema();
+        assert_eq!(schema["required"], json!(["action"]));
     }
 }

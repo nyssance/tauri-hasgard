@@ -966,3 +966,127 @@ test("frameLocator.snapshot scopes to the frame", async () => {
 
   expect(sent).toEqual([["snapshot", { window: "main", interactive: true, frame: ["#pane"] }]])
 })
+
+// --- routes -----------------------------------------------------------------
+//
+// Serialization again: an unset option must not reach the bridge, because the
+// bridge's defaults are the contract and it validates what it receives.
+
+function routeRecorder(reply: unknown = { id: 1, pattern: "**", action: "fulfill" }) {
+  const rpc = new HasgardRpcClient("/unused")
+  const sent: [string, unknown][] = []
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    sent.push([method, params])
+    return reply as never
+  })
+  return { rpc, sent }
+}
+
+test("fulfill sends only the options given, plus its action", async () => {
+  const { rpc, sent } = routeRecorder()
+
+  await new HasgardWindow(rpc, "main").routes.fulfill({ pattern: "**/api/user" })
+
+  expect(sent).toEqual([["route.add", { pattern: "**/api/user", action: "fulfill", window: "main" }]])
+})
+
+test("fulfill forwards status, body, content type, method, and times", async () => {
+  const { rpc, sent } = routeRecorder()
+
+  await new HasgardWindow(rpc, "main").routes.fulfill({
+    pattern: "**/api/user",
+    method: "POST",
+    times: 1,
+    status: 503,
+    body: "down",
+    contentType: "application/json"
+  })
+
+  expect(sent).toEqual([
+    [
+      "route.add",
+      {
+        pattern: "**/api/user",
+        method: "POST",
+        times: 1,
+        status: 503,
+        body: "down",
+        contentType: "application/json",
+        action: "fulfill",
+        window: "main"
+      }
+    ]
+  ])
+})
+
+test("abort never sends a body or status, which would be meaningless", async () => {
+  const { rpc, sent } = routeRecorder()
+
+  await new HasgardWindow(rpc, "main").routes.abort({ pattern: "**/analytics/**" })
+
+  expect(sent).toEqual([["route.add", { pattern: "**/analytics/**", action: "abort", window: "main" }]])
+})
+
+test("a zero status is forwarded rather than dropped as falsy", async () => {
+  // 0 is rejected by the bridge, and it must be the bridge that says so --
+  // dropping it here would silently fulfil with 200 instead.
+  const { rpc, sent } = routeRecorder()
+
+  await new HasgardWindow(rpc, "main").routes.fulfill({ pattern: "**", status: 0 })
+
+  expect(sent).toEqual([["route.add", { pattern: "**", status: 0, action: "fulfill", window: "main" }]])
+})
+
+test("an empty body is forwarded rather than dropped as falsy", async () => {
+  const { rpc, sent } = routeRecorder()
+
+  await new HasgardWindow(rpc, "main").routes.fulfill({ pattern: "**", body: "" })
+
+  expect(sent).toEqual([["route.add", { pattern: "**", body: "", action: "fulfill", window: "main" }]])
+})
+
+test("list parses rules and intercepted requests", async () => {
+  const { rpc } = routeRecorder({
+    routes: [{ id: 1, pattern: "**/api/user", method: null, action: "fulfill", status: 500, times: null, used: 2 }],
+    intercepted: [
+      {
+        id: 7,
+        timestamp: 1000,
+        route_id: 1,
+        method: "GET",
+        url: "https://app.test/api/user",
+        action: "fulfill",
+        status: 500
+      }
+    ]
+  })
+
+  const listing = await new HasgardWindow(rpc, "main").routes.list()
+
+  expect(listing.routes[0]).toEqual({
+    id: 1,
+    pattern: "**/api/user",
+    method: null,
+    action: "fulfill",
+    status: 500,
+    times: null,
+    used: 2
+  })
+  expect(listing.intercepted[0]?.url).toBe("https://app.test/api/user")
+})
+
+test("list rejects an unknown action rather than passing it through", async () => {
+  const { rpc } = routeRecorder({
+    routes: [{ id: 1, pattern: "**", method: null, action: "continue", status: 200, times: null, used: 0 }],
+    intercepted: []
+  })
+
+  await expect(new HasgardWindow(rpc, "main").routes.list()).rejects.toThrow(/must be "fulfill" or "abort"/)
+})
+
+test("clear reports how many rules were removed", async () => {
+  const { rpc, sent } = routeRecorder({ removed: 3 })
+
+  await expect(new HasgardWindow(rpc, "main").routes.clear()).resolves.toEqual({ removed: 3 })
+  expect(sent).toEqual([["route.clear", { window: "main" }]])
+})

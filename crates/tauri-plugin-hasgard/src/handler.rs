@@ -168,6 +168,9 @@ pub(crate) async fn dispatch(
         "dialog.list" => handle_eval_method("dialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "dialog.clear" => handle_eval_method("clearDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "dialog.handle" => handle_eval_method("handleDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "route.add" => handle_eval_method("route", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "route.list" => handle_eval_method("routes", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "route.clear" => handle_eval_method("clearRoutes", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "record.start" => {
             recorder.start();
             Ok(serde_json::json!({"status": "recording"}))

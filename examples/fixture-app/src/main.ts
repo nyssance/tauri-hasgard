@@ -164,6 +164,29 @@ probe<HTMLButtonElement>("#pay").addEventListener("click", () => {
   payLog.textContent = "outer clicked"
 })
 
+// Report the status and body the page received, so a route test asserts on what
+// the application saw rather than on the rule it registered.
+const netLog = probe<HTMLParagraphElement>("#net-log")
+probe<HTMLButtonElement>("#do-fetch").addEventListener("click", async () => {
+  try {
+    const response = await fetch("/api/user")
+    netLog.textContent = `fetch:${response.status}:${await response.text()}`
+  } catch (error) {
+    netLog.textContent = `fetch:error:${error instanceof Error ? error.name : "unknown"}`
+  }
+})
+probe<HTMLButtonElement>("#do-xhr").addEventListener("click", () => {
+  const xhr = new XMLHttpRequest()
+  xhr.open("GET", "/api/user")
+  xhr.addEventListener("load", () => {
+    netLog.textContent = `xhr:${xhr.status}:${xhr.responseText}`
+  })
+  xhr.addEventListener("error", () => {
+    netLog.textContent = "xhr:error"
+  })
+  xhr.send()
+})
+
 const dialogAnswer = probe<HTMLParagraphElement>("#dialog-answer")
 probe<HTMLButtonElement>("#ask-confirm").addEventListener("click", () => {
   dialogAnswer.textContent = `confirm:${window.confirm("Delete the record?")}`

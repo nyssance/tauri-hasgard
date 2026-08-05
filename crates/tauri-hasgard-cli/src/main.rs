@@ -19,7 +19,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cli::{
-    AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, StorageAction, StorageArgs, Target, parse_target,
+    AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction, StorageArgs, Target,
+    parse_target,
 };
 use client::Client;
 
@@ -486,6 +487,40 @@ async fn handle_eval(client: &mut Client, script: Option<String>, scope: Scope<'
     client.call("eval", with_scope(Some(json!({"script": script})), scope)).await
 }
 
+async fn run_route_command(client: &mut Client, action: RouteCommand, scope: Scope<'_>) -> Result<Value> {
+    let (method, params) = match action {
+        RouteCommand::Fulfill { pattern, status, body, content_type, method, times } => {
+            let mut params = json!({
+                "pattern": pattern,
+                "action": "fulfill",
+                "status": status,
+                "body": body,
+                "contentType": content_type,
+            });
+            if let Some(verb) = method {
+                params["method"] = json!(verb);
+            }
+            if let Some(count) = times {
+                params["times"] = json!(count);
+            }
+            ("route.add", Some(params))
+        }
+        RouteCommand::Abort { pattern, method, times } => {
+            let mut params = json!({"pattern": pattern, "action": "abort"});
+            if let Some(verb) = method {
+                params["method"] = json!(verb);
+            }
+            if let Some(count) = times {
+                params["times"] = json!(count);
+            }
+            ("route.add", Some(params))
+        }
+        RouteCommand::List => ("route.list", None),
+        RouteCommand::Clear => ("route.clear", None),
+    };
+    client.call(method, with_scope(params, scope)).await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_click(
     client: &mut Client, target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>,
@@ -538,6 +573,7 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             };
             client.call(method, with_scope(params, scope)).await
         }
+        Command::Route(action) => run_route_command(client, action, scope).await,
         Command::Focus { target } => client.call("focus", with_scope(Some(target_params(&target)), scope)).await,
         Command::Blur { target } => client.call("blur", with_scope(Some(target_params(&target)), scope)).await,
         Command::Disabled { target } => client.call("disabled", with_scope(Some(target_params(&target)), scope)).await,

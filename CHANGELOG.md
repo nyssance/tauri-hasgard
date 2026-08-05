@@ -41,6 +41,26 @@ The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, a
   On the CLI this is a global `--frame SELECTOR`, repeated per nesting level;
   MCP element tools take a `frame` array.
 
+- `window.routes.{fulfill, abort, list, clear}` shape what the page's own
+  `fetch` and `XMLHttpRequest` receive. Network activity could be observed but
+  not changed, so the branches an app most needs tested -- offline, 500, empty --
+  were reachable only by breaking the real backend.
+
+  Rules are declarative rather than Playwright's per-request callback. The bridge
+  only ever answers requests; it cannot call back into the test process and await
+  a handler while the page sits inside `fetch`. The same constraint produced the
+  standing dialog policy.
+
+  Patterns are anchored globs where `*` stays inside a path segment and `**`
+  crosses separators, matched in registration order with first match winning.
+  `times` bounds how many requests a rule answers, which is what a retry test
+  needs. Routed requests still appear in `networkRequests()`: the app did issue
+  them and did get an answer, and a test asserting "the app called /api/user"
+  must not go blind the moment that call is stubbed.
+
+  Resources the webview loads itself -- the document, `<img src>`, stylesheets --
+  are not covered, since no page script is involved in fetching them.
+
 ### Changed
 
 - `dblclick` is now `click({ clickCount: 2 })` on every surface, one

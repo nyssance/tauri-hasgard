@@ -18,7 +18,9 @@ import type {
   FormEntry,
   FormField,
   FormsDump,
+  FulfillOptions,
   HasgardTarget,
+  InterceptedRequest,
   JsonValue,
   NativeScreenshot,
   NativeScreenshotOptions,
@@ -29,6 +31,9 @@ import type {
   RecorderResult,
   RecorderStatus,
   RoleQuery,
+  RouteListing,
+  RouteOptions,
+  RouteRule,
   ScrollOptions,
   Snapshot,
   SnapshotDiff,
@@ -113,6 +118,58 @@ function clickParams(options: ClickOptions): Record<string, JsonValue> {
   if (options.clickCount !== undefined) params.clickCount = options.clickCount
   if (options.position !== undefined) params.position = { ...options.position }
   return params
+}
+
+/**
+ * Serialize a route rule, omitting what the caller left unset so the bridge
+ * keeps applying its own defaults rather than validating explicit nulls.
+ */
+function routeParams(options: FulfillOptions | RouteOptions): Record<string, JsonValue> {
+  const params: Record<string, JsonValue> = { pattern: options.pattern }
+  if (options.method !== undefined) params.method = options.method
+  if (options.times !== undefined) params.times = options.times
+  if ("status" in options && options.status !== undefined) params.status = options.status
+  if ("body" in options && options.body !== undefined) params.body = options.body
+  if ("contentType" in options && options.contentType !== undefined) {
+    params.contentType = options.contentType
+  }
+  return params
+}
+
+function parseRouteAction(value: unknown, context: string): "fulfill" | "abort" {
+  const action = expectString(value, context)
+  if (action !== "fulfill" && action !== "abort") {
+    throw new Error(`${context} must be "fulfill" or "abort", got ${action}`)
+  }
+  return action
+}
+
+function parseRouteRule(value: unknown, index: number): RouteRule {
+  const context = `route.list.routes[${index}]`
+  const rule = expectRecord(value, context)
+  return {
+    id: expectNumber(rule.id, `${context}.id`),
+    pattern: expectString(rule.pattern, `${context}.pattern`),
+    method: expectNullableString(rule.method, `${context}.method`),
+    action: parseRouteAction(rule.action, `${context}.action`),
+    status: expectNumber(rule.status, `${context}.status`),
+    times: rule.times === null ? null : expectNumber(rule.times, `${context}.times`),
+    used: expectNumber(rule.used, `${context}.used`)
+  }
+}
+
+function parseInterceptedRequest(value: unknown, index: number): InterceptedRequest {
+  const context = `route.list.intercepted[${index}]`
+  const entry = expectRecord(value, context)
+  return {
+    id: expectNumber(entry.id, `${context}.id`),
+    timestamp: expectNumber(entry.timestamp, `${context}.timestamp`),
+    route_id: expectNumber(entry.route_id, `${context}.route_id`),
+    method: expectString(entry.method, `${context}.method`),
+    url: expectString(entry.url, `${context}.url`),
+    action: parseRouteAction(entry.action, `${context}.action`),
+    status: expectNumber(entry.status, `${context}.status`)
+  }
 }
 
 /** Resolve a possibly negative ordinal against a match count, Python-style. */
@@ -662,6 +719,54 @@ export class HasgardWindow {
     /** Forget the recorded dialogs. Leaves the accept/dismiss policy alone. */
     clear: async (): Promise<void> => {
       await this.call("dialog.clear")
+    }
+  }
+
+  /**
+   * Shape what the page's own requests receive, without a real backend.
+   *
+   * Rules are declarative rather than Playwright's per-request callback: the
+   * bridge only ever answers requests, so it cannot call back into this process
+   * and await a handler while the page sits inside `fetch`. The same constraint
+   * shaped `dialogs`.
+   *
+   * Rules are checked in registration order and the first match wins, so
+   * register the narrow ones before a catch-all. Both `fetch` and
+   * `XMLHttpRequest` are covered; resources the webview loads itself -- the
+   * document, `<img src>`, stylesheets -- are not, since no page script sees
+   * them.
+   */
+  readonly routes = {
+    /** Answer matching requests with this response instead of the network. */
+    fulfill: async (options: FulfillOptions): Promise<{ id: number }> => {
+      const value = expectRecord(
+        await this.call("route.add", { ...routeParams(options), action: "fulfill" }),
+        "route.add result"
+      )
+      return { id: expectNumber(value.id, "route.add.id") }
+    },
+    /** Fail matching requests the way a dropped connection does. */
+    abort: async (options: RouteOptions): Promise<{ id: number }> => {
+      const value = expectRecord(
+        await this.call("route.add", { ...routeParams(options), action: "abort" }),
+        "route.add result"
+      )
+      return { id: expectNumber(value.id, "route.add.id") }
+    },
+    /** The active rules, their use counts, and every request they answered. */
+    list: async (): Promise<RouteListing> => {
+      const value = expectRecord(await this.call("route.list"), "route.list result")
+      return {
+        routes: expectArray(value.routes, "route.list.routes").map((entry, index) => parseRouteRule(entry, index)),
+        intercepted: expectArray(value.intercepted, "route.list.intercepted").map((entry, index) =>
+          parseInterceptedRequest(entry, index)
+        )
+      }
+    },
+    /** Remove every rule and its interception log. */
+    clear: async (): Promise<{ removed: number }> => {
+      const value = expectRecord(await this.call("route.clear"), "route.clear result")
+      return { removed: expectNumber(value.removed, "route.clear.removed") }
     }
   }
 

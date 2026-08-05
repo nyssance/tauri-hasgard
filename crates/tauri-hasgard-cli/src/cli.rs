@@ -143,6 +143,9 @@ pub(crate) enum Command {
     /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
     #[command(subcommand)]
     Dialog(DialogCommand),
+    /// Shape what the page's own fetch and XHR requests receive.
+    #[command(subcommand)]
+    Route(RouteCommand),
     /// Type text character by character.
     Type { target: String, text: String },
     /// Press a keyboard key.
@@ -398,6 +401,40 @@ pub(crate) enum DialogCommand {
     /// Show the dialogs the page has opened, and the current policy.
     List,
     /// Forget the recorded dialogs, leaving the policy alone.
+    Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum RouteCommand {
+    /// Answer matching requests with a canned response instead of the network.
+    Fulfill {
+        /// URL glob. `*` stays inside one path segment, `**` crosses separators,
+        /// and the pattern must match the whole URL.
+        pattern: String,
+        #[arg(long, default_value_t = 200)]
+        status: u16,
+        #[arg(long, default_value = "")]
+        body: String,
+        #[arg(long, default_value = "text/plain")]
+        content_type: String,
+        /// Restrict to one HTTP verb. Any verb matches when omitted.
+        #[arg(long)]
+        method: Option<String>,
+        /// Stop matching after this many requests, letting later ones through.
+        #[arg(long)]
+        times: Option<u32>,
+    },
+    /// Fail matching requests the way a dropped connection does.
+    Abort {
+        pattern: String,
+        #[arg(long)]
+        method: Option<String>,
+        #[arg(long)]
+        times: Option<u32>,
+    },
+    /// Show the active rules and every request they answered.
+    List,
+    /// Remove every rule and its interception log.
     Clear,
 }
 

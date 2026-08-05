@@ -158,6 +158,54 @@ export interface DialogListing {
   policy: DialogPolicy
 }
 
+/** How a matched request is answered. */
+export interface RouteOptions {
+  /**
+   * Glob against the full URL. `*` stays inside one path segment, `**` crosses
+   * separators, and the pattern is anchored at both ends -- so `**\/api` does
+   * not also intercept `/v2/api-docs`.
+   */
+  pattern: string
+  /** Restrict to one HTTP verb. Any verb matches when omitted. */
+  method?: string
+  /** Stop matching after this many requests, letting later ones through. */
+  times?: number
+}
+
+export interface FulfillOptions extends RouteOptions {
+  /** Defaults to 200. */
+  status?: number
+  body?: string
+  /** Defaults to `text/plain`. */
+  contentType?: string
+}
+
+export interface RouteRule {
+  id: number
+  pattern: string
+  method: string | null
+  action: "fulfill" | "abort"
+  status: number
+  times: number | null
+  /** How many requests this rule has already answered. */
+  used: number
+}
+
+export interface InterceptedRequest {
+  id: number
+  timestamp: number
+  route_id: number
+  method: string
+  url: string
+  action: "fulfill" | "abort"
+  status: number
+}
+
+export interface RouteListing {
+  routes: RouteRule[]
+  intercepted: InterceptedRequest[]
+}
+
 export interface ConsoleLogOptions {
   level?: "log" | "warn" | "error" | "info"
   since?: number

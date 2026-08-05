@@ -209,12 +209,172 @@
     return 0;
   }
 
+  // --- Routing -------------------------------------------------------------
+  //
+  // Rules are declarative rather than Playwright's per-request callback. The
+  // bridge cannot call back into the test process and await an answer -- it only
+  // ever responds to requests -- so a handler round trip would have to block the
+  // page inside `fetch`, which it cannot do. The same constraint shaped the
+  // dialog policy above.
+  //
+  // Rules are checked in registration order; the first match wins, so a narrow
+  // rule registered first survives a later catch-all.
+
+  var _routes = [];
+  var _routeIdCounter = 0;
+  var _routeLog = [];
+  const MAX_ROUTE_LOG = 200;
+
+  // Glob to RegExp, with `**` crossing path separators and `*` staying within a
+  // segment. Anchored at both ends: a pattern that matched a substring would
+  // make `**/api` also intercept `/v2/api-docs`.
+  function globToRegExp(pattern) {
+    var out = "";
+    for (var i = 0; i < pattern.length; i++) {
+      var ch = pattern.charAt(i);
+      if (ch === "*") {
+        if (pattern.charAt(i + 1) === "*") {
+          out += ".*";
+          i++;
+        } else {
+          out += "[^/]*";
+        }
+      } else if (ch === "?") {
+        out += "[^/]";
+      } else if (".+^${}()|[]\\".indexOf(ch) !== -1) {
+        out += "\\" + ch;
+      } else {
+        out += ch;
+      }
+    }
+    return new RegExp("^" + out + "$");
+  }
+
+  function matchRoute(url, method) {
+    for (var i = 0; i < _routes.length; i++) {
+      var route = _routes[i];
+      if (route.times != null && route.used >= route.times) continue;
+      if (route.method && route.method !== method.toUpperCase()) continue;
+      if (!route.regex.test(url)) continue;
+      route.used += 1;
+      _routeLog.push({
+        id: ++_netIdCounter,
+        timestamp: Date.now(),
+        route_id: route.id,
+        method: method.toUpperCase(),
+        url: url,
+        action: route.action,
+        status: route.action === "fulfill" ? route.status : 0,
+      });
+      if (_routeLog.length > MAX_ROUTE_LOG) _routeLog.shift();
+      return route;
+    }
+    return null;
+  }
+
+  function recordNetwork(entry) {
+    _networkRequests.push(entry);
+    if (_networkRequests.length > MAX_REQUESTS) _networkRequests.shift();
+  }
+
+  function routeAdd(params) {
+    var pattern = params && params.pattern;
+    if (typeof pattern !== "string" || pattern === "") {
+      throw new Error("route requires a non-empty 'pattern'");
+    }
+    var action = (params && params.action) || "fulfill";
+    if (action !== "fulfill" && action !== "abort") {
+      throw new Error("route 'action' must be 'fulfill' or 'abort', got: " + String(action).slice(0, 32));
+    }
+    var status = (params && params.status != null) ? params.status : 200;
+    if (typeof status !== "number" || status < 100 || status > 599) {
+      throw new Error("route 'status' must be an HTTP status code between 100 and 599");
+    }
+    var times = (params && params.times != null) ? params.times : null;
+    if (times != null && (typeof times !== "number" || times < 1 || times % 1 !== 0)) {
+      throw new Error("route 'times' must be a positive integer");
+    }
+    var method = (params && params.method) ? String(params.method).toUpperCase() : null;
+    var route = {
+      id: ++_routeIdCounter,
+      pattern: pattern,
+      regex: globToRegExp(pattern),
+      method: method,
+      action: action,
+      status: status,
+      body: (params && params.body != null) ? String(params.body) : "",
+      contentType: (params && params.contentType) || "text/plain",
+      times: times,
+      used: 0,
+    };
+    _routes.push(route);
+    return { id: route.id, pattern: route.pattern, action: route.action };
+  }
+
+  function routeList() {
+    return {
+      routes: _routes.map(function (route) {
+        return {
+          id: route.id,
+          pattern: route.pattern,
+          method: route.method,
+          action: route.action,
+          status: route.status,
+          times: route.times,
+          used: route.used,
+        };
+      }),
+      intercepted: _routeLog.slice(),
+    };
+  }
+
+  function routeClear() {
+    var removed = _routes.length;
+    _routes = [];
+    _routeLog = [];
+    return { removed: removed };
+  }
+
+  function fulfilledResponse(route, url) {
+    var headers = { "Content-Type": route.contentType };
+    if (typeof Response === "function") {
+      var response = new Response(route.body, { status: route.status, headers: headers });
+      // `Response.url` is read-only and empty on a constructed response, but
+      // application code routinely reads it; make it the URL that was asked for.
+      try {
+        Object.defineProperty(response, "url", { value: url });
+      } catch (_) {}
+      return response;
+    }
+    throw new Error("This webview has no Response constructor, so routes cannot be fulfilled");
+  }
+
   const _originalFetch = window.fetch.bind(window);
   window.fetch = function(input, init) {
     const method = (init && init.method) || (input && input.method) || "GET";
     const url = (typeof input === "string") ? input : (input && input.url) || String(input);
     const timestamp = Date.now();
     const requestSize = bodySize(init && init.body);
+
+    // Routed requests are still logged as network activity: the application did
+    // issue them and did receive an answer, and a test asserting "the app called
+    // /api/user" must not go blind the moment that call is stubbed.
+    const route = matchRoute(url, method);
+    if (route) {
+      if (route.action === "abort") {
+        recordNetwork({
+          id: ++_netIdCounter, timestamp: timestamp, method: method, url: url, status: 0,
+          duration_ms: 0, error: "Aborted by route", request_size: requestSize, response_size: 0,
+        });
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      recordNetwork({
+        id: ++_netIdCounter, timestamp: timestamp, method: method, url: url, status: route.status,
+        duration_ms: 0, error: null, request_size: requestSize, response_size: route.body.length,
+      });
+      return Promise.resolve(fulfilledResponse(route, url));
+    }
+
     return _originalFetch(input, init).then(function(response) {
       const duration_ms = Date.now() - timestamp;
       const status = response.status;
@@ -261,7 +421,54 @@
     return result;
   };
 
+  // Deliver a routed answer to an XHR without touching the network.
+  //
+  // The response fields are read-only accessors on the prototype, so they are
+  // shadowed with own properties on this instance. That is confined to requests
+  // a rule already matched: an unrouted XHR keeps the real object untouched.
+  function deliverRoutedXhr(xhr, route, url, requestSize) {
+    var timestamp = Date.now();
+    var aborted = route.action === "abort";
+    var define = function (name, value) {
+      try {
+        Object.defineProperty(xhr, name, { configurable: true, get: function () { return value; } });
+      } catch (_) {}
+    };
+    define("readyState", 4);
+    define("status", aborted ? 0 : route.status);
+    define("statusText", aborted ? "" : "OK");
+    define("responseURL", url);
+    define("responseText", aborted ? "" : route.body);
+    define("response", aborted ? "" : route.body);
+
+    recordNetwork({
+      id: ++_netIdCounter, timestamp: timestamp, method: route.method || "GET", url: url,
+      status: aborted ? 0 : route.status, duration_ms: 0, error: aborted ? "Aborted by route" : null,
+      request_size: requestSize, response_size: aborted ? 0 : route.body.length,
+    });
+
+    // Asynchronous, because a synchronous callback would run before the caller
+    // had a chance to attach its own listeners -- which is not how any real
+    // request behaves.
+    var deliver = function () {
+      try {
+        xhr.dispatchEvent(new Event("readystatechange"));
+        xhr.dispatchEvent(new Event(aborted ? "error" : "load"));
+        xhr.dispatchEvent(new Event("loadend"));
+      } catch (_) {}
+    };
+    if (typeof setTimeout === "function") setTimeout(deliver, 0);
+    else deliver();
+  }
+
   XMLHttpRequest.prototype.send = function(body) {
+    if (this._hasgard) {
+      var routed = matchRoute(this._hasgard.url, this._hasgard.method);
+      if (routed) {
+        deliverRoutedXhr(this, routed, this._hasgard.url, bodySize(body));
+        return undefined;
+      }
+    }
     if (this._hasgard) {
       const hasgard = this._hasgard;
       const timestamp = Date.now();
@@ -1884,5 +2091,8 @@
     storageList: storageList,
     storageClear: storageClear,
     formDump: formDump,
+    route: routeAdd,
+    routes: routeList,
+    clearRoutes: routeClear,
   };
 })();

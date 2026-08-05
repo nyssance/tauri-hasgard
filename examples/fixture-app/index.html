@@ -106,6 +106,12 @@
         <p id="pay-log">none</p>
         <iframe id="pane" src="/embedded.html" title="Embedded pane"></iframe>
 
+        <!-- Fetch and XHR probes, so a route can be proved to intercept both.
+             Each records the status and body the page actually received. -->
+        <button id="do-fetch" type="button">Fetch</button>
+        <button id="do-xhr" type="button">XHR</button>
+        <p id="net-log">none</p>
+
         <!-- Same tag, same class: reachable only by refining on text. -->
         <ul id="tickets">
           <li class="ticket">Ticket 1 — open</li>
