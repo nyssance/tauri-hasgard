@@ -63,11 +63,12 @@ async fn main() -> Result<()> {
         let spinner = indicatif::ProgressBar::new_spinner();
         spinner.enable_steady_tick(Duration::from_millis(80));
         spinner.set_message("Taking screenshot...");
-        let res = run_command(&mut client, args.command, args.window.as_deref()).await;
+        let res =
+            run_command(&mut client, args.command, Scope { window: args.window.as_deref(), frame: &args.frame }).await;
         spinner.finish_and_clear();
         res?
     } else {
-        run_command(&mut client, args.command, args.window.as_deref()).await?
+        run_command(&mut client, args.command, Scope { window: args.window.as_deref(), frame: &args.frame }).await?
     };
 
     // Screenshot save-to-file: decode base64 data URL and write PNG
@@ -229,7 +230,9 @@ async fn follow_logs(
             params.insert("last".into(), json!(n));
             first_poll = false;
         }
-        let result = client.call("console.getLogs", with_window(Some(Value::Object(params)), window)).await?;
+        let result = client
+            .call("console.getLogs", with_scope(Some(Value::Object(params)), Scope { window, ..Scope::default() }))
+            .await?;
         if let Some(entries) = result.as_array()
             && !entries.is_empty()
         {
@@ -268,7 +271,9 @@ async fn follow_network(
             params.insert("last".into(), json!(n));
             first_poll = false;
         }
-        let result = client.call("network.getRequests", with_window(Some(Value::Object(params)), window)).await?;
+        let result = client
+            .call("network.getRequests", with_scope(Some(Value::Object(params)), Scope { window, ..Scope::default() }))
+            .await?;
         if let Some(entries) = result.as_array()
             && !entries.is_empty()
         {
@@ -286,77 +291,94 @@ async fn follow_network(
     }
 }
 
-pub(crate) fn with_window(params: Option<Value>, window: Option<&str>) -> Option<Value> {
-    match (params, window) {
-        (Some(Value::Object(mut map)), Some(w)) => {
-            map.insert("window".to_string(), json!(w));
-            Some(Value::Object(map))
-        }
-        (None, Some(w)) => Some(json!({"window": w})),
-        (params, _) => params,
-    }
+/// The window and frame every element operation is resolved against.
+///
+/// Carried as one value rather than two threaded arguments so that adding a
+/// third dimension later does not mean touching every call site again.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Scope<'a> {
+    pub window: Option<&'a str>,
+    pub frame: &'a [String],
 }
 
-async fn run_command(client: &mut Client, command: Command, window: Option<&str>) -> Result<serde_json::Value> {
+pub(crate) fn with_scope(params: Option<Value>, scope: Scope<'_>) -> Option<Value> {
+    if scope.window.is_none() && scope.frame.is_empty() {
+        return params;
+    }
+    let mut map = match params {
+        Some(Value::Object(map)) => map,
+        Some(other) => return Some(other),
+        None => serde_json::Map::new(),
+    };
+    if let Some(window) = scope.window {
+        map.insert("window".to_string(), json!(window));
+    }
+    if !scope.frame.is_empty() {
+        map.insert("frame".to_string(), json!(scope.frame));
+    }
+    Some(Value::Object(map))
+}
+
+async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) -> Result<serde_json::Value> {
     match command {
         Command::Mcp => anyhow::bail!("mcp must be handled before run_command"),
         Command::Run { .. } => anyhow::bail!("run must be handled before run_command"),
         Command::Windows => client.call("windows.list", None).await,
-        Command::Ping => client.call("ping", with_window(None, window)).await,
-        Command::State => client.call("state", with_window(None, window)).await,
+        Command::Ping => client.call("ping", with_scope(None, scope)).await,
+        Command::State => client.call("state", with_scope(None, scope)).await,
         Command::Snapshot { interactive, selector, depth, save } => {
-            run_snapshot_command(client, interactive, selector, depth, save, window).await
+            run_snapshot_command(client, interactive, selector, depth, save, scope.window).await
         }
         Command::Diff { r#ref: ref_path, interactive, selector, depth } => {
-            run_diff_command(client, ref_path, interactive, selector, depth, window).await
+            run_diff_command(client, ref_path, interactive, selector, depth, scope.window).await
         }
-        Command::Ipc { command, args } => run_ipc_command(client, &command, args.as_deref(), window).await,
+        Command::Ipc { command, args } => run_ipc_command(client, &command, args.as_deref(), scope.window).await,
         Command::Screenshot { path, selector } => {
-            client.call("screenshot", with_window(Some(json!({"path": path, "selector": selector})), window)).await
+            client.call("screenshot", with_scope(Some(json!({"path": path, "selector": selector})), scope)).await
         }
         Command::ScreenshotNative { window_id, output, format } => {
             let window_id = match window_id {
                 Some(id) => id,
-                None => resolve_native_window_id(client, window).await?,
+                None => resolve_native_window_id(client, scope.window).await?,
             };
             client
                 .call(
                     "screenshot_native",
-                    with_window(
+                    with_scope(
                         Some(json!({
                             "window_id": window_id,
                             "output_path": output.display().to_string(),
                             "format": format,
                         })),
-                        window,
+                        Scope { window: scope.window, ..Scope::default() },
                     ),
                 )
                 .await
         }
-        Command::Navigate { url } => client.call("navigate", with_window(Some(json!({"url": url})), window)).await,
-        Command::Url => client.call("url", with_window(None, window)).await,
-        Command::Title => client.call("title", with_window(None, window)).await,
+        Command::Navigate { url } => client.call("navigate", with_scope(Some(json!({"url": url})), scope)).await,
+        Command::Url => client.call("url", with_scope(None, scope)).await,
+        Command::Title => client.call("title", with_scope(None, scope)).await,
         Command::Wait { target, selector, expression, poll, gone, timeout } => {
             let params =
                 build_wait_params(target.as_deref(), selector.as_deref(), expression.as_deref(), poll, gone, timeout);
-            client.call("wait", with_window(Some(params), window)).await
+            client.call("wait", with_scope(Some(params), scope)).await
         }
         Command::Watch { selector, timeout, stable, require_mutation } => {
-            run_watch_command(client, selector, timeout, stable, require_mutation, window).await
+            run_watch_command(client, selector, timeout, stable, require_mutation, scope.window).await
         }
         Command::Logs { level, last, clear, follow } => {
-            run_logs_command(client, level, last, clear, follow, window).await
+            run_logs_command(client, level, last, clear, follow, scope.window).await
         }
         Command::Network { filter, failed, last, clear, follow } => {
-            run_network_command(client, filter, failed, last, clear, follow, window).await
+            run_network_command(client, filter, failed, last, clear, follow, scope.window).await
         }
-        Command::Assert(kind) => run_assert_command(client, kind, window).await,
-        Command::Storage(storage_args) => run_storage_command(client, storage_args, window).await,
-        Command::Forms(args) => run_forms_command(client, args, window).await,
-        Command::Drop { target, file } => run_drop_command(client, &target, file, window).await,
-        Command::Record { action } => run_record_command(client, action, window).await,
-        Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), window).await,
-        cmd => run_dom_command(client, cmd, window).await,
+        Command::Assert(kind) => run_assert_command(client, kind, scope).await,
+        Command::Storage(storage_args) => run_storage_command(client, storage_args, scope.window).await,
+        Command::Forms(args) => run_forms_command(client, args, scope).await,
+        Command::Drop { target, file } => run_drop_command(client, &target, file, scope.window).await,
+        Command::Record { action } => run_record_command(client, action, scope).await,
+        Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), scope.window).await,
+        cmd => run_dom_command(client, cmd, scope).await,
     }
 }
 
@@ -371,13 +393,13 @@ async fn run_snapshot_command(
         save = save.as_ref().map(|p| p.display().to_string()),
         "running snapshot"
     );
-    let params = with_window(
+    let params = with_scope(
         Some(json!({
             "interactive": interactive,
             "selector": selector,
             "depth": depth,
         })),
-        window,
+        Scope { window, ..Scope::default() },
     );
     let mut result = client.call("snapshot", params).await?;
     if let Some(ref path) = save {
@@ -413,7 +435,9 @@ async fn run_watch_command(
     if let Some(sel) = selector {
         params.insert("selector".into(), json!(sel));
     }
-    client.call("watch", with_window(Some(serde_json::Value::Object(params)), window)).await
+    client
+        .call("watch", with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() }))
+        .await
 }
 
 async fn run_diff_command(
@@ -438,7 +462,7 @@ async fn run_diff_command(
         );
         params["reference"] = reference;
     }
-    client.call("diff", with_window(Some(params), window)).await
+    client.call("diff", with_scope(Some(params), Scope { window, ..Scope::default() })).await
 }
 
 fn read_script(reader: &mut impl std::io::Read) -> Result<String> {
@@ -448,7 +472,7 @@ fn read_script(reader: &mut impl std::io::Read) -> Result<String> {
     Ok(s)
 }
 
-async fn handle_eval(client: &mut Client, script: Option<String>, window: Option<&str>) -> Result<Value> {
+async fn handle_eval(client: &mut Client, script: Option<String>, scope: Scope<'_>) -> Result<Value> {
     let script = match script.as_deref() {
         None | Some("-") => {
             anyhow::ensure!(
@@ -459,36 +483,45 @@ async fn handle_eval(client: &mut Client, script: Option<String>, window: Option
         }
         Some(s) => s.to_owned(),
     };
-    client.call("eval", with_window(Some(json!({"script": script})), window)).await
+    client.call("eval", with_scope(Some(json!({"script": script})), scope)).await
 }
 
-async fn run_dom_command(client: &mut Client, command: Command, window: Option<&str>) -> Result<serde_json::Value> {
+#[allow(clippy::too_many_arguments)]
+async fn run_click(
+    client: &mut Client, target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>,
+    position: Option<(f64, f64)>, scope: Scope<'_>,
+) -> Result<serde_json::Value> {
+    let params = click_params(target, modifiers, button, click_count, position);
+    client.call("click", with_scope(Some(params), scope)).await
+}
+
+async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>) -> Result<serde_json::Value> {
     match command {
         Command::Query { by, value, exact } => {
-            client.call("query", with_window(Some(json!({"by": by, "value": value, "exact": exact})), window)).await
+            client.call("query", with_scope(Some(json!({"by": by, "value": value, "exact": exact})), scope)).await
         }
         Command::Click { target, modifiers, button, click_count, position } => {
-            let params = click_params(&target, &modifiers, button.as_deref(), click_count, position);
-            client.call("click", with_window(Some(params), window)).await
+            run_click(client, &target, &modifiers, button.as_deref(), click_count, position, scope).await
         }
-        Command::Dblclick { target } => {
-            let params = click_params(&target, &[], None, Some(2), None);
-            client.call("click", with_window(Some(params), window)).await
-        }
-        Command::Hover { target } => client.call("hover", with_window(Some(target_params(&target)), window)).await,
+        // A double click is the same gesture with a higher count, not a second
+        // op, so the two cannot drift on which events they raise.
+        Command::Dblclick { target } => run_click(client, &target, &[], None, Some(2), None, scope).await,
+        Command::Hover { target } => client.call("hover", with_scope(Some(target_params(&target)), scope)).await,
         // `clear` is `fill ""` rather than its own bridge op so the two cannot
         // drift on which events they fire.
         Command::Clear { target } => {
             let mut params = target_params(&target);
             params["value"] = json!("");
-            client.call("fill", with_window(Some(params), window)).await
+            client.call("fill", with_scope(Some(params), scope)).await
         }
-        Command::SetInputFiles { target, files } => run_set_input_files_command(client, &target, files, window).await,
+        Command::SetInputFiles { target, files } => {
+            run_set_input_files_command(client, &target, files, scope.window).await
+        }
         Command::Wheel { target, delta_x, delta_y } => {
             let mut params = target.as_deref().map_or_else(|| json!({}), target_params);
             params["deltaX"] = json!(delta_x);
             params["deltaY"] = json!(delta_y);
-            client.call("wheel", with_window(Some(params), window)).await
+            client.call("wheel", with_scope(Some(params), scope)).await
         }
         Command::Dialog(action) => {
             let (method, params) = match action {
@@ -503,51 +536,49 @@ async fn run_dom_command(client: &mut Client, command: Command, window: Option<&
                 DialogCommand::List => ("dialog.list", None),
                 DialogCommand::Clear => ("dialog.clear", None),
             };
-            client.call(method, with_window(params, window)).await
+            client.call(method, with_scope(params, scope)).await
         }
-        Command::Focus { target } => client.call("focus", with_window(Some(target_params(&target)), window)).await,
-        Command::Blur { target } => client.call("blur", with_window(Some(target_params(&target)), window)).await,
-        Command::Disabled { target } => {
-            client.call("disabled", with_window(Some(target_params(&target)), window)).await
-        }
+        Command::Focus { target } => client.call("focus", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Blur { target } => client.call("blur", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Disabled { target } => client.call("disabled", with_scope(Some(target_params(&target)), scope)).await,
         Command::BoundingBox { target } => {
-            client.call("boundingBox", with_window(Some(target_params(&target)), window)).await
+            client.call("boundingBox", with_scope(Some(target_params(&target)), scope)).await
         }
         Command::Fill { target, value } => {
             let mut p = target_params(&target);
             p["value"] = json!(value);
-            client.call("fill", with_window(Some(p), window)).await
+            client.call("fill", with_scope(Some(p), scope)).await
         }
         Command::Type { target, text } => {
             let mut p = target_params(&target);
             p["text"] = json!(text);
-            client.call("type", with_window(Some(p), window)).await
+            client.call("type", with_scope(Some(p), scope)).await
         }
-        Command::Press { key } => client.call("press", with_window(Some(json!({"key": key})), window)).await,
+        Command::Press { key } => client.call("press", with_scope(Some(json!({"key": key})), scope)).await,
         Command::Select { target, value } => {
             let mut p = target_params(&target);
             p["value"] = json!(value);
-            client.call("select", with_window(Some(p), window)).await
+            client.call("select", with_scope(Some(p), scope)).await
         }
         Command::Check { target, state } => {
-            client.call("check", with_window(Some(build_check_params(&target, state.as_deref())), window)).await
+            client.call("check", with_scope(Some(build_check_params(&target, state.as_deref())), scope)).await
         }
         Command::Scroll { direction, amount, r#ref } => {
             client
                 .call(
                     "scroll",
-                    with_window(Some(json!({"direction": direction, "amount": amount, "ref": r#ref})), window),
+                    with_scope(Some(json!({"direction": direction, "amount": amount, "ref": r#ref})), scope),
                 )
                 .await
         }
-        Command::Text { target } => client.call("text", with_window(Some(target_params(&target)), window)).await,
+        Command::Text { target } => client.call("text", with_scope(Some(target_params(&target)), scope)).await,
         Command::Html { target } => {
             let params = target.map(|t| target_params(&t));
-            client.call("html", with_window(params, window)).await
+            client.call("html", with_scope(params, scope)).await
         }
-        Command::Value { target } => client.call("value", with_window(Some(target_params(&target)), window)).await,
-        Command::Attrs { target } => client.call("attrs", with_window(Some(target_params(&target)), window)).await,
-        Command::Eval { script } => handle_eval(client, script, window).await,
+        Command::Value { target } => client.call("value", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Attrs { target } => client.call("attrs", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Eval { script } => handle_eval(client, script, scope).await,
         Command::Drag { source, target, offset } => {
             let mut p = json!({"source": target_params(&source)});
             if let Some(t) = target {
@@ -561,7 +592,7 @@ async fn run_dom_command(client: &mut Client, command: Command, window: Option<&
             } else {
                 anyhow::bail!("drag requires either a target element or --offset");
             }
-            client.call("drag", with_window(Some(p), window)).await
+            client.call("drag", with_scope(Some(p), scope)).await
         }
         _ => anyhow::bail!("unexpected command in run_dom_command"),
     }
@@ -585,10 +616,10 @@ fn assert_fail(msg: &str) -> ! {
     std::process::exit(1)
 }
 
-async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Option<&str>) -> Result<serde_json::Value> {
+async fn run_assert_command(client: &mut Client, kind: AssertKind, scope: Scope<'_>) -> Result<serde_json::Value> {
     match kind {
         AssertKind::Text { target, expected } => {
-            let result = client.call("text", with_window(Some(target_params(&target)), window)).await?;
+            let result = client.call("text", with_scope(Some(target_params(&target)), scope)).await?;
             let actual = require_str(&result)?;
             if actual != expected {
                 assert_fail(&format!("expected text \"{expected}\", got \"{actual}\""));
@@ -596,7 +627,7 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Optio
         }
         AssertKind::Visible { target } => {
             let visible = require_bool_field(
-                &client.call("visible", with_window(Some(target_params(&target)), window)).await?,
+                &client.call("visible", with_scope(Some(target_params(&target)), scope)).await?,
                 "visible",
             )?;
             if !visible {
@@ -605,7 +636,7 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Optio
         }
         AssertKind::Hidden { target } => {
             let visible = require_bool_field(
-                &client.call("visible", with_window(Some(target_params(&target)), window)).await?,
+                &client.call("visible", with_scope(Some(target_params(&target)), scope)).await?,
                 "visible",
             )?;
             if visible {
@@ -613,14 +644,14 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Optio
             }
         }
         AssertKind::Value { target, expected } => {
-            let result = client.call("value", with_window(Some(target_params(&target)), window)).await?;
+            let result = client.call("value", with_scope(Some(target_params(&target)), scope)).await?;
             let actual = require_str(&result)?;
             if actual != expected {
                 assert_fail(&format!("expected value \"{expected}\", got \"{actual}\""));
             }
         }
         AssertKind::Count { selector, expected } => {
-            let result = client.call("count", with_window(Some(json!({"selector": selector})), window)).await?;
+            let result = client.call("count", with_scope(Some(json!({"selector": selector})), scope)).await?;
             let actual = result
                 .get("count")
                 .and_then(serde_json::Value::as_u64)
@@ -631,7 +662,7 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Optio
         }
         AssertKind::Checked { target } => {
             let checked = require_bool_field(
-                &client.call("checked", with_window(Some(target_params(&target)), window)).await?,
+                &client.call("checked", with_scope(Some(target_params(&target)), scope)).await?,
                 "checked",
             )?;
             if !checked {
@@ -639,14 +670,14 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, window: Optio
             }
         }
         AssertKind::Contains { target, expected } => {
-            let result = client.call("text", with_window(Some(target_params(&target)), window)).await?;
+            let result = client.call("text", with_scope(Some(target_params(&target)), scope)).await?;
             let actual = require_str(&result)?;
             if !actual.contains(&expected) {
                 assert_fail(&format!("text does not contain \"{expected}\", got \"{actual}\""));
             }
         }
         AssertKind::Url { expected } => {
-            let result = client.call("url", with_window(None, window)).await?;
+            let result = client.call("url", with_scope(None, scope)).await?;
             let actual = require_str(&result)?;
             if !actual.contains(&expected) {
                 assert_fail(&format!("URL does not contain \"{expected}\", got \"{actual}\""));
@@ -660,7 +691,12 @@ async fn run_ipc_command(
     client: &mut Client, command: &str, args: Option<&str>, window: Option<&str>,
 ) -> Result<serde_json::Value> {
     let parsed_args: Option<serde_json::Value> = args.map(serde_json::from_str).transpose()?;
-    client.call("ipc", with_window(Some(json!({"command": command, "args": parsed_args})), window)).await
+    client
+        .call(
+            "ipc",
+            with_scope(Some(json!({"command": command, "args": parsed_args})), Scope { window, ..Scope::default() }),
+        )
+        .await
 }
 
 async fn run_logs_command(
@@ -670,7 +706,7 @@ async fn run_logs_command(
         anyhow::bail!("follow mode must be handled before run_command");
     }
     if clear {
-        return client.call("console.clear", with_window(None, window)).await;
+        return client.call("console.clear", with_scope(None, Scope { window, ..Scope::default() })).await;
     }
     let mut params = serde_json::Map::new();
     if let Some(l) = level {
@@ -679,7 +715,12 @@ async fn run_logs_command(
     if let Some(n) = last {
         params.insert("last".into(), json!(n));
     }
-    client.call("console.getLogs", with_window(Some(serde_json::Value::Object(params)), window)).await
+    client
+        .call(
+            "console.getLogs",
+            with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() }),
+        )
+        .await
 }
 
 async fn run_network_command(
@@ -690,7 +731,7 @@ async fn run_network_command(
         anyhow::bail!("follow mode must be handled before run_command");
     }
     if clear {
-        return client.call("network.clear", with_window(None, window)).await;
+        return client.call("network.clear", with_scope(None, Scope { window, ..Scope::default() })).await;
     }
     let mut params = serde_json::Map::new();
     if let Some(f) = filter {
@@ -702,12 +743,17 @@ async fn run_network_command(
     if let Some(n) = last {
         params.insert("last".into(), json!(n));
     }
-    client.call("network.getRequests", with_window(Some(serde_json::Value::Object(params)), window)).await
+    client
+        .call(
+            "network.getRequests",
+            with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() }),
+        )
+        .await
 }
 
-async fn run_forms_command(client: &mut Client, args: FormsArgs, window: Option<&str>) -> Result<serde_json::Value> {
+async fn run_forms_command(client: &mut Client, args: FormsArgs, scope: Scope<'_>) -> Result<serde_json::Value> {
     let params = args.selector.map(|s| json!({"selector": s}));
-    client.call("forms.dump", with_window(params, window)).await
+    client.call("forms.dump", with_scope(params, scope)).await
 }
 
 async fn run_storage_command(
@@ -716,18 +762,39 @@ async fn run_storage_command(
     let session = args.session;
     match args.action {
         StorageAction::Get { key } => {
-            client.call("storage.get", with_window(Some(json!({"key": key, "session": session})), window)).await
+            client
+                .call(
+                    "storage.get",
+                    with_scope(Some(json!({"key": key, "session": session})), Scope { window, ..Scope::default() }),
+                )
+                .await
         }
         StorageAction::Set { key, value } => {
             client
-                .call("storage.set", with_window(Some(json!({"key": key, "value": value, "session": session})), window))
+                .call(
+                    "storage.set",
+                    with_scope(
+                        Some(json!({"key": key, "value": value, "session": session})),
+                        Scope { window, ..Scope::default() },
+                    ),
+                )
                 .await
         }
         StorageAction::List => {
-            client.call("storage.list", with_window(Some(json!({"session": session})), window)).await
+            client
+                .call(
+                    "storage.list",
+                    with_scope(Some(json!({"session": session})), Scope { window, ..Scope::default() }),
+                )
+                .await
         }
         StorageAction::Clear => {
-            client.call("storage.clear", with_window(Some(json!({"session": session})), window)).await
+            client
+                .call(
+                    "storage.clear",
+                    with_scope(Some(json!({"session": session})), Scope { window, ..Scope::default() }),
+                )
+                .await
         }
     }
 }
@@ -763,7 +830,7 @@ pub(crate) async fn run_drop_command(
 ) -> Result<serde_json::Value> {
     let mut p = target_params(target);
     p["files"] = json!(encode_files(&file)?);
-    client.call("drop", with_window(Some(p), window)).await
+    client.call("drop", with_scope(Some(p), Scope { window, ..Scope::default() })).await
 }
 
 pub(crate) async fn run_set_input_files_command(
@@ -772,7 +839,7 @@ pub(crate) async fn run_set_input_files_command(
     let mut p = target_params(target);
     // An empty list is meaningful here, unlike for `drop`: it deselects.
     p["files"] = json!(encode_files(&files)?);
-    client.call("setInputFiles", with_window(Some(p), window)).await
+    client.call("setInputFiles", with_scope(Some(p), Scope { window, ..Scope::default() })).await
 }
 
 /// Look up the operating-system window id for a Tauri webview label.
@@ -916,11 +983,11 @@ fn save_screenshot(result: &serde_json::Value, path: &std::path::Path) -> Result
     Ok(())
 }
 
-async fn run_record_command(client: &mut Client, action: RecordAction, window: Option<&str>) -> Result<Value> {
+async fn run_record_command(client: &mut Client, action: RecordAction, scope: Scope<'_>) -> Result<Value> {
     match action {
-        RecordAction::Start => client.call("record.start", with_window(None, window)).await,
+        RecordAction::Start => client.call("record.start", with_scope(None, scope)).await,
         RecordAction::Stop { output } => {
-            let result = client.call("record.stop", with_window(None, window)).await?;
+            let result = client.call("record.stop", with_scope(None, scope)).await?;
             let entries = result
                 .get("entries")
                 .and_then(|e| e.as_array())
@@ -934,7 +1001,7 @@ async fn run_record_command(client: &mut Client, action: RecordAction, window: O
                 "count": entries.len()
             }))
         }
-        RecordAction::Status => client.call("record.status", with_window(None, window)).await,
+        RecordAction::Status => client.call("record.status", with_scope(None, scope)).await,
     }
 }
 
@@ -1413,30 +1480,51 @@ mod tests {
         assert_eq!(mime_from_ext(std::path::Path::new("doc.PDF")), "application/pdf");
     }
 
-    #[test]
-    fn test_with_window_no_window_returns_params_unchanged() {
-        let params = Some(json!({"selector": "#btn"}));
-        let result = with_window(params.clone(), None);
-        assert_eq!(result, params);
+    fn window_scope(label: &str) -> Scope<'_> {
+        Scope { window: Some(label), frame: &[] }
     }
 
     #[test]
-    fn test_with_window_none_params_none_window_returns_none() {
-        let result = with_window(None, None);
-        assert_eq!(result, None);
+    fn an_empty_scope_leaves_params_untouched() {
+        assert_eq!(with_scope(None, Scope::default()), None);
+        let params = Some(json!({"selector": "#btn"}));
+        assert_eq!(with_scope(params.clone(), Scope::default()), params);
     }
 
     #[test]
-    fn test_with_window_injects_into_existing_object() {
+    fn a_window_is_injected_into_existing_params() {
         let params = Some(json!({"selector": "#btn"}));
-        let result = with_window(params, Some("settings"));
+        let result = with_scope(params, window_scope("settings"));
         assert_eq!(result, Some(json!({"selector": "#btn", "window": "settings"})));
     }
 
     #[test]
-    fn test_with_window_none_params_creates_object() {
-        let result = with_window(None, Some("main"));
-        assert_eq!(result, Some(json!({"window": "main"})));
+    fn a_window_alone_creates_the_params_object() {
+        assert_eq!(with_scope(None, window_scope("main")), Some(json!({"window": "main"})));
+    }
+
+    #[test]
+    fn a_frame_chain_travels_as_an_array_in_the_order_given() {
+        // Order is the nesting order, outermost first; reversing it would
+        // resolve a different document without any error to say so.
+        let frame = vec!["#outer".to_owned(), "#inner".to_owned()];
+        let result = with_scope(Some(json!({"selector": "#pay"})), Scope { window: None, frame: &frame });
+        assert_eq!(result, Some(json!({"selector": "#pay", "frame": ["#outer", "#inner"]})));
+    }
+
+    #[test]
+    fn a_window_and_a_frame_both_survive() {
+        let frame = vec!["#checkout".to_owned()];
+        let result = with_scope(None, Scope { window: Some("main"), frame: &frame });
+        assert_eq!(result, Some(json!({"window": "main", "frame": ["#checkout"]})));
+    }
+
+    #[test]
+    fn an_empty_frame_list_adds_no_key_at_all() {
+        // Sending `frame: []` would make the bridge resolve an empty chain
+        // rather than skip frame handling entirely.
+        let result = with_scope(Some(json!({"selector": "#a"})), window_scope("main"));
+        assert_eq!(result.expect("a window scope must produce params").get("frame"), None);
     }
 
     #[test]

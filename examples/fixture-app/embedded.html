@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Embedded pane</title>
+  </head>
+  <body>
+    <!-- Same ids as the top document on purpose: a frame-scoped locator that
+         quietly fell back to the main document would still find something, and
+         only differing content exposes it. -->
+    <h1 id="scope">inner</h1>
+    <button data-testid="scope-probe" id="pay" type="button">Pay</button>
+    <p id="pay-log">none</p>
+    <ul>
+      <li class="row">Inner row 1</li>
+      <li class="row">Inner row 2</li>
+      <li class="row">Inner row 3</li>
+    </ul>
+    <iframe id="nested" src="/nested.html" title="Nested pane"></iframe>
+    <script type="module">
+      const log = document.querySelector("#pay-log")
+      document.querySelector("#pay").addEventListener("click", () => {
+        log.textContent = "inner clicked"
+      })
+    </script>
+  </body>
+</html>

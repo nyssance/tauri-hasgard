@@ -855,3 +855,114 @@ test("dblclick is a click with clickCount 2, and keeps the other options", async
 
   expect(sent).toEqual([["click", { selector: "#cell", window: "main", modifiers: ["Alt"], clickCount: 2 }]])
 })
+
+// --- frameLocator -----------------------------------------------------------
+//
+// A frame is a document to search in, not an element to search under, so these
+// pin that the chain reaches every round trip a locator makes: the action, the
+// count, the wait, and the snapshot a role locator needs.
+
+function frameRecorder(elements: { ref: string; role: string; name?: string }[] = []) {
+  const rpc = new HasgardRpcClient("/unused")
+  const sent: [string, unknown][] = []
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    sent.push([method, params])
+    if (method === "snapshot" || method === "query") {
+      return { elements: elements.map((entry, depth) => ({ depth, ...entry })) }
+    }
+    if (method === "count") return { count: 2 }
+    return { ok: true }
+  })
+  return { rpc, sent }
+}
+
+test("a frame-scoped action carries the frame chain alongside the selector", async () => {
+  const { rpc, sent } = frameRecorder()
+
+  await new HasgardWindow(rpc, "main").frameLocator("#checkout").locator("#pay").click()
+
+  expect(sent).toEqual([["click", { selector: "#pay", window: "main", frame: ["#checkout"] }]])
+})
+
+test("nested frameLocator calls accumulate one selector per level, in order", async () => {
+  const { rpc, sent } = frameRecorder()
+
+  await new HasgardWindow(rpc, "main").frameLocator("#outer").frameLocator("#inner").locator("#field").fill("x")
+
+  expect(sent).toEqual([["fill", { selector: "#field", window: "main", frame: ["#outer", "#inner"], value: "x" }]])
+})
+
+test("an unscoped locator sends no frame key at all", async () => {
+  const { rpc, sent } = frameRecorder()
+
+  await new HasgardWindow(rpc, "main").locator("#pay").click()
+
+  expect(sent).toEqual([["click", { selector: "#pay", window: "main" }]])
+})
+
+test("count inside a frame counts in the frame document", async () => {
+  const { rpc, sent } = frameRecorder()
+
+  await expect(new HasgardWindow(rpc, "main").frameLocator("#list").locator(".row").count()).resolves.toBe(2)
+
+  expect(sent).toEqual([["count", { selector: ".row", window: "main", frame: ["#list"] }]])
+})
+
+test("waitFor inside a frame waits on the frame document", async () => {
+  const { rpc, sent } = frameRecorder()
+
+  await new HasgardWindow(rpc, "main")
+    .frameLocator("#list")
+    .locator(".row")
+    .waitFor({ state: "attached", timeoutMs: 100 })
+
+  expect(sent).toEqual([["wait", { selector: ".row", window: "main", frame: ["#list"], gone: false, timeout: 100 }]])
+})
+
+test("a role locator inside a frame snapshots the frame, not the top document", async () => {
+  const { rpc, sent } = frameRecorder([{ ref: "e1", role: "button", name: "Pay" }])
+
+  await new HasgardWindow(rpc, "main")
+    .frameLocator("#checkout")
+    .getByRole("button", { name: "Pay", exact: true })
+    .click()
+
+  expect(sent[0]).toEqual(["snapshot", { window: "main", frame: ["#checkout"] }])
+  // The action targets the resolved ref, which already identifies its document.
+  expect(sent[1]).toEqual(["click", { ref: "e1", window: "main", frame: ["#checkout"] }])
+})
+
+test("a text locator inside a frame queries the frame document", async () => {
+  const { rpc, sent } = frameRecorder([{ ref: "e1", role: "generic" }])
+
+  await new HasgardWindow(rpc, "main").frameLocator("#pane").getByText("Total").click()
+
+  expect(sent[0]).toEqual(["query", { by: "text", value: "Total", window: "main", frame: ["#pane"] }])
+})
+
+test("nth and filter preserve the frame chain", async () => {
+  const { rpc, sent } = frameRecorder([{ ref: "e1", role: "listitem" }])
+
+  await new HasgardWindow(rpc, "main").frameLocator("#list").locator(".row").nth(1).click()
+
+  expect(sent).toEqual([["click", { selector: ".row", index: 1, window: "main", frame: ["#list"] }]])
+})
+
+test("the chain is copied, so a later nested call cannot mutate an earlier locator", async () => {
+  const { rpc, sent } = frameRecorder()
+  const outer = new HasgardWindow(rpc, "main").frameLocator("#outer")
+  const locator = outer.locator("#field")
+  outer.frameLocator("#inner")
+
+  await locator.click()
+
+  expect(sent).toEqual([["click", { selector: "#field", window: "main", frame: ["#outer"] }]])
+})
+
+test("frameLocator.snapshot scopes to the frame", async () => {
+  const { rpc, sent } = frameRecorder([{ ref: "e1", role: "button" }])
+
+  await new HasgardWindow(rpc, "main").frameLocator("#pane").snapshot({ interactive: true })
+
+  expect(sent).toEqual([["snapshot", { window: "main", interactive: true, frame: ["#pane"] }]])
+})

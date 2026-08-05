@@ -18,8 +18,8 @@ use rmcp::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-    build_wait_params, client::Client, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
-    run_set_input_files_command, target_params, with_window,
+    Scope, build_wait_params, client::Client, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
+    run_set_input_files_command, target_params, with_scope,
 };
 
 #[derive(Debug, Clone)]
@@ -85,7 +85,7 @@ impl HasgardMcpServer {
 
     async fn call_app(&self, method: &'static str, params: Option<Value>, window: Option<String>) -> Result<Value> {
         let mut client = self.connect_client().await?;
-        client.call(method, with_window(params, window.as_deref())).await
+        client.call(method, with_scope(params, Scope { window: window.as_deref(), ..Scope::default() })).await
     }
 
     /// Look up the operating-system window id backing a Tauri webview label.
@@ -398,7 +398,9 @@ impl HasgardMcpServer {
         &self, method: &'static str, args: &JsonObject, window: Option<String>,
     ) -> Result<CallToolResult, McpError> {
         let target = required_string(args, "target")?;
-        self.call_app_tool(method, Some(target_params(&target)), window).await
+        let mut params = target_params(&target);
+        insert_optional_frame(&mut params, args)?;
+        self.call_app_tool(method, Some(params), window).await
     }
 
     async fn call_logs_tool(&self, args: &JsonObject, window: Option<String>) -> Result<CallToolResult, McpError> {
@@ -1290,6 +1292,37 @@ fn required_string_array(args: &JsonObject, name: &str) -> Result<Vec<String>, M
         .collect()
 }
 
+/// Read the optional frame chain shared by every element-targeting tool.
+///
+/// Rejected here rather than in the webview so a model gets a message about its
+/// own argument, and so an empty array never reaches the bridge as a chain of
+/// length zero.
+fn optional_frame(args: &JsonObject) -> Result<Option<Vec<String>>, McpError> {
+    let Some(raw) = args.get("frame") else { return Ok(None) };
+    let values = raw.as_array().ok_or_else(|| invalid_params("'frame' must be an array of CSS selectors"))?;
+    if values.is_empty() {
+        return Ok(None);
+    }
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|selector| !selector.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| invalid_params("'frame' must contain only non-empty CSS selectors"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn insert_optional_frame(params: &mut Value, args: &JsonObject) -> Result<(), McpError> {
+    if let Some(frame) = optional_frame(args)? {
+        params["frame"] = json!(frame);
+    }
+    Ok(())
+}
+
 const CLICK_MODIFIERS: [&str; 4] = ["Alt", "Control", "Meta", "Shift"];
 const CLICK_BUTTONS: [&str; 3] = ["left", "middle", "right"];
 
@@ -1329,6 +1362,8 @@ fn click_params_from_args(args: &JsonObject) -> Result<Value, McpError> {
         }
         params["clickCount"] = json!(count);
     }
+
+    insert_optional_frame(&mut params, args)?;
 
     if let Some(raw) = args.get("position") {
         let position = raw.as_object().ok_or_else(|| invalid_params("'position' must be an object"))?;
@@ -1371,7 +1406,20 @@ fn global_empty_schema() -> Arc<JsonObject> {
 }
 
 fn target_schema() -> Arc<JsonObject> {
-    object_schema(props([("target", string_prop("Element ref, CSS selector, or x,y coordinates."))]), &["target"])
+    object_schema(
+        props([
+            ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
+            (
+                "frame",
+                json!({
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Scope to a same-origin iframe: one CSS selector per nesting level, outermost first. Cross-origin frames are unreachable.",
+                }),
+            ),
+        ]),
+        &["target"],
+    )
 }
 
 fn click_schema() -> Arc<JsonObject> {
@@ -1394,6 +1442,14 @@ fn click_schema() -> Arc<JsonObject> {
                 ),
             ),
             ("clickCount", integer_prop("Presses in one gesture. 2 also raises a single dblclick.")),
+            (
+                "frame",
+                json!({
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Scope to a same-origin iframe: one CSS selector per nesting level, outermost first. Cross-origin frames are unreachable.",
+                }),
+            ),
             (
                 "position",
                 json!({
@@ -2235,26 +2291,27 @@ mod tests {
 mod click_args_tests {
     use super::*;
 
-    fn args(value: Value) -> JsonObject {
+    fn args(value: &Value) -> JsonObject {
         value.as_object().cloned().expect("test args must be an object")
     }
 
     #[test]
     fn a_bare_target_sends_no_option_keys() {
-        let params = click_params_from_args(&args(json!({"target": "#save"}))).unwrap();
+        let params =
+            click_params_from_args(&args(&json!({"target": "#save"}))).expect("valid arguments must build params");
         assert_eq!(params, json!({"selector": "#save"}));
     }
 
     #[test]
     fn every_option_reaches_the_bridge_under_its_wire_name() {
-        let params = click_params_from_args(&args(json!({
+        let params = click_params_from_args(&args(&json!({
             "target": "@e3",
             "modifiers": ["Shift", "Meta"],
             "button": "right",
             "clickCount": 2,
             "position": {"x": 3, "y": 4},
         })))
-        .unwrap();
+        .expect("valid arguments must build params");
         assert_eq!(
             params,
             json!({
@@ -2269,7 +2326,8 @@ mod click_args_tests {
 
     #[test]
     fn an_unknown_modifier_is_rejected_and_the_message_names_the_accepted_set() {
-        let error = click_params_from_args(&args(json!({"target": "#a", "modifiers": ["Cmd"]}))).unwrap_err();
+        let error = click_params_from_args(&args(&json!({"target": "#a", "modifiers": ["Cmd"]})))
+            .expect_err("invalid arguments must be rejected");
         let message = format!("{error:?}");
         assert!(message.contains("Cmd"), "must quote the bad value: {message}");
         assert!(message.contains("Shift"), "must list the accepted set: {message}");
@@ -2277,45 +2335,49 @@ mod click_args_tests {
 
     #[test]
     fn an_unknown_button_is_rejected_rather_than_silently_clicking_left() {
-        let error = click_params_from_args(&args(json!({"target": "#a", "button": "primary"}))).unwrap_err();
+        let error = click_params_from_args(&args(&json!({"target": "#a", "button": "primary"})))
+            .expect_err("invalid arguments must be rejected");
         assert!(format!("{error:?}").contains("primary"));
     }
 
     #[test]
     fn a_zero_click_count_is_rejected_rather_than_producing_no_press_at_all() {
-        assert!(click_params_from_args(&args(json!({"target": "#a", "clickCount": 0}))).is_err());
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "clickCount": 0}))).is_err());
     }
 
     #[test]
     fn a_non_array_modifiers_value_is_rejected() {
-        assert!(click_params_from_args(&args(json!({"target": "#a", "modifiers": "Shift"}))).is_err());
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "modifiers": "Shift"}))).is_err());
     }
 
     #[test]
     fn a_non_string_modifier_is_rejected() {
-        assert!(click_params_from_args(&args(json!({"target": "#a", "modifiers": [1]}))).is_err());
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "modifiers": [1]}))).is_err());
     }
 
     #[test]
     fn a_half_specified_position_is_rejected_rather_than_defaulting_the_missing_axis() {
-        let error = click_params_from_args(&args(json!({"target": "#a", "position": {"x": 10}}))).unwrap_err();
+        let error = click_params_from_args(&args(&json!({"target": "#a", "position": {"x": 10}})))
+            .expect_err("invalid arguments must be rejected");
         assert!(format!("{error:?}").contains("position.y"));
     }
 
     #[test]
     fn a_non_object_position_is_rejected() {
-        assert!(click_params_from_args(&args(json!({"target": "#a", "position": [1, 2]}))).is_err());
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "position": [1, 2]}))).is_err());
     }
 
     #[test]
     fn an_empty_modifier_array_is_omitted_rather_than_sent_as_an_empty_list() {
-        let params = click_params_from_args(&args(json!({"target": "#a", "modifiers": []}))).unwrap();
+        let params = click_params_from_args(&args(&json!({"target": "#a", "modifiers": []})))
+            .expect("valid arguments must build params");
         assert_eq!(params.get("modifiers"), None);
     }
 
     #[test]
     fn a_zero_position_survives_rather_than_being_dropped_as_falsy() {
-        let params = click_params_from_args(&args(json!({"target": "#a", "position": {"x": 0, "y": 0}}))).unwrap();
+        let params = click_params_from_args(&args(&json!({"target": "#a", "position": {"x": 0, "y": 0}})))
+            .expect("valid arguments must build params");
         assert_eq!(params["position"], json!({"x": 0.0, "y": 0.0}));
     }
 
@@ -2324,8 +2386,63 @@ mod click_args_tests {
         // A schema that allows a value the handler rejects sends models down a
         // path that always fails; the two lists must not drift.
         let schema = click_schema();
-        let properties = schema["properties"].as_object().unwrap();
+        let properties = schema["properties"].as_object().expect("valid arguments must build params");
         assert_eq!(properties["modifiers"]["items"]["enum"], json!(CLICK_MODIFIERS));
         assert_eq!(properties["button"]["enum"], json!(CLICK_BUTTONS));
+    }
+}
+
+/// The frame chain shared by every element-targeting MCP tool.
+#[cfg(test)]
+mod frame_args_tests {
+    use super::*;
+
+    fn args(value: &Value) -> JsonObject {
+        value.as_object().cloned().expect("test args must be an object")
+    }
+
+    #[test]
+    fn a_frame_chain_reaches_the_bridge_in_the_order_given() {
+        let params = click_params_from_args(&args(&json!({
+            "target": "#pay",
+            "frame": ["#outer", "#inner"],
+        })))
+        .expect("valid arguments must build params");
+        assert_eq!(params["frame"], json!(["#outer", "#inner"]));
+    }
+
+    #[test]
+    fn omitting_frame_sends_no_key() {
+        let params =
+            click_params_from_args(&args(&json!({"target": "#pay"}))).expect("valid arguments must build params");
+        assert_eq!(params.get("frame"), None);
+    }
+
+    #[test]
+    fn an_empty_frame_array_is_treated_as_absent() {
+        // Forwarding `[]` would make the bridge walk a chain of length zero
+        // rather than skip frame resolution entirely.
+        let params = click_params_from_args(&args(&json!({"target": "#pay", "frame": []})))
+            .expect("valid arguments must build params");
+        assert_eq!(params.get("frame"), None);
+    }
+
+    #[test]
+    fn a_non_array_frame_is_rejected() {
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "frame": "#f"}))).is_err());
+    }
+
+    #[test]
+    fn a_non_string_or_empty_selector_is_rejected() {
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "frame": [1]}))).is_err());
+        assert!(click_params_from_args(&args(&json!({"target": "#a", "frame": [""]}))).is_err());
+    }
+
+    #[test]
+    fn the_target_schema_advertises_frame_so_models_know_it_exists() {
+        let schema = target_schema();
+        let properties = schema["properties"].as_object().expect("valid arguments must build params");
+        assert_eq!(properties["frame"]["type"], json!("array"));
+        assert_eq!(properties["frame"]["items"]["type"], json!("string"));
     }
 }

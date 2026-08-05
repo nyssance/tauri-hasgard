@@ -28,6 +28,11 @@ export interface SnapshotOptions {
   interactive?: boolean
   selector?: string
   depth?: number
+  /**
+   * Take the snapshot inside this chain of same-origin iframes, one CSS
+   * selector per nesting level, instead of in the top document.
+   */
+  frame?: string[]
 }
 
 export interface WindowInfo {

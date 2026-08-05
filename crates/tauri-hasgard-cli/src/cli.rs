@@ -16,6 +16,14 @@ pub(crate) struct Cli {
     #[arg(long, env = "TAURI_HASGARD_WINDOW", global = true)]
     pub window: Option<String>,
 
+    /// Scope element operations to a same-origin iframe, by CSS selector.
+    ///
+    /// Repeat to descend into nested frames, outermost first. Cross-origin
+    /// frames are unreachable from page script and report that rather than a
+    /// missing element.
+    #[arg(long = "frame", value_name = "SELECTOR", global = true)]
+    pub frame: Vec<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -846,30 +854,30 @@ mod position_tests {
 
     #[test]
     fn parses_an_integer_pair() {
-        assert_eq!(parse_position("10,5").unwrap(), (10.0, 5.0));
+        assert_eq!(parse_position("10,5").expect("a valid pair must parse"), (10.0, 5.0));
     }
 
     #[test]
     fn parses_negative_and_fractional_offsets() {
         // Negative offsets are meaningful: they aim outside the box, which is how
         // you test that a handler ignores a press on its margin.
-        assert_eq!(parse_position("-3,2.5").unwrap(), (-3.0, 2.5));
+        assert_eq!(parse_position("-3,2.5").expect("a valid pair must parse"), (-3.0, 2.5));
     }
 
     #[test]
     fn tolerates_spaces_around_the_comma() {
-        assert_eq!(parse_position(" 10 , 5 ").unwrap(), (10.0, 5.0));
+        assert_eq!(parse_position(" 10 , 5 ").expect("a valid pair must parse"), (10.0, 5.0));
     }
 
     #[test]
     fn rejects_a_missing_comma_by_naming_the_expected_form() {
-        let error = parse_position("10").unwrap_err();
+        let error = parse_position("10").expect_err("a missing comma must fail");
         assert!(error.contains("X,Y"), "unhelpful message: {error}");
     }
 
     #[test]
     fn rejects_a_non_numeric_axis_rather_than_defaulting_it_to_zero() {
-        assert!(parse_position("a,5").unwrap_err().contains("x offset"));
-        assert!(parse_position("10,b").unwrap_err().contains("y offset"));
+        assert!(parse_position("a,5").expect_err("a non-numeric x must fail").contains("x offset"));
+        assert!(parse_position("10,b").expect_err("a non-numeric y must fail").contains("y offset"));
     }
 }

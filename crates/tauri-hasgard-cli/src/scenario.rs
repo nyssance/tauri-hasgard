@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::client::Client;
-use crate::{build_wait_params, target_params, with_window};
+use crate::{Scope, build_wait_params, target_params, with_scope};
 
 // ── TOML schema ──────────────────────────────────────────────────────────────
 
@@ -190,56 +190,56 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
     match step.action.as_str() {
         "click" => {
             let t = require_target(step)?;
-            client.call("click", with_window(Some(target_params(t)), window)).await
+            client.call("click", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await
         }
         "fill" => {
             let t = require_target(step)?;
             let value = step.value.as_deref().unwrap_or("");
             let mut p = target_params(t);
             p["value"] = json!(value);
-            client.call("fill", with_window(Some(p), window)).await
+            client.call("fill", with_scope(Some(p), Scope { window, ..Scope::default() })).await
         }
         "type" => {
             let t = require_target(step)?;
             let text = step.text.as_deref().unwrap_or("");
             let mut p = target_params(t);
             p["text"] = json!(text);
-            client.call("type", with_window(Some(p), window)).await
+            client.call("type", with_scope(Some(p), Scope { window, ..Scope::default() })).await
         }
         "press" => {
             let key = step.key.as_deref().ok_or_else(|| anyhow::anyhow!("press step requires 'key'"))?;
-            client.call("press", with_window(Some(json!({"key": key})), window)).await
+            client.call("press", with_scope(Some(json!({"key": key})), Scope { window, ..Scope::default() })).await
         }
         "select" => {
             let t = require_target(step)?;
             let value = step.value.as_deref().unwrap_or("");
             let mut p = target_params(t);
             p["value"] = json!(value);
-            client.call("select", with_window(Some(p), window)).await
+            client.call("select", with_scope(Some(p), Scope { window, ..Scope::default() })).await
         }
         "check" => {
             let t = require_target(step)?;
-            client.call("check", with_window(Some(target_params(t)), window)).await
+            client.call("check", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await
         }
         "scroll" => {
             let direction = step.direction.as_deref().unwrap_or("down");
             client
                 .call(
                     "scroll",
-                    with_window(
+                    with_scope(
                         Some(json!({
                             "direction": direction,
                             "amount": step.amount,
                             "ref": step.step_ref,
                         })),
-                        window,
+                        Scope { window, ..Scope::default() },
                     ),
                 )
                 .await
         }
         "navigate" => {
             let url = step.url.as_deref().ok_or_else(|| anyhow::anyhow!("navigate step requires 'url'"))?;
-            client.call("navigate", with_window(Some(json!({"url": url})), window)).await
+            client.call("navigate", with_scope(Some(json!({"url": url})), Scope { window, ..Scope::default() })).await
         }
         "wait" => {
             let timeout = timeout_ms.unwrap_or(10_000);
@@ -257,7 +257,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             let target = step.target.as_deref().or(target_from_ref.as_deref());
             let params =
                 build_wait_params(target, step.selector.as_deref(), None, None, step.gone.unwrap_or(false), timeout);
-            client.call("wait", with_window(Some(params), window)).await
+            client.call("wait", with_scope(Some(params), Scope { window, ..Scope::default() })).await
         }
         "watch" => {
             let timeout = timeout_ms.unwrap_or(10_000);
@@ -272,15 +272,21 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             if let Some(sel) = &step.selector {
                 params.insert("selector".into(), json!(sel));
             }
-            client.call("watch", with_window(Some(Value::Object(params)), window)).await
+            client.call("watch", with_scope(Some(Value::Object(params)), Scope { window, ..Scope::default() })).await
         }
         "eval" => {
             let script = step.script.as_deref().ok_or_else(|| anyhow::anyhow!("eval step requires 'script'"))?;
-            client.call("eval", with_window(Some(json!({"script": script})), window)).await
+            client.call("eval", with_scope(Some(json!({"script": script})), Scope { window, ..Scope::default() })).await
         }
         "screenshot" => {
             let result = client
-                .call("screenshot", with_window(Some(json!({"path": step.path, "selector": step.selector})), window))
+                .call(
+                    "screenshot",
+                    with_scope(
+                        Some(json!({"path": step.path, "selector": step.selector})),
+                        Scope { window, ..Scope::default() },
+                    ),
+                )
                 .await?;
             if let Some(path) = &step.path {
                 save_screenshot_result(&result, path)?;
@@ -291,7 +297,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             let t = require_target(step)?;
             let expected =
                 step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-text requires 'expected'"))?;
-            let result = client.call("text", with_window(Some(target_params(t)), window)).await?;
+            let result =
+                client.call("text", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await?;
             let actual = result.as_str().unwrap_or_default();
             anyhow::ensure!(actual == expected, "expected text {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
@@ -299,21 +306,25 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         "assert-exists" => {
             let t = require_target(step)?;
             client
-                .call("visible", with_window(Some(target_params(t)), window))
+                .call("visible", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() }))
                 .await
                 .with_context(|| format!("element '{t}' was not found in the DOM"))?;
             Ok(json!({"ok": true}))
         }
         "assert-visible" => {
             let t = require_target(step)?;
-            let result = client.call("visible", with_window(Some(target_params(t)), window)).await?;
+            let result = client
+                .call("visible", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() }))
+                .await?;
             let visible = result.get("visible").and_then(Value::as_bool).unwrap_or(false);
             anyhow::ensure!(visible, "element is not visible");
             Ok(json!({"ok": true}))
         }
         "assert-hidden" => {
             let t = require_target(step)?;
-            let result = client.call("visible", with_window(Some(target_params(t)), window)).await?;
+            let result = client
+                .call("visible", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() }))
+                .await?;
             let visible = result.get("visible").and_then(Value::as_bool).unwrap_or(true);
             anyhow::ensure!(!visible, "element is visible");
             Ok(json!({"ok": true}))
@@ -322,14 +333,15 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             let t = require_target(step)?;
             let expected =
                 step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-value requires 'expected'"))?;
-            let result = client.call("value", with_window(Some(target_params(t)), window)).await?;
+            let result =
+                client.call("value", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await?;
             let actual = result.as_str().unwrap_or_default();
             anyhow::ensure!(actual == expected, "expected value {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
         "assert-url" => {
             let expected = step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-url requires 'expected'"))?;
-            let result = client.call("url", with_window(None, window)).await?;
+            let result = client.call("url", with_scope(None, Scope { window, ..Scope::default() })).await?;
             let actual = result.as_str().unwrap_or_default();
             anyhow::ensure!(actual.contains(expected), "URL does not contain {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
@@ -355,7 +367,7 @@ async fn take_failure_screenshot(client: &mut Client, step_name: &str, window: O
     let filename = format!("{safe_name}-{ts}.png");
     let path = dir.join(filename.as_str());
 
-    let result = client.call("screenshot", with_window(Some(json!({})), window)).await?;
+    let result = client.call("screenshot", with_scope(Some(json!({})), Scope { window, ..Scope::default() })).await?;
     save_screenshot_result(&result, &path)?;
     let arrow = crate::style::dim("failure screenshot →");
     eprintln!("  {arrow} {}", path.display());

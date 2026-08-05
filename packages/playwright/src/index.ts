@@ -57,4 +57,12 @@ export type {
   WindowInfo,
   WindowState
 } from "./types.js"
-export { byPoint, byRef, bySelector, HasgardApplication, HasgardLocator, HasgardWindow } from "./window.js"
+export {
+  byPoint,
+  byRef,
+  bySelector,
+  HasgardApplication,
+  HasgardFrameLocator,
+  HasgardLocator,
+  HasgardWindow
+} from "./window.js"

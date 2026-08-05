@@ -393,6 +393,18 @@ export class HasgardWindow {
     return new HasgardLocator(this, { kind: "query", by: "testid", value: testId, query: {} })
   }
 
+  /**
+   * Scope locators to a same-origin `<iframe>`.
+   *
+   * Cross-origin frames are out of reach: the same-origin policy binds injected
+   * script exactly as it binds the page's own, so no bridge can see into a
+   * third-party payment or OAuth frame. Those raise an error naming the origin
+   * problem rather than reporting a missing element.
+   */
+  frameLocator(selector: string): HasgardFrameLocator {
+    return new HasgardFrameLocator(this, [selector])
+  }
+
   async snapshot(options: SnapshotOptions = {}): Promise<Snapshot> {
     const raw = expectRecord(
       await this.rpc.call("snapshot", withWindow(this.label, options as Record<string, JsonValue>)),
@@ -689,7 +701,70 @@ type LocatorQuery = (
   | { kind: "selector"; selector: string }
   | { kind: "role"; role: string; query: RoleQuery }
   | { kind: "query"; by: QueryDimension; value: string; query: TextQuery }
-) & { index?: number; filters?: FilterOptions[] }
+) & { index?: number; filters?: FilterOptions[]; frame?: string[] }
+
+/**
+ * The locator factories of a window, scoped to a chain of same-origin iframes.
+ *
+ * Mirrors the window's own factories rather than wrapping a locator, because a
+ * frame is a document to search in, not an element to search under: `#pay`
+ * inside the frame is not a descendant of `#pay` outside it.
+ */
+export class HasgardFrameLocator {
+  private readonly windowRef: HasgardWindow
+  private readonly frame: string[]
+
+  constructor(window: HasgardWindow, frame: string[]) {
+    this.windowRef = window
+    this.frame = frame
+  }
+
+  /** Descend into a frame nested inside this one. */
+  frameLocator(selector: string): HasgardFrameLocator {
+    return new HasgardFrameLocator(this.windowRef, [...this.frame, selector])
+  }
+
+  locator(selector: string): HasgardLocator {
+    return new HasgardLocator(this.windowRef, { kind: "selector", selector, frame: [...this.frame] })
+  }
+
+  getByRole(role: string, query: RoleQuery = {}): HasgardLocator {
+    return new HasgardLocator(this.windowRef, { kind: "role", role, query, frame: [...this.frame] })
+  }
+
+  getByText(text: string, query: TextQuery = {}): HasgardLocator {
+    return this.byDimension("text", text, query)
+  }
+
+  getByLabel(text: string, query: TextQuery = {}): HasgardLocator {
+    return this.byDimension("label", text, query)
+  }
+
+  getByPlaceholder(text: string, query: TextQuery = {}): HasgardLocator {
+    return this.byDimension("placeholder", text, query)
+  }
+
+  getByAltText(text: string, query: TextQuery = {}): HasgardLocator {
+    return this.byDimension("alt", text, query)
+  }
+
+  getByTitle(text: string, query: TextQuery = {}): HasgardLocator {
+    return this.byDimension("title", text, query)
+  }
+
+  getByTestId(testId: string): HasgardLocator {
+    return this.byDimension("testid", testId, {})
+  }
+
+  /** Snapshot the frame's own document rather than the top one. */
+  async snapshot(options: SnapshotOptions = {}): Promise<Snapshot> {
+    return this.windowRef.snapshot({ ...options, frame: [...this.frame] })
+  }
+
+  private byDimension(by: QueryDimension, value: string, query: TextQuery): HasgardLocator {
+    return new HasgardLocator(this.windowRef, { kind: "query", by, value, query, frame: [...this.frame] })
+  }
+}
 
 export class HasgardLocator {
   readonly window: HasgardWindow
@@ -709,15 +784,15 @@ export class HasgardLocator {
    * the wrong event fails here rather than in front of a user.
    */
   async click(options: ClickOptions = {}): Promise<void> {
-    await this.withTarget(target => this.window.call("click", { ...targetParams(target), ...clickParams(options) }))
+    await this.withTarget(target => this.window.call("click", { ...this.scoped(target), ...clickParams(options) }))
   }
 
   async fill(value: string): Promise<void> {
-    await this.withTarget(target => this.window.call("fill", { ...targetParams(target), value }))
+    await this.withTarget(target => this.window.call("fill", { ...this.scoped(target), value }))
   }
 
   async type(text: string): Promise<void> {
-    await this.withTarget(target => this.window.call("type", { ...targetParams(target), text }))
+    await this.withTarget(target => this.window.call("type", { ...this.scoped(target), text }))
   }
 
   /** Empty the control, firing `input` and `change` as `fill` does. */
@@ -736,7 +811,7 @@ export class HasgardLocator {
     const payloads = await readFileInputs(files)
     await this.withTarget(target =>
       this.window.call("setInputFiles", {
-        ...targetParams(target),
+        ...this.scoped(target),
         files: payloads as unknown as JsonValue
       })
     )
@@ -752,7 +827,7 @@ export class HasgardLocator {
   async wheel(deltaX: number, deltaY: number): Promise<boolean> {
     return this.withTarget(async target => {
       const value = expectRecord(
-        await this.window.call("wheel", { ...targetParams(target), deltaX, deltaY }),
+        await this.window.call("wheel", { ...this.scoped(target), deltaX, deltaY }),
         "wheel result"
       )
       return expectBoolean(value.defaultPrevented, "wheel.defaultPrevented")
@@ -760,26 +835,26 @@ export class HasgardLocator {
   }
 
   async selectOption(value: string): Promise<void> {
-    await this.withTarget(target => this.window.call("select", { ...targetParams(target), value }))
+    await this.withTarget(target => this.window.call("select", { ...this.scoped(target), value }))
   }
 
   /** Drive the checkbox to checked. A no-op when it is already checked. */
   async check(): Promise<void> {
-    await this.withTarget(target => this.window.call("check", { ...targetParams(target), checked: true }))
+    await this.withTarget(target => this.window.call("check", { ...this.scoped(target), checked: true }))
   }
 
   /** Drive the checkbox to unchecked. A no-op when it is already unchecked. */
   async uncheck(): Promise<void> {
-    await this.withTarget(target => this.window.call("check", { ...targetParams(target), checked: false }))
+    await this.withTarget(target => this.window.call("check", { ...this.scoped(target), checked: false }))
   }
 
   /** Flip the checkbox, whatever its current state. */
   async toggle(): Promise<void> {
-    await this.withTarget(target => this.window.call("check", targetParams(target)))
+    await this.withTarget(target => this.window.call("check", this.scoped(target)))
   }
 
   async hover(): Promise<void> {
-    await this.withTarget(target => this.window.call("hover", targetParams(target)))
+    await this.withTarget(target => this.window.call("hover", this.scoped(target)))
   }
 
   /** Shorthand for `click({ clickCount: 2 })`; other options still apply. */
@@ -788,23 +863,23 @@ export class HasgardLocator {
   }
 
   async focus(): Promise<void> {
-    await this.withTarget(target => this.window.call("focus", targetParams(target)))
+    await this.withTarget(target => this.window.call("focus", this.scoped(target)))
   }
 
   async blur(): Promise<void> {
-    await this.withTarget(target => this.window.call("blur", targetParams(target)))
+    await this.withTarget(target => this.window.call("blur", this.scoped(target)))
   }
 
   /** Scroll this element's own scrollport. */
   async scrollBy(options: ScrollOptions): Promise<void> {
     await this.withTarget(target =>
-      this.window.call("scroll", { ...targetParams(target), ...(options as unknown as Record<string, JsonValue>) })
+      this.window.call("scroll", { ...this.scoped(target), ...(options as unknown as Record<string, JsonValue>) })
     )
   }
 
   async boundingBox(): Promise<BoundingBox> {
     return this.withTarget(async target => {
-      const value = expectRecord(await this.window.call("boundingBox", targetParams(target)), "boundingBox result")
+      const value = expectRecord(await this.window.call("boundingBox", this.scoped(target)), "boundingBox result")
       return {
         x: expectNumber(value.x, "boundingBox.x"),
         y: expectNumber(value.y, "boundingBox.y"),
@@ -816,7 +891,7 @@ export class HasgardLocator {
 
   async isDisabled(): Promise<boolean> {
     return this.withTarget(async target => {
-      const value = expectRecord(await this.window.call("disabled", targetParams(target)), "disabled result")
+      const value = expectRecord(await this.window.call("disabled", this.scoped(target)), "disabled result")
       return expectBoolean(value.disabled, "disabled.disabled")
     })
   }
@@ -827,19 +902,19 @@ export class HasgardLocator {
 
   async textContent(): Promise<string> {
     return this.withTarget(async target =>
-      expectString(await this.window.call("text", targetParams(target)), "text result")
+      expectString(await this.window.call("text", this.scoped(target)), "text result")
     )
   }
 
   async inputValue(): Promise<string> {
     return this.withTarget(async target =>
-      expectString(await this.window.call("value", targetParams(target)), "value result")
+      expectString(await this.window.call("value", this.scoped(target)), "value result")
     )
   }
 
   async innerHTML(): Promise<string> {
     return this.withTarget(async target =>
-      expectString(await this.window.call("html", targetParams(target)), "html result")
+      expectString(await this.window.call("html", this.scoped(target)), "html result")
     )
   }
 
@@ -866,7 +941,7 @@ export class HasgardLocator {
   /** Drag this element by a pixel offset from its centre. */
   async dragBy(offset: DragOffset): Promise<void> {
     await this.withTarget(target =>
-      this.window.call("drag", { source: targetParams(target), offset: { x: offset.x, y: offset.y } })
+      this.window.call("drag", { source: this.scoped(target), offset: { x: offset.x, y: offset.y } })
     )
   }
 
@@ -874,7 +949,7 @@ export class HasgardLocator {
   async dropFiles(files: DropFile[]): Promise<void> {
     await this.withTarget(target =>
       this.window.call("drop", {
-        ...targetParams(target),
+        ...this.scoped(target),
         files: files as unknown as JsonValue
       })
     )
@@ -882,7 +957,7 @@ export class HasgardLocator {
 
   async attributes(): Promise<Record<string, string>> {
     return this.withTarget(async target => {
-      const value = expectRecord(await this.window.call("attrs", targetParams(target)), "attrs result")
+      const value = expectRecord(await this.window.call("attrs", this.scoped(target)), "attrs result")
       return Object.fromEntries(
         Object.entries(value).map(([name, attr]) => [name, expectString(attr, `attribute ${name}`)])
       )
@@ -891,14 +966,14 @@ export class HasgardLocator {
 
   async isVisible(): Promise<boolean> {
     return this.withTarget(async target => {
-      const value = expectRecord(await this.window.call("visible", targetParams(target)), "visible result")
+      const value = expectRecord(await this.window.call("visible", this.scoped(target)), "visible result")
       return expectBoolean(value.visible, "visible.visible")
     })
   }
 
   async isChecked(): Promise<boolean> {
     return this.withTarget(async target => {
-      const value = expectRecord(await this.window.call("checked", targetParams(target)), "checked result")
+      const value = expectRecord(await this.window.call("checked", this.scoped(target)), "checked result")
       return expectBoolean(value.checked, "checked.checked")
     })
   }
@@ -909,7 +984,10 @@ export class HasgardLocator {
     const total =
       this.query.kind === "selector" && !this.query.filters?.length
         ? expectNumber(
-            expectRecord(await this.window.call("count", { selector: this.query.selector }), "count result").count,
+            expectRecord(
+              await this.window.call("count", { selector: this.query.selector, ...this.frameParams() }),
+              "count result"
+            ).count,
             "count.count"
           )
         : (await this.resolveAll()).length
@@ -927,7 +1005,8 @@ export class HasgardLocator {
       await this.window.call("wait", {
         selector: this.query.selector,
         gone: options.state === "detached",
-        timeout: options.timeoutMs
+        timeout: options.timeoutMs,
+        ...this.frameParams()
       })
       return
     }
@@ -999,6 +1078,21 @@ export class HasgardLocator {
     return byRef(elements[0]!.ref)
   }
 
+  /**
+   * Serialize a target together with the frame chain this locator lives in.
+   *
+   * A ref carries its own document, so the bridge ignores `frame` for one; the
+   * chain still travels so that a selector or coordinate target -- which the
+   * bridge must resolve itself -- lands in the right document.
+   */
+  private scoped(target: HasgardTarget): Record<string, JsonValue> {
+    return { ...targetParams(target), ...this.frameParams() }
+  }
+
+  private frameParams(): Record<string, JsonValue> {
+    return this.query.frame ? { frame: [...this.query.frame] } : {}
+  }
+
   private async withTarget<T>(operation: (target: HasgardTarget) => Promise<T>): Promise<T> {
     return this.window.runExclusive(async () => operation(await this.resolveUnique()))
   }
@@ -1019,7 +1113,7 @@ export class HasgardLocator {
       return this.runQuery(params)
     }
     const query = this.query
-    const snapshot = await this.window.snapshot()
+    const snapshot = await this.window.snapshot(query.frame ? { frame: [...query.frame] } : {})
     return snapshot.elements.filter(element => {
       if (element.role !== query.role) return false
       const expected = query.query.name
@@ -1053,7 +1147,7 @@ export class HasgardLocator {
   }
 
   private async runQuery(params: Record<string, JsonValue>): Promise<SnapshotElement[]> {
-    return this.parseElements(await this.window.call("query", params), "query")
+    return this.parseElements(await this.window.call("query", { ...params, ...this.frameParams() }), "query")
   }
 
   private parseElements(raw: unknown, source: string): SnapshotElement[] {

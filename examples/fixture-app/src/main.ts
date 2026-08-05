@@ -159,6 +159,11 @@ hitPad.addEventListener("click", event => {
   hitLog.textContent = `${Math.round(event.clientX - rect.left)},${Math.round(event.clientY - rect.top)}`
 })
 
+const payLog = probe<HTMLParagraphElement>("#pay-log")
+probe<HTMLButtonElement>("#pay").addEventListener("click", () => {
+  payLog.textContent = "outer clicked"
+})
+
 const dialogAnswer = probe<HTMLParagraphElement>("#dialog-answer")
 probe<HTMLButtonElement>("#ask-confirm").addEventListener("click", () => {
   dialogAnswer.textContent = `confirm:${window.confirm("Delete the record?")}`

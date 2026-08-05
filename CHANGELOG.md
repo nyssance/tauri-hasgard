@@ -27,6 +27,20 @@ The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, a
   and `tauri-hasgard click --modifier Shift --button right --click-count 2
 --position 10,5`.
 
+- `window.frameLocator(selector)` scopes locators to a same-origin `<iframe>`,
+  and chains for nested frames. Everything inside a frame was previously
+  unreachable: the bridge only ever queried the top document, so an embedded
+  checkout, docs pane, or OAuth callback simply had no locator.
+
+  Cross-origin frames stay out of reach and say so. The same-origin policy binds
+  injected script exactly as it binds the page's own, so this is a wall rather
+  than a gap -- and reporting it beats the alternative of falling back to the
+  top document and answering "no element matches" for a page where the element
+  plainly exists.
+
+  On the CLI this is a global `--frame SELECTOR`, repeated per nesting level;
+  MCP element tools take a `frame` array.
+
 ### Changed
 
 - `dblclick` is now `click({ clickCount: 2 })` on every surface, one

@@ -98,6 +98,14 @@
         <div id="hit-pad"></div>
         <p id="hit-log">none</p>
 
+        <!-- A same-origin frame, itself hosting a nested one. The ids inside
+             deliberately repeat ids from this document, so a locator that fell
+             back to the top document would still resolve and go unnoticed. -->
+        <h1 id="scope">outer</h1>
+        <button id="pay" type="button">Pay</button>
+        <p id="pay-log">none</p>
+        <iframe id="pane" src="/embedded.html" title="Embedded pane"></iframe>
+
         <!-- Same tag, same class: reachable only by refining on text. -->
         <ul id="tickets">
           <li class="ticket">Ticket 1 — open</li>

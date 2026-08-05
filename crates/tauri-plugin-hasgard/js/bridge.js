@@ -470,15 +470,16 @@
     refCounter = 0;
     idMap.clear();
 
+    const doc = frameDocument(options && options.frame);
     var root;
     if (selector) {
       try {
-        root = document.querySelector(selector);
+        root = doc.querySelector(selector);
       } catch (e) {
         throw new Error("Invalid selector: " + selector);
       }
     } else {
-      root = document.body;
+      root = doc.body;
     }
     if (!root) return { elements: [] };
 
@@ -562,14 +563,14 @@
     return texts;
   }
 
-  function queryCandidates(by, value) {
-    if (by === "selector") return document.querySelectorAll(value);
-    if (by === "placeholder") return document.querySelectorAll("[placeholder]");
-    if (by === "testid") return document.querySelectorAll("[data-testid]");
-    if (by === "alt") return document.querySelectorAll("[alt]");
-    if (by === "title") return document.querySelectorAll("[title]");
-    if (by === "label") return document.querySelectorAll("input, textarea, select, button, meter, output, progress");
-    return document.querySelectorAll("*");
+  function queryCandidates(doc, by, value) {
+    if (by === "selector") return doc.querySelectorAll(value);
+    if (by === "placeholder") return doc.querySelectorAll("[placeholder]");
+    if (by === "testid") return doc.querySelectorAll("[data-testid]");
+    if (by === "alt") return doc.querySelectorAll("[alt]");
+    if (by === "title") return doc.querySelectorAll("[title]");
+    if (by === "label") return doc.querySelectorAll("input, textarea, select, button, meter, output, progress");
+    return doc.querySelectorAll("*");
   }
 
   function queryMatches(el, by, value, exact) {
@@ -598,7 +599,7 @@
     var exact = !!params.exact;
 
     var matched = [];
-    var candidates = queryCandidates(by, params.value);
+    var candidates = queryCandidates(frameDocument(params.frame), by, params.value);
     for (var i = 0; i < candidates.length; i++) {
       if (queryMatches(candidates[i], by, params.value, exact)) matched.push(candidates[i]);
     }
@@ -659,6 +660,43 @@
     };
   }
 
+  // Resolve the document a frame-scoped operation should query.
+  //
+  // `frame` is a chain of CSS selectors, one per nesting level, so an element
+  // two iframes deep names both hosts. Omitting it keeps the main document, so
+  // every existing caller is unaffected.
+  //
+  // A cross-origin frame exposes a null `contentDocument`. The same-origin
+  // policy binds injected script exactly as it binds the page's own, so this is
+  // a wall rather than a gap -- say so, instead of reporting the empty result
+  // that a silent fallback to the main document would produce.
+  function frameDocument(frame) {
+    if (frame == null) return document;
+    var chain = Array.isArray(frame) ? frame : [frame];
+    var doc = document;
+    for (var i = 0; i < chain.length; i++) {
+      var selector = chain[i];
+      if (typeof selector !== "string" || selector === "") {
+        throw new Error("frame must be a CSS selector, or an array of them for nested frames");
+      }
+      var host = doc.querySelector(selector);
+      if (!host) throw new Error("No frame matches selector: " + selector);
+      if (!("contentDocument" in host)) {
+        var tag = String(host.tagName || "?").toLowerCase();
+        throw new Error("Selector " + selector + " matched a <" + tag + ">, expected an <iframe> or <frame>");
+      }
+      var inner = host.contentDocument;
+      if (!inner) {
+        throw new Error(
+          "Frame " + selector + " is cross-origin, so its document cannot be reached from page script. " +
+          "Same-origin frames only."
+        );
+      }
+      doc = inner;
+    }
+    return doc;
+  }
+
   function resolve(ref) {
     return idMap.get(ref) || null;
   }
@@ -674,8 +712,8 @@
   // element. Counting first and indexing second would let the DOM change in
   // between and silently act on a different node. A negative index counts back
   // from the end, which is what makes `last()` a single call.
-  function selectorAt(selector, index) {
-    var matches = document.querySelectorAll(selector);
+  function selectorAt(doc, selector, index) {
+    var matches = doc.querySelectorAll(selector);
     var position = index < 0 ? matches.length + index : index;
     var el = matches[position];
     if (!el) {
@@ -687,20 +725,26 @@
   }
 
   function resolveTarget(params) {
+    // A ref already identifies one node, whichever document minted it, so the
+    // frame chain is not consulted -- re-resolving would only be a chance to
+    // disagree with the snapshot that produced the ref.
     if (params.ref) return requireEl(params.ref);
+    var doc = frameDocument(params.frame);
     if (params.selector) {
       if (params.index != null) {
         if (typeof params.index !== "number" || !Number.isInteger(params.index)) {
           throw new Error("index must be an integer");
         }
-        return selectorAt(params.selector, params.index);
+        return selectorAt(doc, params.selector, params.index);
       }
-      var el = document.querySelector(params.selector);
+      var el = doc.querySelector(params.selector);
       if (!el) throw new Error("No element matches selector: " + params.selector);
       return el;
     }
     if (params.x != null && params.y != null) {
-      var pointEl = document.elementFromPoint(params.x, params.y);
+      // Coordinates are relative to the frame's own viewport, matching how the
+      // frame's scripts see them.
+      var pointEl = doc.elementFromPoint(params.x, params.y);
       if (!pointEl) throw new Error("No element at (" + params.x + "," + params.y + ")");
       return pointEl;
     }
@@ -1256,7 +1300,7 @@
     if (!params || !params.selector) {
       throw new Error("count requires a selector parameter");
     }
-    return { count: document.querySelectorAll(params.selector).length };
+    return { count: frameDocument(params.frame).querySelectorAll(params.selector).length };
   }
 
   function checked(params) {
@@ -1490,7 +1534,7 @@
 
     return new Promise(function (res, rej) {
       function check() {
-        if (selector) return document.querySelector(selector);
+        if (selector) return frameDocument(options && options.frame).querySelector(selector);
         if (ref) return idMap.get(ref) || null;
         return null;
       }

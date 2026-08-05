@@ -429,3 +429,40 @@ test("position presses a point inside the element, not its centre", async ({ win
   await pad.click()
   await expect(window.locator("#hit-log").textContent()).resolves.toBe("100,50")
 })
+
+test("a frame-scoped locator acts inside the frame, not the top document", async ({ window }) => {
+  // Both documents carry #pay and #pay-log, so a locator that quietly fell back
+  // to the top document would still click something and still find a log.
+  const frame = window.frameLocator("#pane")
+
+  await frame.locator("#pay").click()
+
+  await expect(frame.locator("#pay-log").textContent()).resolves.toBe("inner clicked")
+  await expect(window.locator("#pay-log").textContent()).resolves.toBe("none")
+})
+
+test("the top document is unaffected by the presence of a frame", async ({ window }) => {
+  await window.locator("#pay").click()
+
+  await expect(window.locator("#pay-log").textContent()).resolves.toBe("outer clicked")
+})
+
+test("text and role locators read the frame's own document", async ({ window }) => {
+  const frame = window.frameLocator("#pane")
+
+  await expect(frame.locator("#scope").textContent()).resolves.toBe("inner")
+  await expect(window.locator("#scope").textContent()).resolves.toBe("outer")
+  await expect(frame.locator(".row").count()).resolves.toBe(3)
+})
+
+test("a nested frame chain reaches two levels down", async ({ window }) => {
+  const nested = window.frameLocator("#pane").frameLocator("#nested")
+
+  await expect(nested.locator("#scope").textContent()).resolves.toBe("nested")
+})
+
+test("a missing frame names the frame, not the element", async ({ window }) => {
+  await expect(window.frameLocator("#absent").locator("#pay").click()).rejects.toThrow(
+    /No frame matches selector: #absent/
+  )
+})
