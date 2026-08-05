@@ -50,7 +50,7 @@ cargo add tauri-plugin-hasgard
 
 ```toml
 [dependencies]
-tauri-plugin-hasgard = "0.2"
+tauri-plugin-hasgard = "0.3"
 ```
 
 ```rust

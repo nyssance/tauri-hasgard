@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+- Add `locator.click(options)` with `modifiers`, `button`, `clickCount`, and
+  `position`. A right press raises `contextmenu` and a middle press raises
+  `auxclick`; neither raises `click`, matching the platform. `dblclick` is now
+  `click({ clickCount: 2 })`, so `detail` escalates across the presses and one
+  `dblclick` closes the gesture.
+- Add `window.frameLocator(selector)`, chainable for nested frames. Same-origin
+  only: injected script is bound by the same-origin policy exactly as page
+  script is, and a cross-origin frame reports that rather than looking empty.
+- Add `window.routes.{fulfill, abort, list, clear}` to shape what the page's own
+  `fetch` and `XMLHttpRequest` receive. Rules are declarative rather than
+  per-request callbacks, since the bridge cannot await a handler while the page
+  sits inside `fetch`. Tauri's own IPC is never routed; without that exclusion a
+  `**` rule would swallow the bridge's replies and brick the session.
+- Fix the CLI aborting with `STATUS_STACK_OVERFLOW` on Windows, where the 1 MiB
+  main-thread stack could not build the clap command tree. Every invocation
+  crashed there, including the Scoop binaries.
+
 ## 0.2.1
 
 Supersedes `0.2.0`, which was tagged but never published.

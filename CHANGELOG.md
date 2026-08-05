@@ -7,7 +7,7 @@ bump may carry breaking changes.
 The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, and
 `@nyssance/tauri-hasgard` — share one version.
 
-## [Unreleased]
+## [0.3.0]
 
 ### Added
 
