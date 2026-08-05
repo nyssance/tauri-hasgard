@@ -24,8 +24,38 @@ use cli::{
 };
 use client::Client;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Windows gives a process's main thread a 1 MiB stack, against 8 MiB on Linux
+/// and macOS. Building this CLI's clap command tree overflows that, so
+/// `tauri-hasgard --version` -- and every other invocation -- aborted with
+/// `STATUS_STACK_OVERFLOW` (0xC00000FD) on Windows while working everywhere else.
+///
+/// The parse therefore runs on a thread this process sizes itself. Tokio's
+/// worker threads get the same size, since command handlers build the same
+/// structures. 16 MiB is reserved address space, not committed memory: pages are
+/// only backed once touched, so this costs nothing on platforms that never
+/// needed it.
+const STACK_SIZE: usize = 16 * 1024 * 1024;
+
+fn main() -> Result<()> {
+    std::thread::Builder::new()
+        .name("tauri-hasgard".to_owned())
+        .stack_size(STACK_SIZE)
+        .spawn(run)
+        .context("failed to start the main worker thread")?
+        .join()
+        .map_err(|_| anyhow::anyhow!("the main worker thread panicked"))?
+}
+
+fn run() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(STACK_SIZE)
+        .build()
+        .context("failed to build the async runtime")?
+        .block_on(run_cli())
+}
+
+async fn run_cli() -> Result<()> {
     let args = Cli::parse();
     let is_mcp = matches!(args.command, Command::Mcp);
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()

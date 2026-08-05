@@ -65,6 +65,18 @@ The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, a
   swallow the bridge's own replies and brick the session, including the call
   that would have removed the rule.
 
+### Fixed
+
+- The CLI aborted with `STATUS_STACK_OVERFLOW` on Windows. Building the clap
+  command tree overflowed the 1 MiB stack Windows gives a process's main thread,
+  against 8 MiB on Linux and macOS, so **every** invocation crashed there --
+  including `--version`, and including the binaries published through Scoop. The
+  parse now runs on a thread this process sizes itself, and Tokio's workers get
+  the same size since command handlers build the same structures.
+
+  Only CI's Windows runner can observe this; it cannot reproduce on a platform
+  whose main stack was never close to the limit.
+
 ### Changed
 
 - `dblclick` is now `click({ clickCount: 2 })` on every surface, one
