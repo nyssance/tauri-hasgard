@@ -250,7 +250,20 @@
     return new RegExp("^" + out + "$");
   }
 
+  // Tauri's own IPC is never routed.
+  //
+  // Every eval result travels back through `__TAURI_INTERNALS__.invoke`, which
+  // on several platforms is an HTTP request to the IPC endpoint. A catch-all
+  // rule would therefore swallow the bridge's own replies, and every later call
+  // -- including the one that removes the rule -- would die on an eval timeout
+  // with nothing to say why. Excluding it here is not a convenience: without it
+  // `route({ pattern: "**" })` bricks the session.
+  function isTauriIpc(url) {
+    return /^ipc:\/\//i.test(url) || /^https?:\/\/ipc\.localhost([:/?#]|$)/i.test(url);
+  }
+
   function matchRoute(url, method) {
+    if (isTauriIpc(url)) return null;
     for (var i = 0; i < _routes.length; i++) {
       var route = _routes[i];
       if (route.times != null && route.used >= route.times) continue;

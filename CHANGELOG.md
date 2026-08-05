@@ -59,7 +59,11 @@ The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, a
   must not go blind the moment that call is stubbed.
 
   Resources the webview loads itself -- the document, `<img src>`, stylesheets --
-  are not covered, since no page script is involved in fetching them.
+  are not covered, since no page script is involved in fetching them. Tauri's own
+  IPC is excluded deliberately: eval results travel back through
+  `__TAURI_INTERNALS__.invoke`, so without the exclusion a `**` rule would
+  swallow the bridge's own replies and brick the session, including the call
+  that would have removed the rule.
 
 ### Changed
 

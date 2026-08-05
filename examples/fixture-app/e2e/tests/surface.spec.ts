@@ -421,13 +421,24 @@ test("shift extends a selection the way a real multi-select list reads it", asyn
 
 test("position presses a point inside the element, not its centre", async ({ window }) => {
   const pad = window.locator("#hit-pad")
+  const hit = async (): Promise<[number, number]> => {
+    const [x, y] = (await window.locator("#hit-log").textContent()).split(",").map(Number)
+    return [x as number, y as number]
+  }
+  // One pixel of slack: an element's box lands on fractional coordinates, and
+  // the platform rounds the event's own clientX/clientY independently, so an
+  // exact equality here fails on a layout that is not off by anything real.
+  const near = (actual: number, expected: number) => Math.abs(actual - expected) <= 1
 
   await pad.click({ position: { x: 10, y: 5 } })
-  await expect(window.locator("#hit-log").textContent()).resolves.toBe("10,5")
+  const [px, py] = await hit()
+  expect(near(px, 10) && near(py, 5), `expected near 10,5 but got ${px},${py}`).toBe(true)
 
-  // A 200x100 pad: the centre is 100,50, so the default must differ from above.
+  // A 200x100 pad: the centre is 100,50, far enough from 10,5 that the slack
+  // above cannot hide a press that ignored `position` entirely.
   await pad.click()
-  await expect(window.locator("#hit-log").textContent()).resolves.toBe("100,50")
+  const [cx, cy] = await hit()
+  expect(near(cx, 100) && near(cy, 50), `expected near 100,50 but got ${cx},${cy}`).toBe(true)
 })
 
 test("a frame-scoped locator acts inside the frame, not the top document", async ({ window }) => {

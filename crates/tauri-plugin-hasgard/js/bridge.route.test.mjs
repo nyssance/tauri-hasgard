@@ -294,3 +294,27 @@ test("a non-positive times is rejected", () => {
   assert.throws(() => hasgard.route({ pattern: "**", times: 0 }), /positive integer/);
   assert.throws(() => hasgard.route({ pattern: "**", times: 1.5 }), /positive integer/);
 });
+
+test("Tauri's own IPC is never routed, even by a catch-all", async () => {
+  // Every eval result rides `__TAURI_INTERNALS__.invoke`, which is an HTTP
+  // request to the IPC endpoint on several platforms. Without this exclusion a
+  // `**` rule swallows the bridge's own replies and the session bricks: the
+  // very call that would remove the rule can no longer return.
+  const { hasgard, fetch, reachedNetwork } = loadBridge();
+  hasgard.route({ pattern: "**", status: 500, body: "blocked" });
+
+  assert.equal((await fetch("ipc://localhost")).status, 200, "the ipc:// scheme must pass through");
+  assert.equal((await fetch("http://ipc.localhost/x")).status, 200, "the Windows IPC host must pass through");
+
+  assert.deepEqual(reachedNetwork, ["ipc://localhost", "http://ipc.localhost/x"]);
+  // Ordinary traffic is still routed, so the exclusion is narrow.
+  assert.equal((await fetch("https://app.test/api/user")).status, 500);
+});
+
+test("the IPC exclusion does not swallow a host that merely starts with ipc", async () => {
+  const { hasgard, fetch, reachedNetwork } = loadBridge();
+  hasgard.route({ pattern: "**", status: 500 });
+
+  assert.equal((await fetch("https://ipc.localhost.evil.test/x")).status, 500);
+  assert.deepEqual(reachedNetwork, []);
+});
