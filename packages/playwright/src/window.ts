@@ -3,6 +3,7 @@ import { basename } from "node:path"
 import { HasgardRpcClient } from "./rpc-client.js"
 import type {
   BoundingBox,
+  ClickOptions,
   ConsoleLogEntry,
   ConsoleLogOptions,
   DialogListing,
@@ -99,6 +100,19 @@ function targetParams(target: HasgardTarget): Record<string, JsonValue> {
       : { selector: target.selector, index: target.index }
   }
   return { x: target.x, y: target.y }
+}
+
+/**
+ * Serialize click options, omitting anything the caller left unset so the
+ * bridge keeps applying its own defaults rather than receiving explicit nulls.
+ */
+function clickParams(options: ClickOptions): Record<string, JsonValue> {
+  const params: Record<string, JsonValue> = {}
+  if (options.modifiers !== undefined) params.modifiers = options.modifiers
+  if (options.button !== undefined) params.button = options.button
+  if (options.clickCount !== undefined) params.clickCount = options.clickCount
+  if (options.position !== undefined) params.position = { ...options.position }
+  return params
 }
 
 /** Resolve a possibly negative ordinal against a match count, Python-style. */
@@ -686,8 +700,16 @@ export class HasgardLocator {
     this.query = query
   }
 
-  async click(): Promise<void> {
-    await this.withTarget(target => this.window.call("click", targetParams(target)))
+  /**
+   * Click this element.
+   *
+   * A right or middle click raises `contextmenu`/`auxclick` and no `click`, and
+   * `clickCount: 2` escalates `detail` across the presses before a single
+   * `dblclick` -- both matching what the platform does, so a listener bound to
+   * the wrong event fails here rather than in front of a user.
+   */
+  async click(options: ClickOptions = {}): Promise<void> {
+    await this.withTarget(target => this.window.call("click", { ...targetParams(target), ...clickParams(options) }))
   }
 
   async fill(value: string): Promise<void> {
@@ -760,8 +782,9 @@ export class HasgardLocator {
     await this.withTarget(target => this.window.call("hover", targetParams(target)))
   }
 
-  async dblclick(): Promise<void> {
-    await this.withTarget(target => this.window.call("dblclick", targetParams(target)))
+  /** Shorthand for `click({ clickCount: 2 })`; other options still apply. */
+  async dblclick(options: Omit<ClickOptions, "clickCount"> = {}): Promise<void> {
+    await this.click({ ...options, clickCount: 2 })
   }
 
   async focus(): Promise<void> {

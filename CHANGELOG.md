@@ -7,6 +7,33 @@ bump may carry breaking changes.
 The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, and
 `@nyssance/tauri-hasgard` — share one version.
 
+## [Unreleased]
+
+### Added
+
+- `click` takes `modifiers`, `button`, `clickCount`, and `position`. Until now a
+  click could only be an unmodified left press at the element centre, which put
+  Shift-extended multi-select, right-click context menus, and anything that
+  branches on `detail` out of reach entirely.
+
+  The event stream follows the platform rather than being convenient: a right
+  press raises `contextmenu` and a middle press raises `auxclick`, and **neither
+  raises `click`**. An app that binds its context menu to `click` therefore fails
+  here, which is the point — it is already broken for every real user.
+  `clickCount: 2` escalates `detail` across the presses and ends in a single
+  `dblclick`, so the two are distinguishable.
+
+  Available on all four surfaces: `locator.click(options)`, the `click` MCP tool,
+  and `tauri-hasgard click --modifier Shift --button right --click-count 2
+--position 10,5`.
+
+### Changed
+
+- `dblclick` is now `click({ clickCount: 2 })` on every surface, one
+  implementation instead of two. The previous version replayed the whole gesture
+  twice, which reset `detail` to 1 on the second press and raised `dblclick`
+  unconditionally — neither matches a real double click.
+
 ## [0.2.1]
 
 Supersedes `v0.2.0`, which was tagged but published nothing: its release run

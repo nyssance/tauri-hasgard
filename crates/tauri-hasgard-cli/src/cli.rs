@@ -20,6 +20,17 @@ pub(crate) struct Cli {
     pub command: Command,
 }
 
+/// Parse an `X,Y` click offset. Rejected rather than defaulted, because a
+/// silently ignored `--position` would click the centre and look like a bug in
+/// the page instead of a typo in the command.
+fn parse_position(raw: &str) -> Result<(f64, f64), String> {
+    let (x, y) = raw.split_once(',').ok_or_else(|| format!("expected X,Y (for example 10,5), got {raw:?}"))?;
+    let parse = |part: &str, axis: &str| {
+        part.trim().parse::<f64>().map_err(|_| format!("{axis} offset must be a number, got {part:?}"))
+    };
+    Ok((parse(x, "x")?, parse(y, "y")?))
+}
+
 #[derive(Subcommand)]
 pub(crate) enum Command {
     /// Start a Model Context Protocol server over stdio.
@@ -71,8 +82,25 @@ pub(crate) enum Command {
         exact: bool,
     },
     /// Click an element.
-    Click { target: String },
-    /// Double-click an element.
+    ///
+    /// A right click raises `contextmenu` and a middle click raises `auxclick`;
+    /// neither raises `click`, matching a real press.
+    Click {
+        target: String,
+        /// Repeat to hold several. Meta is Command on macOS.
+        #[arg(long = "modifier", value_name = "KEY", value_parser = ["Alt", "Control", "Meta", "Shift"])]
+        modifiers: Vec<String>,
+        /// Which button to press.
+        #[arg(long, value_parser = ["left", "middle", "right"])]
+        button: Option<String>,
+        /// Presses in one gesture. 2 also raises a single `dblclick`.
+        #[arg(long)]
+        click_count: Option<u32>,
+        /// Press at this offset from the element's top-left, not its centre.
+        #[arg(long, value_name = "X,Y", value_parser = parse_position)]
+        position: Option<(f64, f64)>,
+    },
+    /// Double-click an element. Shorthand for `click --click-count 2`.
     Dblclick { target: String },
     /// Move the pointer over an element.
     Hover { target: String },
@@ -809,5 +837,39 @@ mod tests {
         } else {
             panic!("Expected Snapshot command with save");
         }
+    }
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::*;
+
+    #[test]
+    fn parses_an_integer_pair() {
+        assert_eq!(parse_position("10,5").unwrap(), (10.0, 5.0));
+    }
+
+    #[test]
+    fn parses_negative_and_fractional_offsets() {
+        // Negative offsets are meaningful: they aim outside the box, which is how
+        // you test that a handler ignores a press on its margin.
+        assert_eq!(parse_position("-3,2.5").unwrap(), (-3.0, 2.5));
+    }
+
+    #[test]
+    fn tolerates_spaces_around_the_comma() {
+        assert_eq!(parse_position(" 10 , 5 ").unwrap(), (10.0, 5.0));
+    }
+
+    #[test]
+    fn rejects_a_missing_comma_by_naming_the_expected_form() {
+        let error = parse_position("10").unwrap_err();
+        assert!(error.contains("X,Y"), "unhelpful message: {error}");
+    }
+
+    #[test]
+    fn rejects_a_non_numeric_axis_rather_than_defaulting_it_to_zero() {
+        assert!(parse_position("a,5").unwrap_err().contains("x offset"));
+        assert!(parse_position("10,b").unwrap_err().contains("y offset"));
     }
 }

@@ -81,6 +81,23 @@
         <button id="ask-alert" type="button">Ask alert</button>
         <p id="dialog-answer">none</p>
 
+        <!-- Click shape. `mouse-log` records the event stream verbatim, so a
+             test can assert that a right press produced contextmenu and no
+             click, rather than only that something happened. `select-log`
+             records the modifier a real multi-select list would branch on, and
+             `hit-pad` reports where inside the box the press landed. -->
+        <button id="mouse-target" type="button">Mouse target</button>
+        <button id="mouse-reset" type="button">Reset mouse log</button>
+        <p id="mouse-log">none</p>
+        <p id="detail-log">0</p>
+        <ul id="rows">
+          <li class="row" data-row="1">Row 1</li>
+          <li class="row" data-row="2">Row 2</li>
+        </ul>
+        <p id="select-log">none</p>
+        <div id="hit-pad"></div>
+        <p id="hit-log">none</p>
+
         <!-- Same tag, same class: reachable only by refining on text. -->
         <ul id="tickets">
           <li class="ticket">Ticket 1 — open</li>

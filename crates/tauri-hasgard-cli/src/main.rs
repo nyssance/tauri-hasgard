@@ -467,9 +467,13 @@ async fn run_dom_command(client: &mut Client, command: Command, window: Option<&
         Command::Query { by, value, exact } => {
             client.call("query", with_window(Some(json!({"by": by, "value": value, "exact": exact})), window)).await
         }
-        Command::Click { target } => client.call("click", with_window(Some(target_params(&target)), window)).await,
+        Command::Click { target, modifiers, button, click_count, position } => {
+            let params = click_params(&target, &modifiers, button.as_deref(), click_count, position);
+            client.call("click", with_window(Some(params), window)).await
+        }
         Command::Dblclick { target } => {
-            client.call("dblclick", with_window(Some(target_params(&target)), window)).await
+            let params = click_params(&target, &[], None, Some(2), None);
+            client.call("click", with_window(Some(params), window)).await
         }
         Command::Hover { target } => client.call("hover", with_window(Some(target_params(&target)), window)).await,
         // `clear` is `fill ""` rather than its own bridge op so the two cannot
@@ -814,6 +818,29 @@ pub(crate) fn target_params(raw: &str) -> serde_json::Value {
         Target::Selector(s) => json!({"selector": s}),
         Target::Coords(x, y) => json!({"x": x, "y": y}),
     }
+}
+
+/// Build params for the `click` RPC call.
+///
+/// Unset options are omitted rather than sent as null, so the bridge keeps
+/// applying its own defaults; sending `button: null` would fail its validation.
+pub(crate) fn click_params(
+    target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>, position: Option<(f64, f64)>,
+) -> serde_json::Value {
+    let mut params = target_params(target);
+    if !modifiers.is_empty() {
+        params["modifiers"] = json!(modifiers);
+    }
+    if let Some(button) = button {
+        params["button"] = json!(button);
+    }
+    if let Some(count) = click_count {
+        params["clickCount"] = json!(count);
+    }
+    if let Some((x, y)) = position {
+        params["position"] = json!({"x": x, "y": y});
+    }
+    params
 }
 
 /// Build params for the `wait` RPC call.
@@ -1692,5 +1719,48 @@ mod tests {
         // rejects immediately instead of hanging on `MutationObserver`.
         let p = build_wait_params(Some("@"), None, None, None, false, 1000);
         assert_eq!(p, json!({"gone": false, "timeout": 1000}));
+    }
+}
+
+#[cfg(test)]
+mod click_param_tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_click_sends_only_the_target() {
+        // No option keys at all, so the bridge defaults stay in force.
+        assert_eq!(click_params("#save", &[], None, None, None), json!({"selector": "#save"}));
+    }
+
+    #[test]
+    fn every_option_reaches_the_bridge_under_its_wire_name() {
+        let modifiers = vec!["Shift".to_owned(), "Meta".to_owned()];
+        assert_eq!(
+            click_params("@e3", &modifiers, Some("right"), Some(2), Some((3.0, 4.0))),
+            json!({
+                "ref": "e3",
+                "modifiers": ["Shift", "Meta"],
+                "button": "right",
+                "clickCount": 2,
+                "position": {"x": 3.0, "y": 4.0},
+            })
+        );
+    }
+
+    #[test]
+    fn an_empty_modifier_list_is_omitted_rather_than_sent_as_an_empty_array() {
+        assert_eq!(click_params("#save", &[], None, None, None).get("modifiers"), None);
+    }
+
+    #[test]
+    fn a_zero_position_is_sent_rather_than_treated_as_absent() {
+        // (0,0) is the top-left corner, a real target -- dropping it would
+        // silently retarget the press to the centre.
+        assert_eq!(click_params("#canvas", &[], None, None, Some((0.0, 0.0)))["position"], json!({"x": 0.0, "y": 0.0}));
+    }
+
+    #[test]
+    fn dblclick_is_expressed_as_a_click_count() {
+        assert_eq!(click_params("#cell", &[], None, Some(2), None)["clickCount"], json!(2));
     }
 }

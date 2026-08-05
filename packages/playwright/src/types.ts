@@ -67,6 +67,35 @@ export interface DragOffset {
   y: number
 }
 
+/** A held keyboard modifier. Named as the platform reports them on the event. */
+export type KeyModifier = "Alt" | "Control" | "Meta" | "Shift"
+
+export type MouseButton = "left" | "middle" | "right"
+
+/** A point inside the element, measured from its top-left corner. */
+export interface ElementPosition {
+  x: number
+  y: number
+}
+
+export interface ClickOptions {
+  /**
+   * Modifiers held for the whole gesture. `Meta` is Command on macOS and the
+   * Windows key elsewhere -- the platform's own accelerator, which is why
+   * multi-select lists usually bind it rather than `Control`.
+   */
+  modifiers?: KeyModifier[]
+  /**
+   * Which button. `right` raises `contextmenu` and `middle` raises `auxclick`;
+   * neither raises `click`, exactly as a real press does not.
+   */
+  button?: MouseButton
+  /** Presses in one gesture. `2` also raises a single `dblclick` at the end. */
+  clickCount?: number
+  /** Where inside the element to press. Defaults to its centre. */
+  position?: ElementPosition
+}
+
 export interface DropFile {
   name: string
   /** Base64-encoded file contents. */

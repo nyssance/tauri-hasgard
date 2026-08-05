@@ -775,3 +775,83 @@ test("clear goes through fill so both fire the same events", async () => {
 
   expect(sent).toEqual([["fill", { selector: "#name", value: "", window: "main" }]])
 })
+
+// --- click options --------------------------------------------------------
+//
+// The client's only job here is serialization: unset options must not reach the
+// bridge at all, because the bridge's defaults are the contract and an explicit
+// `undefined`/`null` would either override them or trip validation.
+
+function clickRecorder() {
+  const rpc = new HasgardRpcClient("/unused")
+  const sent: [string, unknown][] = []
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    sent.push([method, params])
+    return { ok: true }
+  })
+  return { rpc, sent }
+}
+
+test("a plain click sends no option keys, leaving the bridge defaults in force", async () => {
+  const { rpc, sent } = clickRecorder()
+
+  await new HasgardWindow(rpc, "main").locator("#save").click()
+
+  expect(sent).toEqual([["click", { selector: "#save", window: "main" }]])
+})
+
+test("click forwards every option it was given", async () => {
+  const { rpc, sent } = clickRecorder()
+
+  await new HasgardWindow(rpc, "main")
+    .locator("#row")
+    .click({ modifiers: ["Shift"], button: "right", clickCount: 2, position: { x: 3, y: 4 } })
+
+  expect(sent).toEqual([
+    [
+      "click",
+      {
+        selector: "#row",
+        window: "main",
+        modifiers: ["Shift"],
+        button: "right",
+        clickCount: 2,
+        position: { x: 3, y: 4 }
+      }
+    ]
+  ])
+})
+
+test("click forwards only the options set, not the whole shape", async () => {
+  const { rpc, sent } = clickRecorder()
+
+  await new HasgardWindow(rpc, "main").locator("#row").click({ modifiers: ["Meta"] })
+
+  expect(sent).toEqual([["click", { selector: "#row", window: "main", modifiers: ["Meta"] }]])
+})
+
+test("a zero position is forwarded rather than treated as absent", async () => {
+  const { rpc, sent } = clickRecorder()
+
+  await new HasgardWindow(rpc, "main").locator("#canvas").click({ position: { x: 0, y: 0 } })
+
+  expect(sent).toEqual([["click", { selector: "#canvas", window: "main", position: { x: 0, y: 0 } }]])
+})
+
+test("position is copied, so mutating the caller's object cannot alter a sent request", async () => {
+  const { rpc, sent } = clickRecorder()
+  const position = { x: 1, y: 2 }
+
+  await new HasgardWindow(rpc, "main").locator("#canvas").click({ position })
+  position.x = 999
+
+  expect(sent).toEqual([["click", { selector: "#canvas", window: "main", position: { x: 1, y: 2 } }]])
+})
+
+test("dblclick is a click with clickCount 2, and keeps the other options", async () => {
+  const { rpc, sent } = clickRecorder()
+
+  await new HasgardWindow(rpc, "main").locator("#cell").dblclick({ modifiers: ["Alt"] })
+
+  expect(sent).toEqual([["click", { selector: "#cell", window: "main", modifiers: ["Alt"], clickCount: 2 }]])
+})

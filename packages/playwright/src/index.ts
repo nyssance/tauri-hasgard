@@ -5,6 +5,7 @@ export { HasgardProcess } from "./process-manager.js"
 export { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 export type {
   BoundingBox,
+  ClickOptions,
   ConsoleLogEntry,
   ConsoleLogOptions,
   DialogListing,
@@ -15,6 +16,7 @@ export type {
   DiffOptions,
   DragOffset,
   DropFile,
+  ElementPosition,
   FileInput,
   FilterOptions,
   FormEntry,
@@ -27,6 +29,8 @@ export type {
   HasgardWorkerFixtures,
   JsonPrimitive,
   JsonValue,
+  KeyModifier,
+  MouseButton,
   NativeScreenshot,
   NativeScreenshotOptions,
   NetworkRequestEntry,

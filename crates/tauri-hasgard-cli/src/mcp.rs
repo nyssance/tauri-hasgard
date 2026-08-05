@@ -169,7 +169,10 @@ impl HasgardMcpServer {
                 });
                 self.call_app_tool("query", Some(params), window).await
             }
-            "click" => self.target_call("click", &args, window).await,
+            "click" => {
+                let params = click_params_from_args(&args)?;
+                self.call_app_tool("click", Some(params), window).await
+            }
             "fill" => {
                 let mut params = target_params(&required_string(&args, "target")?);
                 params["value"] = json!(required_string(&args, "value")?);
@@ -193,7 +196,11 @@ impl HasgardMcpServer {
                 }
                 self.call_app_tool("check", Some(params), window).await
             }
-            "dblclick" => self.target_call("dblclick", &args, window).await,
+            "dblclick" => {
+                let mut params = click_params_from_args(&args)?;
+                params["clickCount"] = json!(2);
+                self.call_app_tool("click", Some(params), window).await
+            }
             "hover" => self.target_call("hover", &args, window).await,
             "focus" => self.target_call("focus", &args, window).await,
             "blur" => self.target_call("blur", &args, window).await,
@@ -706,8 +713,9 @@ fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "click",
-            description: "Click an element target by ref, selector, or coordinates.",
-            schema: target_schema,
+            description: "Click an element target by ref, selector, or coordinates, with optional \
+                          modifiers, button, click count, and in-element position.",
+            schema: click_schema,
             read_only: false,
             destructive: false,
             idempotent: false,
@@ -1282,6 +1290,60 @@ fn required_string_array(args: &JsonObject, name: &str) -> Result<Vec<String>, M
         .collect()
 }
 
+const CLICK_MODIFIERS: [&str; 4] = ["Alt", "Control", "Meta", "Shift"];
+const CLICK_BUTTONS: [&str; 3] = ["left", "middle", "right"];
+
+/// Build `click` params from MCP arguments.
+///
+/// Enumerated values are checked here rather than left to the bridge: a model
+/// that guesses "Cmd" or "primary" gets a message naming the accepted set,
+/// instead of a JavaScript error relayed from inside the webview.
+fn click_params_from_args(args: &JsonObject) -> Result<Value, McpError> {
+    let mut params = target_params(&required_string(args, "target")?);
+
+    if let Some(raw) = args.get("modifiers") {
+        let values = raw.as_array().ok_or_else(|| invalid_params("'modifiers' must be an array"))?;
+        let mut modifiers = Vec::with_capacity(values.len());
+        for value in values {
+            let name = value.as_str().ok_or_else(|| invalid_params("'modifiers' must contain only strings"))?;
+            if !CLICK_MODIFIERS.contains(&name) {
+                return Err(invalid_params(format!("unknown modifier '{name}'; expected one of {CLICK_MODIFIERS:?}")));
+            }
+            modifiers.push(name);
+        }
+        if !modifiers.is_empty() {
+            params["modifiers"] = json!(modifiers);
+        }
+    }
+
+    if let Some(button) = optional_string(args, "button")? {
+        if !CLICK_BUTTONS.contains(&button.as_str()) {
+            return Err(invalid_params(format!("unknown button '{button}'; expected one of {CLICK_BUTTONS:?}")));
+        }
+        params["button"] = json!(button);
+    }
+
+    if let Some(count) = optional_u32(args, "clickCount")? {
+        if count == 0 {
+            return Err(invalid_params("'clickCount' must be at least 1"));
+        }
+        params["clickCount"] = json!(count);
+    }
+
+    if let Some(raw) = args.get("position") {
+        let position = raw.as_object().ok_or_else(|| invalid_params("'position' must be an object"))?;
+        let axis = |name: &str| {
+            position
+                .get(name)
+                .and_then(Value::as_f64)
+                .ok_or_else(|| invalid_params(format!("'position.{name}' is required and must be a number")))
+        };
+        params["position"] = json!({"x": axis("x")?, "y": axis("y")?});
+    }
+
+    Ok(params)
+}
+
 fn insert_optional_string(params: &mut Map<String, Value>, args: &JsonObject, name: &str) -> Result<(), McpError> {
     if let Some(value) = optional_string(args, name)? {
         params.insert(name.to_owned(), json!(value));
@@ -1310,6 +1372,41 @@ fn global_empty_schema() -> Arc<JsonObject> {
 
 fn target_schema() -> Arc<JsonObject> {
     object_schema(props([("target", string_prop("Element ref, CSS selector, or x,y coordinates."))]), &["target"])
+}
+
+fn click_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
+            (
+                "modifiers",
+                json!({
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["Alt", "Control", "Meta", "Shift"]},
+                    "description": "Modifiers held for the whole gesture. Meta is Command on macOS.",
+                }),
+            ),
+            (
+                "button",
+                enum_prop(
+                    "Which button. right raises contextmenu and middle raises auxclick; neither raises click.",
+                    &["left", "middle", "right"],
+                ),
+            ),
+            ("clickCount", integer_prop("Presses in one gesture. 2 also raises a single dblclick.")),
+            (
+                "position",
+                json!({
+                    "type": "object",
+                    "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+                    "required": ["x", "y"],
+                    "additionalProperties": false,
+                    "description": "Offset from the element's top-left corner. Defaults to its centre.",
+                }),
+            ),
+        ]),
+        &["target"],
+    )
 }
 
 fn query_schema() -> Arc<JsonObject> {
@@ -2126,5 +2223,109 @@ mod tests {
                 writer.write_all(&response).await.expect("write response");
             }
         })
+    }
+}
+
+/// Validation for the `click` tool's enumerated arguments.
+///
+/// A model guessing "Cmd" or "primary" must be told the accepted set here,
+/// where the message is part of the tool contract -- not have the guess relayed
+/// into the webview to fail as a JavaScript error the model cannot act on.
+#[cfg(test)]
+mod click_args_tests {
+    use super::*;
+
+    fn args(value: Value) -> JsonObject {
+        value.as_object().cloned().expect("test args must be an object")
+    }
+
+    #[test]
+    fn a_bare_target_sends_no_option_keys() {
+        let params = click_params_from_args(&args(json!({"target": "#save"}))).unwrap();
+        assert_eq!(params, json!({"selector": "#save"}));
+    }
+
+    #[test]
+    fn every_option_reaches_the_bridge_under_its_wire_name() {
+        let params = click_params_from_args(&args(json!({
+            "target": "@e3",
+            "modifiers": ["Shift", "Meta"],
+            "button": "right",
+            "clickCount": 2,
+            "position": {"x": 3, "y": 4},
+        })))
+        .unwrap();
+        assert_eq!(
+            params,
+            json!({
+                "ref": "e3",
+                "modifiers": ["Shift", "Meta"],
+                "button": "right",
+                "clickCount": 2,
+                "position": {"x": 3.0, "y": 4.0},
+            })
+        );
+    }
+
+    #[test]
+    fn an_unknown_modifier_is_rejected_and_the_message_names_the_accepted_set() {
+        let error = click_params_from_args(&args(json!({"target": "#a", "modifiers": ["Cmd"]}))).unwrap_err();
+        let message = format!("{error:?}");
+        assert!(message.contains("Cmd"), "must quote the bad value: {message}");
+        assert!(message.contains("Shift"), "must list the accepted set: {message}");
+    }
+
+    #[test]
+    fn an_unknown_button_is_rejected_rather_than_silently_clicking_left() {
+        let error = click_params_from_args(&args(json!({"target": "#a", "button": "primary"}))).unwrap_err();
+        assert!(format!("{error:?}").contains("primary"));
+    }
+
+    #[test]
+    fn a_zero_click_count_is_rejected_rather_than_producing_no_press_at_all() {
+        assert!(click_params_from_args(&args(json!({"target": "#a", "clickCount": 0}))).is_err());
+    }
+
+    #[test]
+    fn a_non_array_modifiers_value_is_rejected() {
+        assert!(click_params_from_args(&args(json!({"target": "#a", "modifiers": "Shift"}))).is_err());
+    }
+
+    #[test]
+    fn a_non_string_modifier_is_rejected() {
+        assert!(click_params_from_args(&args(json!({"target": "#a", "modifiers": [1]}))).is_err());
+    }
+
+    #[test]
+    fn a_half_specified_position_is_rejected_rather_than_defaulting_the_missing_axis() {
+        let error = click_params_from_args(&args(json!({"target": "#a", "position": {"x": 10}}))).unwrap_err();
+        assert!(format!("{error:?}").contains("position.y"));
+    }
+
+    #[test]
+    fn a_non_object_position_is_rejected() {
+        assert!(click_params_from_args(&args(json!({"target": "#a", "position": [1, 2]}))).is_err());
+    }
+
+    #[test]
+    fn an_empty_modifier_array_is_omitted_rather_than_sent_as_an_empty_list() {
+        let params = click_params_from_args(&args(json!({"target": "#a", "modifiers": []}))).unwrap();
+        assert_eq!(params.get("modifiers"), None);
+    }
+
+    #[test]
+    fn a_zero_position_survives_rather_than_being_dropped_as_falsy() {
+        let params = click_params_from_args(&args(json!({"target": "#a", "position": {"x": 0, "y": 0}}))).unwrap();
+        assert_eq!(params["position"], json!({"x": 0.0, "y": 0.0}));
+    }
+
+    #[test]
+    fn the_advertised_schema_accepts_exactly_what_the_handler_accepts() {
+        // A schema that allows a value the handler rejects sends models down a
+        // path that always fails; the two lists must not drift.
+        let schema = click_schema();
+        let properties = schema["properties"].as_object().unwrap();
+        assert_eq!(properties["modifiers"]["items"]["enum"], json!(CLICK_MODIFIERS));
+        assert_eq!(properties["button"]["enum"], json!(CLICK_BUTTONS));
     }
 }

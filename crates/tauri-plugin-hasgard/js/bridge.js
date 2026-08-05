@@ -735,28 +735,81 @@
     return el.dispatchEvent(event);
   }
 
+  // MouseEvent.button (which one changed state) and MouseEvent.buttons (bitmask
+  // of what is held) use different numbering; a right press is button 2 and
+  // buttons 2, but a middle press is button 1 and buttons 4.
+  const MOUSE_BUTTONS = {
+    left: { button: 0, mask: 1 },
+    middle: { button: 1, mask: 4 },
+    right: { button: 2, mask: 2 },
+  };
+
+  const MODIFIER_FLAGS = {
+    Alt: "altKey",
+    Control: "ctrlKey",
+    Meta: "metaKey",
+    Shift: "shiftKey",
+  };
+
+  function modifierInit(modifiers) {
+    const init = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
+    if (!modifiers) return init;
+    if (!Array.isArray(modifiers)) throw new Error("modifiers must be an array");
+    for (var i = 0; i < modifiers.length; i++) {
+      const flag = MODIFIER_FLAGS[modifiers[i]];
+      if (!flag) {
+        throw new Error(
+          "Unknown modifier " + JSON.stringify(modifiers[i]) +
+          ". Expected one of Alt, Control, Meta, Shift"
+        );
+      }
+      init[flag] = true;
+    }
+    return init;
+  }
+
+  function mouseButton(name) {
+    if (name == null) return MOUSE_BUTTONS.left;
+    const spec = MOUSE_BUTTONS[name];
+    if (!spec) {
+      throw new Error(
+        "Unknown button " + JSON.stringify(name) + ". Expected left, middle, or right"
+      );
+    }
+    return spec;
+  }
+
+  // Where inside the element the pointer lands. `position` is element-relative,
+  // matching Playwright; `params.x/y` stay viewport-absolute because they are
+  // also the coordinate *target*, resolved before we ever see the element.
+  function clickPoint(el, params) {
+    const rect = el.getBoundingClientRect();
+    if (params.position) {
+      const px = params.position.x;
+      const py = params.position.y;
+      if (typeof px !== "number" || typeof py !== "number") {
+        throw new Error("position must be { x: number, y: number }");
+      }
+      return { x: rect.left + px, y: rect.top + py };
+    }
+    return {
+      x: params.x != null ? params.x : rect.left + rect.width / 2,
+      y: params.y != null ? params.y : rect.top + rect.height / 2,
+    };
+  }
+
   function click(params) {
     const el = resolveTarget(params);
     el.scrollIntoView({ behavior: "instant", block: "center", inline: "center" });
-    const rect = el.getBoundingClientRect();
-    const x = params.x != null ? params.x : rect.left + rect.width / 2;
-    const y = params.y != null ? params.y : rect.top + rect.height / 2;
-    const downInit = {
-      clientX: x,
-      clientY: y,
-      button: 0,
-      buttons: 1,
-      detail: 1,
-      view: window,
-    };
-    const upInit = {
-      clientX: x,
-      clientY: y,
-      button: 0,
-      buttons: 0,
-      detail: 1,
-      view: window,
-    };
+    const point = clickPoint(el, params);
+    const x = point.x;
+    const y = point.y;
+    const button = mouseButton(params.button);
+    const modifiers = modifierInit(params.modifiers);
+    const clickCount = params.clickCount != null ? params.clickCount : 1;
+    if (typeof clickCount !== "number" || clickCount < 1 || clickCount % 1 !== 0) {
+      throw new Error("clickCount must be a positive integer");
+    }
     const mouseInit = function(options) {
       return Object.assign({
         bubbles: true,
@@ -765,18 +818,55 @@
       }, options);
     };
 
-    const pointerDownOk = dispatchPointerEvent(el, "pointerdown", downInit);
-    if (pointerDownOk) {
-      const mouseDownOk = el.dispatchEvent(new MouseEvent("mousedown", mouseInit(downInit)));
-      if (mouseDownOk && typeof el.focus === "function") {
-        el.focus();
+    // A double click is one gesture, not two: the browser raises detail 1 then
+    // detail 2 on the *same* element, then a single dblclick. Replaying click()
+    // twice would reset detail to 1 and never produce dblclick, so listeners
+    // that distinguish the two would see the wrong thing.
+    for (var n = 1; n <= clickCount; n++) {
+      const downInit = Object.assign({
+        clientX: x,
+        clientY: y,
+        button: button.button,
+        buttons: button.mask,
+        detail: n,
+        view: window,
+      }, modifiers);
+      const upInit = Object.assign({}, downInit, { buttons: 0 });
+
+      const pointerDownOk = dispatchPointerEvent(el, "pointerdown", downInit);
+      if (pointerDownOk) {
+        const mouseDownOk = el.dispatchEvent(new MouseEvent("mousedown", mouseInit(downInit)));
+        if (mouseDownOk && typeof el.focus === "function") {
+          el.focus();
+        }
+      }
+      dispatchPointerEvent(el, "pointerup", upInit);
+      if (pointerDownOk) {
+        el.dispatchEvent(new MouseEvent("mouseup", mouseInit(upInit)));
+      }
+      // Only the primary button produces a `click` event. A right press raises
+      // `contextmenu` instead, and a middle press raises `auxclick` -- binding a
+      // right-click menu to `click` is exactly the bug this lets tests catch.
+      if (button.button === 0) {
+        dispatchPointerEvent(el, "click", upInit);
+      } else {
+        el.dispatchEvent(new MouseEvent("auxclick", mouseInit(upInit)));
+        if (button.button === 2) {
+          el.dispatchEvent(new MouseEvent("contextmenu", mouseInit(upInit)));
+        }
       }
     }
-    dispatchPointerEvent(el, "pointerup", upInit);
-    if (pointerDownOk) {
-      el.dispatchEvent(new MouseEvent("mouseup", mouseInit(upInit)));
+
+    if (clickCount >= 2) {
+      el.dispatchEvent(new MouseEvent("dblclick", mouseInit(Object.assign({
+        clientX: x,
+        clientY: y,
+        button: button.button,
+        buttons: 0,
+        detail: 2,
+        view: window,
+      }, modifiers))));
     }
-    dispatchPointerEvent(el, "click", upInit);
     return { ok: true };
   }
 
@@ -927,27 +1017,10 @@
     return { ok: true };
   }
 
+  // Kept as its own command for the CLI and for callers that predate
+  // `click({ clickCount })`; the gesture itself now has one implementation.
   function dblclick(params) {
-    const el = resolveTarget(params);
-    click(params);
-    click(params);
-    const rect = el.getBoundingClientRect();
-    const x = params.x != null ? params.x : rect.left + rect.width / 2;
-    const y = params.y != null ? params.y : rect.top + rect.height / 2;
-    el.dispatchEvent(
-      new MouseEvent("dblclick", {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        clientX: x,
-        clientY: y,
-        button: 0,
-        buttons: 0,
-        detail: 2,
-        view: window
-      })
-    );
-    return { ok: true };
+    return click(Object.assign({}, params, { clickCount: 2 }));
   }
 
   function scroll(options) {

@@ -376,3 +376,56 @@ test("clear empties a control through the same path as fill", async ({ window })
 
   await expect(input.inputValue()).resolves.toBe("")
 })
+
+test("a right click raises contextmenu and never click", async ({ window }) => {
+  await window.locator("#mouse-reset").click()
+  const log = window.locator("#mouse-log")
+
+  await window.locator("#mouse-target").click({ button: "right" })
+
+  // The sequence, not just the presence of an event: a menu bound to `click`
+  // would still fire on a left press and pass a weaker assertion.
+  await expect(log.textContent()).resolves.toBe("auxclick:2 contextmenu:2")
+})
+
+test("a middle click raises auxclick without contextmenu", async ({ window }) => {
+  await window.locator("#mouse-reset").click()
+  await window.locator("#mouse-target").click({ button: "middle" })
+
+  await expect(window.locator("#mouse-log").textContent()).resolves.toBe("auxclick:1")
+})
+
+test("clickCount 2 escalates detail and ends in one dblclick", async ({ window }) => {
+  await window.locator("#mouse-reset").click()
+  await window.locator("#mouse-target").click({ clickCount: 2 })
+
+  await expect(window.locator("#mouse-log").textContent()).resolves.toBe("click:0 click:0 dblclick:0")
+  await expect(window.locator("#detail-log").textContent()).resolves.toBe("2")
+})
+
+test("shift extends a selection the way a real multi-select list reads it", async ({ window }) => {
+  const rows = window.locator("#rows .row")
+  const log = window.locator("#select-log")
+
+  await rows.nth(0).click()
+  await expect(log.textContent()).resolves.toBe("1")
+
+  await rows.nth(1).click({ modifiers: ["Shift"] })
+  await expect(log.textContent()).resolves.toBe("1,2")
+
+  // Without the modifier the selection resets, proving the flag reached the page
+  // rather than the second click simply accumulating.
+  await rows.nth(1).click()
+  await expect(log.textContent()).resolves.toBe("2")
+})
+
+test("position presses a point inside the element, not its centre", async ({ window }) => {
+  const pad = window.locator("#hit-pad")
+
+  await pad.click({ position: { x: 10, y: 5 } })
+  await expect(window.locator("#hit-log").textContent()).resolves.toBe("10,5")
+
+  // A 200x100 pad: the centre is 100,50, so the default must differ from above.
+  await pad.click()
+  await expect(window.locator("#hit-log").textContent()).resolves.toBe("100,50")
+})

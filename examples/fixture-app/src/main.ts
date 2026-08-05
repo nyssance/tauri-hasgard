@@ -111,6 +111,54 @@ sizeScroller("#wheel-blocked", "#wheel-blocked-inner").addEventListener("wheel",
   event.preventDefault()
 })
 
+// Record the mouse event stream verbatim. Asserting on the sequence is what
+// separates "the right button did something" from "the right button raised
+// contextmenu and no click" — an app binding its menu to `click` passes the
+// weaker check and breaks for every real user.
+const mouseLog = probe<HTMLParagraphElement>("#mouse-log")
+const detailLog = probe<HTMLParagraphElement>("#detail-log")
+const mouseTarget = probe<HTMLButtonElement>("#mouse-target")
+const mouseSeen: string[] = []
+for (const type of ["click", "auxclick", "contextmenu", "dblclick"]) {
+  mouseTarget.addEventListener(type, event => {
+    event.preventDefault()
+    mouseSeen.push(`${type}:${(event as MouseEvent).button}`)
+    mouseLog.textContent = mouseSeen.join(" ")
+    detailLog.textContent = String((event as MouseEvent).detail)
+  })
+}
+
+// Lets each test start from a known log rather than depending on file order.
+probe<HTMLButtonElement>("#mouse-reset").addEventListener("click", () => {
+  mouseSeen.length = 0
+  mouseLog.textContent = "none"
+  detailLog.textContent = "0"
+})
+
+// The modifier a real multi-select list branches on.
+const selectLog = probe<HTMLParagraphElement>("#select-log")
+const selected = new Set<string>()
+for (const row of document.querySelectorAll<HTMLLIElement>("#rows .row")) {
+  row.addEventListener("click", event => {
+    const id = row.dataset.row ?? "?"
+    if (!event.shiftKey && !event.metaKey) selected.clear()
+    selected.add(id)
+    selectLog.textContent = [...selected].sort().join(",")
+  })
+}
+
+// Reports where inside the box the press landed, so `position` can be checked
+// against a coordinate rather than against "it clicked something".
+const hitLog = probe<HTMLParagraphElement>("#hit-log")
+const hitPad = probe<HTMLDivElement>("#hit-pad")
+hitPad.style.width = "200px"
+hitPad.style.height = "100px"
+hitPad.style.border = "1px solid currentColor"
+hitPad.addEventListener("click", event => {
+  const rect = hitPad.getBoundingClientRect()
+  hitLog.textContent = `${Math.round(event.clientX - rect.left)},${Math.round(event.clientY - rect.top)}`
+})
+
 const dialogAnswer = probe<HTMLParagraphElement>("#dialog-answer")
 probe<HTMLButtonElement>("#ask-confirm").addEventListener("click", () => {
   dialogAnswer.textContent = `confirm:${window.confirm("Delete the record?")}`
