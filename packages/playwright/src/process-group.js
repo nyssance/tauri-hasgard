@@ -7,6 +7,10 @@ function signalGroup(pid, signal) {
     return true
   } catch (error) {
     if (error.code === "ESRCH") return false
+    // Darwin can report EPERM while a group contains only exiting/zombie
+    // processes. A probe has not established absence: keep waiting for ESRCH.
+    // Actual termination permission errors must still propagate.
+    if (signal === 0 && error.code === "EPERM") return true
     throw error
   }
 }
