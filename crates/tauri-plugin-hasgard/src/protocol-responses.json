@@ -1,0 +1,68 @@
+[
+  { "name": "object result", "valid": true, "response": { "jsonrpc": "2.0", "id": 1, "result": { "ok": true } } },
+  { "name": "explicit null result", "valid": true, "response": { "jsonrpc": "2.0", "id": 1, "result": null } },
+  { "name": "false result", "valid": true, "response": { "jsonrpc": "2.0", "id": 1, "result": false } },
+  { "name": "zero result", "valid": true, "response": { "jsonrpc": "2.0", "id": 1, "result": 0 } },
+  { "name": "empty string result", "valid": true, "response": { "jsonrpc": "2.0", "id": 1, "result": "" } },
+  {
+    "name": "RPC error",
+    "valid": true,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": { "code": -32602, "message": "bad target", "data": { "field": "ref" } }
+    }
+  },
+  {
+    "name": "uncorrelated parse error",
+    "valid": true,
+    "response": { "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "Parse error" } }
+  },
+  { "name": "missing result and error", "valid": false, "response": { "jsonrpc": "2.0", "id": 1 } },
+  {
+    "name": "both result and error",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 1, "result": null, "error": { "code": -32603, "message": "broken" } }
+  },
+  { "name": "null error", "valid": false, "response": { "jsonrpc": "2.0", "id": 1, "error": null } },
+  {
+    "name": "null error alongside result",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 1, "result": null, "error": null }
+  },
+  { "name": "missing version", "valid": false, "response": { "id": 1, "result": true } },
+  { "name": "wrong version", "valid": false, "response": { "jsonrpc": "1.0", "id": 1, "result": true } },
+  { "name": "missing id", "valid": false, "response": { "jsonrpc": "2.0", "result": true } },
+  { "name": "string id", "valid": false, "response": { "jsonrpc": "2.0", "id": "1", "result": true } },
+  { "name": "fractional id", "valid": false, "response": { "jsonrpc": "2.0", "id": 1.5, "result": true } },
+  { "name": "negative id", "valid": false, "response": { "jsonrpc": "2.0", "id": -1, "result": true } },
+  {
+    "name": "unsafe integer id",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 9007199254740992, "result": true }
+  },
+  { "name": "null success id", "valid": false, "response": { "jsonrpc": "2.0", "id": null, "result": true } },
+  {
+    "name": "missing error code",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 1, "error": { "message": "broken" } }
+  },
+  {
+    "name": "fractional error code",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 1, "error": { "code": -1.5, "message": "broken" } }
+  },
+  {
+    "name": "out of range error code",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 1, "error": { "code": 2147483648, "message": "broken" } }
+  },
+  {
+    "name": "non-string error message",
+    "valid": false,
+    "response": { "jsonrpc": "2.0", "id": 1, "error": { "code": -32603, "message": null } }
+  },
+  { "name": "null envelope", "valid": false, "response": null },
+  { "name": "array envelope", "valid": false, "response": [] },
+  { "name": "string envelope", "valid": false, "response": "broken" }
+]

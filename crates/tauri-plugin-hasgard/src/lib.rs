@@ -6,6 +6,8 @@ pub(crate) mod eval;
 mod handler;
 #[cfg(feature = "press")]
 pub(crate) mod key;
+#[cfg(all(target_os = "macos", debug_assertions))]
+mod macos_keyboard;
 pub(crate) mod protocol;
 pub(crate) mod recorder;
 // Native screenshot capture for the `screenshot_native` JSON-RPC method.
@@ -158,6 +160,9 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
             } else {
                 focus_handle.get_webview_window("main").ok_or_else(|| "Window 'main' not found".to_owned())?
             };
+            #[cfg(target_os = "macos")]
+            macos_keyboard::focus(&target)?;
+            #[cfg(not(target_os = "macos"))]
             target.set_focus().map_err(|e| e.to_string())?;
 
             #[cfg(windows)]
@@ -186,19 +191,13 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
         // it is on the main dispatch queue and aborts the whole process with
         // SIGTRAP when it is not — a crash, not a recoverable error.
         #[cfg(target_os = "macos")]
-        run_injection: Box::new(move |task: Box<dyn FnOnce() + Send>| {
-            let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
-            main_handle
-                .run_on_main_thread(move || {
-                    task();
-                    // A closed receiver means the caller timed out and gave up;
-                    // the work still ran, so there is nothing to report.
-                    let _ = done_tx.send(());
-                })
-                .map_err(|error| format!("could not reach the main thread: {error}"))?;
-            done_rx
-                .recv_timeout(std::time::Duration::from_secs(10))
-                .map_err(|error| format!("main-thread task did not finish: {error}"))
+        run_injection: Box::new(move |label, marker, confirm, task| {
+            let label = label.unwrap_or("main");
+            let target = main_handle.get_webview_window(label).ok_or_else(|| server::InjectionError {
+                message: format!("Window '{label}' not found"),
+                started: false,
+            })?;
+            macos_keyboard::inject(&target, marker, confirm, task)
         }),
         // Windows' `SendInput` and the Linux X11/libei backends inject from any
         // thread, so the hop would buy nothing and cost something: it would
@@ -206,9 +205,8 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
         // portal handshake inside `Enigo::new` can need the main loop to turn —
         // which is precisely what blocking on it prevents. Run in place.
         #[cfg(not(target_os = "macos"))]
-        run_injection: Box::new(|task: Box<dyn FnOnce() + Send>| {
-            task();
-            Ok(())
+        run_injection: Box::new(|_window, _marker, _confirm, task| {
+            task().map_err(|message| server::InjectionError { message, started: true })
         }),
     })
 }

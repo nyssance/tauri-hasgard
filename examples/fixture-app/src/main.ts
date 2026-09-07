@@ -211,6 +211,7 @@ console.warn("fixture warning marker")
 
 for (let index = 1; index <= 80; index += 1) {
   const article = document.createElement("article")
+  article.style.whiteSpace = "pre-wrap"
   article.dataset.turn = String(index)
   const lines = Array.from({ length: (index % 7) + 1 }, (_, line) => `Turn ${index}, line ${line + 1}`)
   article.textContent = lines.join("\n")

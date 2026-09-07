@@ -1,6 +1,6 @@
 {
   "name": "@nyssance/tauri-hasgard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Playwright Test fixtures for native Tauri Hasgard automation",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,12 +18,14 @@
     "NOTICE.md"
   ],
   "scripts": {
-    "build": "bun node_modules/tsup/dist/cli-default.js src/index.ts --format esm --outDir dist --clean && bun node_modules/typescript/bin/tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true",
-    "dev": "tsup src/index.ts --format esm --dts --outDir dist --watch",
+    "build": "bun node_modules/tsup/dist/cli-default.js src/index.ts src/process-supervisor.js --format esm --outDir dist --clean && bun node_modules/typescript/bin/tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true",
+    "dev": "bun run --parallel dev:js dev:types",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "dev:js": "tsup src/index.ts src/process-supervisor.js --format esm --outDir dist --watch",
+    "dev:types": "tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true --watch"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.61.1 <2"

@@ -121,7 +121,7 @@ impl HasgardMcpServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(match self.call_app(method, params, window).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(err),
+            Err(err) => tool_error(&err),
         })
     }
 
@@ -183,7 +183,19 @@ impl HasgardMcpServer {
                 params["text"] = json!(required_string(&args, "text")?);
                 self.call_app_tool("type", Some(params), window).await
             }
-            "press" => self.call_app_tool("press", Some(json!({"key": required_string(&args, "key")?})), window).await,
+            "press" => {
+                let mut params = json!({"key": required_string(&args, "key")?});
+                if let Some(completion) = optional_string(&args, "completion")? {
+                    params["completion"] = json!(completion);
+                }
+                if let Some(expression) = optional_string(&args, "wait_for")? {
+                    params["waitFor"] = json!(expression);
+                }
+                if let Some(timeout) = optional_u64(&args, "timeout")? {
+                    params["timeout"] = json!(timeout);
+                }
+                self.call_app_tool("press", Some(params), window).await
+            }
             "select" => {
                 let mut params = target_params(&required_string(&args, "target")?);
                 params["value"] = json!(required_string(&args, "value")?);
@@ -435,11 +447,11 @@ impl HasgardMcpServer {
         }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         Ok(match run_drop_command(&mut client, &target, files, window.as_deref()).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(err),
+            Err(err) => tool_error(&err),
         })
     }
 
@@ -451,11 +463,11 @@ impl HasgardMcpServer {
         let files: Vec<PathBuf> = required_string_array(&args, "files")?.into_iter().map(PathBuf::from).collect();
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         Ok(match run_set_input_files_command(&mut client, &target, files, window.as_deref()).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(err),
+            Err(err) => tool_error(&err),
         })
     }
 
@@ -521,16 +533,16 @@ impl HasgardMcpServer {
         if let Some(export) = export.as_deref() {
             return Ok(match export_replay_file(&path, export) {
                 Ok(result) => tool_success(result),
-                Err(err) => tool_error(err),
+                Err(err) => tool_error(&err),
             });
         }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         Ok(match run_replay_command(&mut client, &path, None, window.as_deref()).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(err),
+            Err(err) => tool_error(&err),
         })
     }
 
@@ -544,7 +556,7 @@ impl HasgardMcpServer {
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
             }
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         let passed = if contains { actual.contains(&expected) } else { actual == expected };
         if passed {
@@ -567,7 +579,7 @@ impl HasgardMcpServer {
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
             }
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         if actual == expected {
             Ok(tool_success(json!({"ok": true})))
@@ -586,7 +598,7 @@ impl HasgardMcpServer {
                 Some(value) => value,
                 None => return Ok(tool_error_msg(format!("missing boolean field '{field}'"))),
             },
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         if actual == expected {
             Ok(tool_success(json!({"ok": true})))
@@ -611,7 +623,7 @@ impl HasgardMcpServer {
                 Some(value) => value,
                 None => return Ok(tool_error_msg("missing 'count' field")),
             },
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         if actual == expected {
             Ok(tool_success(json!({"ok": true})))
@@ -627,7 +639,7 @@ impl HasgardMcpServer {
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
             }
-            Err(err) => return Ok(tool_error(err)),
+            Err(err) => return Ok(tool_error(&err)),
         };
         if actual.contains(&expected) {
             Ok(tool_success(json!({"ok": true})))
@@ -686,8 +698,7 @@ fn namespaced_tool_name(name: &str) -> String {
 
 fn dangerous_mcp_tools_enabled() -> bool {
     std::env::var(ENABLE_DANGEROUS_MCP_TOOLS_ENV)
-        .ok()
-        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .is_ok_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
 fn validate_navigate_url(url: &str) -> Result<(), McpError> {
@@ -1229,7 +1240,10 @@ fn tool_success(result: Value) -> CallToolResult {
     CallToolResult::structured(Value::Object(payload))
 }
 
-fn tool_error(err: impl std::fmt::Display) -> CallToolResult {
+fn tool_error(err: &anyhow::Error) -> CallToolResult {
+    if let Some(failure) = err.downcast_ref::<crate::client::RpcFailure>() {
+        return CallToolResult::structured_error(json!({ "error": err.to_string(), "rpcError": failure.0 }));
+    }
     tool_error_msg(err.to_string())
 }
 
@@ -1596,7 +1610,24 @@ fn type_schema() -> Arc<JsonObject> {
 }
 
 fn press_schema() -> Arc<JsonObject> {
-    object_schema(props([("key", string_prop("Keyboard key to press."))]), &["key"])
+    object_schema(
+        props([
+            ("key", string_prop("Native keyboard key to press; respects the active input method.")),
+            (
+                "completion",
+                enum_prop(
+                    "webview waits for trusted keyup (default); native confirms OS posting only for native shortcuts or navigation.",
+                    &["webview", "native"],
+                ),
+            ),
+            (
+                "wait_for",
+                string_prop("JavaScript postcondition to await before another native press may focus a window."),
+            ),
+            ("timeout", integer_prop("Postcondition timeout in milliseconds; requires wait_for.")),
+        ]),
+        &["key"],
+    )
 }
 
 fn scroll_schema() -> Arc<JsonObject> {

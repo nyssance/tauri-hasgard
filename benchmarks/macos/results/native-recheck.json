@@ -1,0 +1,22 @@
+{
+  "recordedAt": "2026-09-07T07:42:06Z",
+  "status": "pending",
+  "runs": [
+    {
+      "suite": "clients.spec.ts and native-focus.spec.ts",
+      "passed": 5,
+      "failed": 3,
+      "failures": "Three concurrent native-key stress cases timed out waiting for AppKit marked release acknowledgement."
+    },
+    {
+      "suite": "isolated native m/s and m/Shift+s",
+      "passed": 1,
+      "failed": 1,
+      "observations": [
+        "m/s completed all 200 pairs and text assertions, but exact key-event list contained extra trusted Control keydowns.",
+        "m/Shift+s completed all 200 pairs and passed."
+      ],
+      "limitation": "Physical desktop interference is evidenced for this run; it does not establish the cause of earlier timeouts."
+    }
+  ]
+}

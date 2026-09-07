@@ -1,24 +1,20 @@
 import type { HasgardLocator } from "./window.js"
 
-async function poll<T>(
-  read: () => Promise<T>,
-  matches: (value: T) => boolean,
-  timeoutMs: number
-): Promise<{ pass: boolean; value: T | undefined; error: unknown }> {
+async function poll<T>(read: () => Promise<T>, matches: (value: T) => boolean, timeoutMs: number): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0)
+    throw new RangeError("Assertion timeout must be a finite non-negative number")
   const deadline = Date.now() + timeoutMs
-  let value: T | undefined
-  let error: unknown
-  while (Date.now() <= deadline) {
+  // Read at least once, including timeout: 0. A failed read is never evidence
+  // that a negative assertion is true.
+  for (;;) {
     try {
-      value = await read()
-      error = undefined
-      if (matches(value)) return { pass: true, value, error }
-    } catch (caught) {
-      error = caught
+      const value = await read()
+      if (matches(value) || Date.now() >= deadline) return value
+    } catch (error) {
+      if (Date.now() >= deadline) throw error
     }
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))))
   }
-  return { pass: false, value, error }
 }
 
 export function createHasgardExpect(playwrightExpect: typeof import("@playwright/test").expect) {
@@ -31,11 +27,11 @@ export function createHasgardExpect(playwrightExpect: typeof import("@playwright
         timeout
       )
       return {
-        pass: result.value === true,
+        pass: result === true,
         message: () =>
           this.isNot
             ? "expected Hasgard locator not to be visible"
-            : `expected Hasgard locator to be visible within ${timeout}ms${result.error ? `: ${String(result.error)}` : ""}`
+            : `expected Hasgard locator to be visible within ${timeout}ms`
       }
     },
 
@@ -52,11 +48,11 @@ export function createHasgardExpect(playwrightExpect: typeof import("@playwright
         timeout
       )
       return {
-        pass: result.value === undefined ? false : matches(result.value),
+        pass: matches(result),
         message: () =>
           this.isNot
-            ? `expected Hasgard locator text not to match ${String(expected)}, received ${String(result.value)}`
-            : `expected Hasgard locator text to match ${String(expected)}, received ${String(result.value)}`
+            ? `expected Hasgard locator text not to match ${String(expected)}, received ${String(result)}`
+            : `expected Hasgard locator text to match ${String(expected)}, received ${String(result)}`
       }
     }
   })

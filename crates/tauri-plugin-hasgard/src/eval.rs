@@ -18,6 +18,17 @@ pub(crate) enum EvalError {
 
 type PendingMap = HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>;
 
+struct PendingGuard<'a> {
+    pending: &'a Mutex<PendingMap>,
+    id: u64,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.pending.lock().expect("pending lock poisoned").remove(&self.id);
+    }
+}
+
 /// Engine for executing JS in a `WebView` and resolving eval results delivered via the `__callback` IPC command.
 ///
 /// The core ADR-001 pattern: wrap script in try/catch + return a callback payload,
@@ -26,7 +37,7 @@ type PendingMap = HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>
 pub(crate) struct EvalEngine {
     pending: Arc<Mutex<PendingMap>>,
     next_id: Arc<AtomicU64>,
-    last_snapshot: Arc<Mutex<Option<serde_json::Value>>>,
+    last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
 impl EvalEngine {
@@ -34,22 +45,22 @@ impl EvalEngine {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(1)),
-            last_snapshot: Arc::new(Mutex::new(None)),
+            last_snapshot: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Store the last snapshot result for later diff comparison.
-    ///
-    /// Note: `store_snapshot` and `get_last_snapshot` each acquire the lock independently.
-    /// Concurrent snapshot/diff calls may observe non-deterministic ordering — acceptable
-    /// for this single-connection CLI debugging tool.
-    pub fn store_snapshot(&self, value: &serde_json::Value) {
-        *self.last_snapshot.lock().expect("last_snapshot lock poisoned") = Some(value.clone());
+    /// Keep each window's baseline separate. An omitted label denotes main,
+    /// exactly as it does in the host's eval routing.
+    pub fn store_snapshot(&self, window: Option<&str>, value: &serde_json::Value) {
+        self.last_snapshot
+            .lock()
+            .expect("last_snapshot lock poisoned")
+            .insert(window.unwrap_or("main").to_owned(), value.clone());
     }
 
     /// Retrieve the last stored snapshot, if any.
-    pub fn get_last_snapshot(&self) -> Option<serde_json::Value> {
-        self.last_snapshot.lock().expect("last_snapshot lock poisoned").clone()
+    pub fn get_last_snapshot(&self, window: Option<&str>) -> Option<serde_json::Value> {
+        self.last_snapshot.lock().expect("last_snapshot lock poisoned").get(window.unwrap_or("main")).cloned()
     }
 
     /// Register a pending eval request. Returns the ID and a receiver.
@@ -96,24 +107,17 @@ impl EvalEngine {
     }
 
     /// Wait for a pending eval result with timeout.
-    /// Cleans up the pending entry on timeout to prevent memory leaks.
+    /// Cleans up on every exit, including cancellation of the waiting task.
     pub async fn wait(
         &self, id: u64, rx: oneshot::Receiver<Result<serde_json::Value, String>>, timeout: Duration,
     ) -> Result<serde_json::Value, EvalError> {
+        let _pending = PendingGuard { pending: &self.pending, id };
         let result = tokio::time::timeout(timeout, rx).await;
 
         match result {
             Ok(Ok(inner)) => inner.map_err(EvalError::JsError),
-            Ok(Err(_)) => {
-                // Defensive cleanup — sender dropped without sending
-                self.pending.lock().expect("pending lock poisoned").remove(&id);
-                Err(EvalError::ChannelClosed)
-            }
-            Err(_) => {
-                // Remove stale entry from pending map on timeout
-                self.pending.lock().expect("pending lock poisoned").remove(&id);
-                Err(EvalError::Timeout(timeout))
-            }
+            Ok(Err(_)) => Err(EvalError::ChannelClosed),
+            Err(_) => Err(EvalError::Timeout(timeout)),
         }
     }
 }
@@ -170,6 +174,18 @@ mod tests {
         let result = engine.wait(id, rx, Duration::from_secs(1)).await;
         assert!(matches!(result, Err(EvalError::Timeout(_))));
         // Verify pending entry was cleaned up
+        assert!(!engine.pending.lock().expect("lock").contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn cancelled_wait_removes_its_pending_sender() {
+        let engine = EvalEngine::new();
+        let (id, rx) = engine.register();
+        let mut waiting = Box::pin(engine.wait(id, rx, Duration::from_secs(30)));
+        let waker = std::task::Waker::noop();
+        let mut context = std::task::Context::from_waker(waker);
+        assert!(matches!(std::future::Future::poll(waiting.as_mut(), &mut context), std::task::Poll::Pending));
+        drop(waiting);
         assert!(!engine.pending.lock().expect("lock").contains_key(&id));
     }
 
@@ -234,15 +250,18 @@ mod tests {
     #[test]
     fn test_get_last_snapshot_none_initially() {
         let engine = EvalEngine::new();
-        assert!(engine.get_last_snapshot().is_none());
+        assert!(engine.get_last_snapshot(None).is_none());
     }
 
     #[test]
     fn test_store_and_retrieve_snapshot() {
         let engine = EvalEngine::new();
         let value = json!({"elements": [{"ref": "e1", "role": "button", "depth": 1}]});
-        engine.store_snapshot(&value);
-        let retrieved = engine.get_last_snapshot();
+        engine.store_snapshot(None, &value);
+        let retrieved = engine.get_last_snapshot(Some("main"));
         assert_eq!(retrieved, Some(value));
+        assert!(engine.get_last_snapshot(Some("settings")).is_none());
+        engine.store_snapshot(Some("settings"), &json!({"elements": []}));
+        assert_ne!(engine.get_last_snapshot(None), engine.get_last_snapshot(Some("settings")));
     }
 }

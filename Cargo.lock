@@ -1338,6 +1338,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "global-hotkey"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c386b0a4a70cb2d39fffd74480f985b6f0bfbcb934b6a6b6b7e630e448f242e"
+dependencies = [
+ "crossbeam-channel",
+ "keyboard-types",
+ "objc2",
+ "objc2-app-kit",
+ "once_cell",
+ "serde",
+ "thiserror 2.0.19",
+ "windows-sys 0.59.0",
+ "x11rb",
+ "xkeysym",
+]
+
+[[package]]
 name = "gobject-sys"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3578,7 +3596,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-hasgard-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3606,6 +3624,7 @@ version = "0.1.0"
 dependencies = [
  "tauri",
  "tauri-build",
+ "tauri-plugin-global-shortcut",
  "tauri-plugin-hasgard",
 ]
 
@@ -3640,9 +3659,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-hasgard"
-version = "0.3.0"
+name = "tauri-plugin-global-shortcut"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4dd9f4c5136c09cd962da0c86dc4accd4666db2ea591cf16e6597435843bd2b"
 dependencies = [
+ "global-hotkey",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "tauri-plugin-hasgard"
+version = "0.4.0"
+dependencies = [
+ "block2",
  "core-foundation",
  "core-graphics",
  "enigo",
@@ -3650,6 +3685,7 @@ dependencies = [
  "libc",
  "objc2",
  "objc2-app-kit",
+ "objc2-core-graphics",
  "serde",
  "serde_json",
  "serial_test",

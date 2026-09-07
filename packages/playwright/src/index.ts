@@ -37,6 +37,7 @@ export type {
   NativeScreenshotOptions,
   NetworkRequestEntry,
   NetworkRequestOptions,
+  PressOptions,
   QueryDimension,
   RecorderEntry,
   RecorderResult,

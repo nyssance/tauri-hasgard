@@ -66,6 +66,8 @@ pub enum KeyError {
     Empty,
     #[error("unknown key: {0}")]
     UnknownKey(String),
+    #[error("duplicate modifier: {0}")]
+    DuplicateModifier(String),
     #[error("enigo init failed: {0}")]
     EnigoInit(String),
     #[error("enigo input failed: {0}")]
@@ -122,28 +124,28 @@ pub fn parse_combo(combo: &str) -> Result<Combo, KeyError> {
         }
     };
 
-    let modifiers = if modifier_section.is_empty() {
-        Vec::new()
-    } else {
-        modifier_section
-            .split('+')
-            .map(|tok| {
-                let trimmed_tok = tok.trim();
-                if trimmed_tok.is_empty() {
-                    // An empty segment between separators is a typo, not a
-                    // modifier — reject rather than silently collapsing.
-                    Err(KeyError::UnknownKey(combo.trim().to_owned()))
-                } else {
-                    parse_modifier(trimmed_tok)
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    };
+    let mut modifiers = Vec::new();
+    if !modifier_section.is_empty() {
+        for token in modifier_section.split('+') {
+            let token = token.trim();
+            if token.is_empty() {
+                return Err(KeyError::UnknownKey(combo.trim().to_owned()));
+            }
+            let modifier = parse_modifier(token)?;
+            if modifiers.contains(&modifier) {
+                return Err(KeyError::DuplicateModifier(token.to_owned()));
+            }
+            modifiers.push(modifier);
+        }
+    }
 
     if main.is_empty() {
         return Err(KeyError::Empty);
     }
     let key = parse_key(main)?;
+    if modifiers.contains(&key) {
+        return Err(KeyError::DuplicateModifier(main.to_owned()));
+    }
     Ok(Combo { modifiers, key })
 }
 
@@ -306,22 +308,27 @@ fn tap_main_key(enigo: &mut Enigo, key: Key, _has_modifiers: bool) -> Result<(),
 ///
 /// All callers serialize through a process-global lock so two concurrent
 /// `press` RPC calls never interleave their modifier-down/key/modifier-up
-/// sequences. This is a blocking OS call; async callers should wrap with
-/// `tokio::task::spawn_blocking` to avoid stalling the runtime.
-pub fn simulate_press(combo: &str) -> Result<(), KeyError> {
+/// sequences. On macOS, this must run on the `AppKit` main thread because Enigo
+/// queries the current keyboard layout. Other platforms use a blocking worker.
+pub fn simulate_press(combo: &str, marker: i64) -> Result<(), KeyError> {
     let parsed = parse_combo(combo)?;
+    #[cfg(target_os = "macos")]
+    if objc2::MainThreadMarker::new().is_none() {
+        return Err(KeyError::EnigoInput("macOS key injection must run on the main thread".to_owned()));
+    }
     let _guard = PRESS_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| {
-        // The Accessibility permission hint only applies to macOS — on Linux
-        // (libei/X11) and Windows the remediation is different, so don't
-        // point users at the wrong fix.
-        #[cfg(target_os = "macos")]
-        let msg = format!("{e} (on macOS, grant Accessibility permission to the launching terminal)");
-        #[cfg(not(target_os = "macos"))]
-        let msg = e.to_string();
-        KeyError::EnigoInit(msg)
-    })?;
+    let mut enigo =
+        Enigo::new(&Settings { event_source_user_data: Some(marker), ..Settings::default() }).map_err(|e| {
+            // The Accessibility permission hint only applies to macOS — on Linux
+            // (libei/X11) and Windows the remediation is different, so don't
+            // point users at the wrong fix.
+            #[cfg(target_os = "macos")]
+            let msg = format!("{e} (on macOS, grant Accessibility permission to the launching terminal)");
+            #[cfg(not(target_os = "macos"))]
+            let msg = e.to_string();
+            KeyError::EnigoInit(msg)
+        })?;
 
     // Track how many modifiers were pressed so we can release exactly those
     // on any failure path — including failures during the modifier press loop.
@@ -360,6 +367,22 @@ pub fn simulate_press(combo: &str) -> Result<(), KeyError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duplicate_modifiers_cannot_expand_one_gesture_into_unbounded_events() {
+        for combo in ["Shift+Shift+a", "Control+Ctrl+a", "Meta+Command+a", "Alt+Option", "Shift+Shift"] {
+            assert!(matches!(parse_combo(combo), Err(KeyError::DuplicateModifier(_))), "{combo}");
+        }
+        assert!(matches!(parse_combo(&format!("{}a", "Shift+".repeat(100_000))), Err(KeyError::DuplicateModifier(_))));
+        assert_eq!(parse_combo("Control+Alt+Shift+Meta+a").expect("all distinct modifiers").modifiers.len(), 4);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn worker_thread_injection_fails_before_calling_hitoolbox() {
+        let result = std::thread::spawn(|| simulate_press("a", 1)).join().expect("worker must not crash");
+        assert!(matches!(result, Err(KeyError::EnigoInput(message)) if message.contains("main thread")));
+    }
 
     fn key_eq(a: Key, b: Key) -> bool {
         // Key doesn't impl PartialEq for all variants in older versions; format!-compare.

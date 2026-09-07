@@ -15,7 +15,7 @@ use tokio::sync::Mutex as AsyncMutex;
 /// events, so the window manager has time to actually transfer focus. Tuned
 /// empirically — too short and the first key on Wayland drops; too long and
 /// press feels sluggish.
-#[cfg(feature = "press")]
+#[cfg(all(feature = "press", not(target_os = "macos")))]
 const FOCUS_SETTLE_MS: u64 = 80;
 
 /// Serializes the full `focus → settle → inject` sequence across concurrent
@@ -25,6 +25,8 @@ const FOCUS_SETTLE_MS: u64 = 80;
 /// focus race.
 #[cfg(feature = "press")]
 static PRESS_ORDER_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
+#[cfg(feature = "press")]
+static NEXT_MARKER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0x4847_0000);
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const SCREENSHOT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -94,9 +96,32 @@ pub(crate) async fn dispatch(
     #[cfg(not(feature = "press"))]
     let _ = press_hooks;
 
+    if let Some(params) = params {
+        let object = params.as_object().ok_or_else(|| RpcError {
+            code: -32602,
+            message: "params must be an object of named parameters".to_owned(),
+            data: None,
+        })?;
+        if let Some(window) = object.get("window")
+            && window.as_str().is_none_or(str::is_empty)
+        {
+            return Err(RpcError { code: -32602, message: "window must be a non-empty string".to_owned(), data: None });
+        }
+        if matches!(method, "wait" | "watch")
+            && let Some(timeout) = object.get("timeout")
+            && timeout.as_u64().is_none_or(|value| i32::try_from(value).is_err())
+        {
+            return Err(RpcError {
+                code: -32602,
+                message: "timeout must be an integer between 0 and 2147483647 milliseconds".to_owned(),
+                data: None,
+            });
+        }
+    }
+
     // Save original params before window extraction so the recorder can strip
     // "window" internally.
-    let original_params = params.cloned();
+    let original_params = params;
 
     let (window, owned_params) = extract_window(params);
     let params = owned_params.as_ref().or(params);
@@ -117,13 +142,13 @@ pub(crate) async fn dispatch(
         }
         "snapshot" => {
             let result = handle_eval_method("snapshot", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await?;
-            engine.store_snapshot(&result);
+            engine.store_snapshot(win, &result);
             Ok(result)
         }
         "query" | "filter" => handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "diff" => handle_diff(params, engine, eval_fn, win).await,
         #[cfg(feature = "press")]
-        "press" => handle_press(params, press_hooks, win).await,
+        "press" => handle_press(params, press_hooks, win, engine, eval_fn).await,
         #[cfg(not(feature = "press"))]
         "press" => Err(RpcError {
             code: -32601,
@@ -192,7 +217,7 @@ pub(crate) async fn dispatch(
 
     // Auto-record on successful dispatches
     if result.is_ok() && recorder.is_active() {
-        recorder.record(method, original_params.as_ref());
+        recorder.record(method, original_params);
     }
 
     result
@@ -212,7 +237,7 @@ async fn handle_diff(
     let reference = if let Some(ref_val) = params.and_then(|p| p.get("reference")) {
         ref_val.clone()
     } else {
-        engine.get_last_snapshot().ok_or_else(|| RpcError {
+        engine.get_last_snapshot(window).ok_or_else(|| RpcError {
             code: -32602,
             message: "No previous snapshot available. Run `snapshot` first or use `diff --ref <file>`".to_owned(),
             data: None,
@@ -250,36 +275,110 @@ async fn handle_diff(
     // Parse both snapshots: extract "elements" arrays
     let old_elements: Vec<diff::SnapshotElement> = reference
         .get("elements")
-        .map(|v| serde_json::from_value(v.clone()))
-        .transpose()
+        .ok_or_else(|| RpcError {
+            code: -32602,
+            message: "Reference snapshot requires an elements array".to_owned(),
+            data: None,
+        })
+        .map(|v| serde_json::from_value(v.clone()))?
         .map_err(|e| RpcError {
             code: -32602,
             message: format!("Failed to parse reference snapshot elements: {e}"),
             data: None,
-        })?
-        .unwrap_or_default();
+        })?;
 
     let new_elements: Vec<diff::SnapshotElement> = result
         .get("elements")
-        .map(|v| serde_json::from_value(v.clone()))
-        .transpose()
+        .ok_or_else(|| RpcError {
+            code: -32603,
+            message: "New snapshot is missing its elements array".to_owned(),
+            data: None,
+        })
+        .map(|v| serde_json::from_value(v.clone()))?
         .map_err(|e| RpcError {
             code: -32603,
             message: format!("Failed to parse new snapshot elements: {e}"),
             data: None,
-        })?
-        .unwrap_or_default();
+        })?;
 
     let diff_result = diff::compute_diff(&old_elements, &new_elements);
 
     // Store the new snapshot for subsequent diffs
-    engine.store_snapshot(&result);
+    engine.store_snapshot(window, &result);
 
     serde_json::to_value(&diff_result).map_err(|e| RpcError {
         code: -32603,
         message: format!("Serialization error: {e}"),
         data: None,
     })
+}
+
+#[cfg(feature = "press")]
+struct PressRequest<'a> {
+    key_str: &'a str,
+    wait_for: Option<&'a str>,
+    webview_completion: bool,
+}
+
+#[cfg(feature = "press")]
+fn press_error(message: String, phase: &str, injected: bool) -> RpcError {
+    RpcError { code: -32603, message, data: Some(serde_json::json!({"phase": phase, "injected": injected})) }
+}
+
+#[cfg(feature = "press")]
+fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, RpcError> {
+    let wait_for = params
+        .and_then(|p| p.get("waitFor"))
+        .map(|value| {
+            value.as_str().filter(|s| !s.trim().is_empty()).ok_or_else(|| RpcError {
+                code: -32602,
+                message: "press waitFor must be a non-empty JavaScript expression".to_owned(),
+                data: None,
+            })
+        })
+        .transpose()?;
+    if wait_for.is_none() && params.is_some_and(|p| p.get("timeout").is_some()) {
+        return Err(RpcError { code: -32602, message: "press timeout requires waitFor".to_owned(), data: None });
+    }
+    let key_str =
+        params.and_then(|p| p.get("key")).and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).ok_or_else(
+            || RpcError {
+                code: -32602,
+                message: "press requires a non-empty \"key\" string param".to_owned(),
+                data: None,
+            },
+        )?;
+
+    // Parse the combo up front: a bad combo is a client input error, so we
+    // shouldn't take the serialization lock, steal focus, or sleep for it —
+    // and we report it as -32602 (invalid params) instead of letting the
+    // later spawn_blocking path surface it as -32603 (internal error).
+    let parsed = key::parse_combo(key_str).map_err(|e| RpcError {
+        code: -32602,
+        message: format!("invalid press combo: {e}"),
+        data: None,
+    })?;
+    let completion = match params.and_then(|p| p.get("completion")) {
+        None => "webview",
+        Some(value) => value.as_str().filter(|s| matches!(*s, "webview" | "native")).ok_or_else(|| RpcError {
+            code: -32602,
+            message: "press completion must be webview or native".to_owned(),
+            data: None,
+        })?,
+    };
+    let modifier_only =
+        matches!(parsed.key, enigo::Key::Shift | enigo::Key::Control | enigo::Key::Alt | enigo::Key::Meta);
+    let webview_completion = completion == "webview" && !modifier_only;
+    if params.and_then(|p| p.get("timeout")).is_some_and(|timeout| timeout.as_u64().is_none_or(|value| value > 10_000))
+    {
+        return Err(RpcError {
+            code: -32602,
+            message: "press postcondition timeout must be an integer between 0 and 10000 milliseconds".to_owned(),
+            data: None,
+        });
+    }
+
+    Ok(PressRequest { key_str, wait_for, webview_completion })
 }
 
 /// Handle the "press" method by injecting an OS-level keyboard event.
@@ -295,66 +394,36 @@ async fn handle_diff(
 /// docs (#45, #75, #114).
 #[cfg(feature = "press")]
 async fn handle_press(
-    params: Option<&serde_json::Value>, press_hooks: Option<&PressHooksRef>, window: Option<&str>,
+    params: Option<&serde_json::Value>, press_hooks: Option<&PressHooksRef>, window: Option<&str>, engine: &EvalEngine,
+    eval_fn: Option<&EvalFn>,
 ) -> Result<serde_json::Value, RpcError> {
-    let key_str =
-        params.and_then(|p| p.get("key")).and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).ok_or_else(
-            || RpcError {
-                code: -32602,
-                message: "press requires a non-empty \"key\" string param".to_owned(),
-                data: None,
-            },
-        )?;
-
-    // Parse the combo up front: a bad combo is a client input error, so we
-    // shouldn't take the serialization lock, steal focus, or sleep for it —
-    // and we report it as -32602 (invalid params) instead of letting the
-    // later spawn_blocking path surface it as -32603 (internal error).
-    key::parse_combo(key_str).map_err(|e| RpcError {
-        code: -32602,
-        message: format!("invalid press combo: {e}"),
-        data: None,
-    })?;
-
-    // An explicit `--window <label>` with no focus hook installed would
-    // otherwise silently drop the focus step and inject into whatever window
-    // currently has focus. Reject before taking any lock.
-    if window.is_some() && press_hooks.is_none() {
+    let PressRequest { key_str, wait_for, webview_completion } = parse_press(params)?;
+    if (webview_completion || wait_for.is_some()) && eval_fn.is_none() {
         return Err(RpcError {
             code: -32603,
-            message: "cannot focus target window: no focus hook installed".to_owned(),
+            message: "press completion requires an eval host".to_owned(),
             data: None,
         });
     }
 
-    // Hold this lock across the whole focus → settle → inject sequence so
-    // two concurrent `press` calls cannot interleave their focus steps (call
-    // A focuses window X, call B focuses window Y, then both keys land on Y).
-    let _order_guard = PRESS_ORDER_LOCK.lock().await;
+    let hooks = press_hooks.cloned().ok_or_else(|| RpcError {
+        code: -32603,
+        message: "native press requires host focus and injection hooks".to_owned(),
+        data: None,
+    })?;
 
-    if let Some(hooks) = press_hooks {
-        match (hooks.focus)(window) {
-            Ok(()) => {
-                // Only wait if the WM actually accepted the focus request —
-                // a failed focus call won't transfer focus, so sleeping
-                // would just delay the press for nothing.
-                tokio::time::sleep(Duration::from_millis(FOCUS_SETTLE_MS)).await;
-            }
-            Err(e) => {
-                if let Some(label) = window {
-                    // The caller explicitly targeted a window; silently
-                    // falling through would deliver the key to whatever
-                    // window currently has focus and still return ok.
-                    return Err(RpcError {
-                        code: -32603,
-                        message: format!("failed to focus window '{label}': {e}"),
-                        data: None,
-                    });
-                }
-                tracing::warn!(error = %e, "focus before press failed (continuing)");
-            }
-        }
-    }
+    // Serialize focus and injection, including requests on different sockets.
+    let _order_guard = PRESS_ORDER_LOCK.lock().await;
+    let focus_hooks = hooks.clone();
+    let focus_window = window.map(str::to_owned);
+    tokio::task::spawn_blocking(move || (focus_hooks.focus)(focus_window.as_deref()))
+        .await
+        .map_err(|e| press_error(format!("focus task failed: {e}"), "focus", false))?
+        .map_err(|e| press_error(format!("failed to focus target window: {e}"), "focus", false))?;
+    // The macOS hook confirms AppKit activation and key-window ownership.
+    // Other backends retain their existing settle interval.
+    #[cfg(not(target_os = "macos"))]
+    tokio::time::sleep(Duration::from_millis(FOCUS_SETTLE_MS)).await;
 
     let combo = key_str.to_owned();
     // Injection goes through the host's runner, which decides the thread: on
@@ -365,21 +434,24 @@ async fn handle_press(
     // keycodes and never take that path, which is why the bug stayed invisible
     // until a character was pressed. Other platforms inject from any thread and
     // their runner says so; that choice lives in `make_press_hooks`, not here.
-    let hooks = press_hooks.cloned();
-    tokio::task::spawn_blocking(move || match hooks {
-        Some(hooks) => {
-            let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
-            (hooks.run_injection)(Box::new(move || {
-                let _ = result_tx.send(key::simulate_press(&combo));
-            }))
-            .map_err(key::KeyError::EnigoInit)?;
-            result_rx
-                .recv()
-                .unwrap_or_else(|_| Err(key::KeyError::EnigoInit("native key injection produced no result".to_owned())))
-        }
-        // No host hooks (unit tests, and any embedder that installed none):
-        // there is no runner to defer to, so inject in place.
-        None => key::simulate_press(&combo),
+    let injection_window = window.map(str::to_owned);
+    let marker = NEXT_MARKER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let completion_params = serde_json::json!({"token": marker});
+    if webview_completion {
+        handle_eval_method("_preparePress", Some(&completion_params), engine, eval_fn, window, DEFAULT_TIMEOUT)
+            .await
+            .map_err(|mut error| {
+            error.data = Some(serde_json::json!({"phase": "prepare", "injected": false}));
+            error
+        })?;
+    }
+    let injection = tokio::task::spawn_blocking(move || {
+        (hooks.run_injection)(
+            injection_window.as_deref(),
+            marker,
+            webview_completion,
+            Box::new(move || key::simulate_press(&combo, marker).map_err(|e| e.to_string())),
+        )
     })
     .await
     .map_err(|e| {
@@ -393,11 +465,65 @@ async fn handle_press(
         } else {
             format!("press task failed: {e}")
         };
-        RpcError { code: -32603, message, data: None }
-    })?
-    .map_err(|e| RpcError { code: -32603, message: format!("press failed: {e}"), data: None })?;
+        RpcError { code: -32603, message, data: Some(serde_json::json!({"phase": "injection", "injected": "unknown"})) }
+    })
+    .and_then(|result| result.map_err(|error| injection_error(&error)));
+    let injected = injection.is_ok();
+    let completed = match injection {
+        Ok(()) if webview_completion => {
+            handle_eval_method("_waitPress", Some(&completion_params), engine, eval_fn, window, Duration::from_secs(12))
+                .await
+                .map(|_| ())
+        }
+        other => other,
+    };
+    if webview_completion {
+        // The bridge also expires observers itself, so navigation or a dead
+        // eval channel cannot leave a permanent listener behind.
+        if let Some(eval_fn) = eval_fn {
+            let _ = eval_fn(window, format!("window.__HASGARD__._cancelPress({completion_params})"));
+        }
+    }
+    completed.map_err(|mut error| {
+        if injected {
+            error.data = Some(serde_json::json!({"phase": "completion", "injected": true}));
+        }
+        error
+    })?;
 
+    if let Some(expression) = wait_for {
+        let mut wait_params = serde_json::json!({"expression": expression});
+        if let Some(timeout) = params.and_then(|p| p.get("timeout")) {
+            wait_params["timeout"] = timeout.clone();
+        }
+        // Keep the same ordering lock through the application's observable
+        // postcondition. Native event delivery alone cannot acknowledge an
+        // asynchronous WebKit edit, navigation, or input-method transaction.
+        handle_eval_method(
+            "wait",
+            Some(&wait_params),
+            engine,
+            eval_fn,
+            window,
+            bridge_eval_timeout(Some(&wait_params)),
+        )
+        .await
+        .map_err(|mut error| {
+            error.data = Some(serde_json::json!({"phase": "postcondition", "injected": true}));
+            error
+        })?;
+    }
     Ok(serde_json::json!({"ok": true}))
+}
+
+#[cfg(feature = "press")]
+fn injection_error(error: &crate::server::InjectionError) -> RpcError {
+    let injected = if error.started { serde_json::json!("unknown") } else { serde_json::json!(false) };
+    RpcError {
+        code: -32603,
+        message: format!("press failed: {}", error.message),
+        data: Some(serde_json::json!({"phase":"injection", "injected":injected})),
+    }
 }
 
 /// Handle a method that requires JS evaluation via the bridge.
@@ -455,17 +581,14 @@ fn build_bridge_call(method: &str, params: Option<&serde_json::Value>) -> Result
 
 /// Process the IPC callback from the JS bridge (ADR-001).
 pub(crate) fn handle_callback(engine: &EvalEngine, id: u64, result: Option<String>, error: Option<String>) {
-    if let Some(err) = error {
-        engine.resolve(id, Err(err));
-    } else if let Some(res) = result {
-        match serde_json::from_str(&res) {
-            Ok(val) => engine.resolve(id, Ok(val)),
-            Err(_) => engine.resolve(id, Ok(serde_json::Value::String(res))),
+    let outcome = match (result, error) {
+        (Some(result), None) => {
+            serde_json::from_str(&result).map_err(|error| format!("Invalid callback result JSON: {error}"))
         }
-    } else {
-        tracing::warn!(id, "callback received with neither result nor error");
-        engine.resolve(id, Ok(serde_json::Value::Null));
-    }
+        (None, Some(error)) => Err(error),
+        _ => Err("Callback requires exactly one of result or error".to_owned()),
+    };
+    engine.resolve(id, outcome);
 }
 
 /// Tauri IPC command for the eval callback handler.
@@ -496,6 +619,53 @@ pub(crate) fn __callback(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(feature = "press")]
+    #[test]
+    fn press_rejects_invalid_completion_and_postcondition_timeouts() {
+        for completion in [json!(null), json!(true), json!("unknown")] {
+            assert!(parse_press(Some(&json!({"key": "a", "completion": completion}))).is_err());
+        }
+        for timeout in [json!(null), json!(-1), json!(0.5), json!("100"), json!(10_001)] {
+            assert!(parse_press(Some(&json!({"key": "a", "waitFor": "true", "timeout": timeout}))).is_err());
+        }
+        assert!(parse_press(Some(&json!({"key": "a", "timeout": 1}))).is_err());
+        assert!(parse_press(Some(&json!({"key": "a", "waitFor": "true", "timeout": 0}))).is_ok());
+    }
+
+    #[tokio::test]
+    async fn malformed_callbacks_never_become_successful_null_or_raw_strings() {
+        let engine = EvalEngine::new();
+        for (result, error) in
+            [(None, None), (Some("null".to_owned()), Some("boom".to_owned())), (Some("not JSON".to_owned()), None)]
+        {
+            let (id, rx) = engine.register();
+            handle_callback(&engine, id, result, error);
+            assert!(rx.await.expect("callback resolves").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_optional_parameters_never_fall_back_to_main_or_default_timeout() {
+        let engine = EvalEngine::new();
+        for params in
+            [json!(null), json!([]), json!(5), json!({"window": 5}), json!({"window": null}), json!({"window": ""})]
+        {
+            let error = dispatch("ping", Some(&params), &engine, None, None, None, &Recorder::new())
+                .await
+                .expect_err("invalid params");
+            assert_eq!(error.code, -32602, "{params}");
+        }
+        for method in ["wait", "watch"] {
+            for timeout in [json!(null), json!("100"), json!(-1), json!(0.5), json!(2_147_483_648_u64)] {
+                let params = json!({"timeout": timeout});
+                let error = dispatch(method, Some(&params), &engine, None, None, None, &Recorder::new())
+                    .await
+                    .expect_err("invalid timeout");
+                assert_eq!(error.code, -32602, "{method}: {params}");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_dispatch_ping_returns_ok() {
@@ -539,7 +709,7 @@ mod tests {
         let engine = EvalEngine::new();
         let result = dispatch(
             "press",
-            Some(&json!({"key": "Enter", "window": "settings"})),
+            Some(&json!({"key": "Enter", "window": "settings", "completion": "native"})),
             &engine,
             None,
             None,
@@ -559,6 +729,74 @@ mod tests {
         let result = dispatch("press", None, &engine, None, None, None, &Recorder::new()).await;
         let err = result.expect_err("dispatch returns Err");
         assert_eq!(err.code, -32602);
+    }
+
+    #[cfg(feature = "press")]
+    #[tokio::test]
+    async fn default_window_focus_failure_never_injects_keys() {
+        let hooks = std::sync::Arc::new(crate::server::PressHooks {
+            focus: Box::new(|_| Err("focus denied".to_owned())),
+            run_injection: Box::new(|_, _, _, _| panic!("must not inject after failed focus")),
+        });
+        let error = dispatch(
+            "press",
+            Some(&json!({"key": "a", "completion": "native"})),
+            &EvalEngine::new(),
+            None,
+            None,
+            Some(&hooks),
+            &Recorder::new(),
+        )
+        .await
+        .expect_err("focus must fail closed");
+        assert_eq!(error.code, -32603);
+        assert!(error.message.contains("focus denied"));
+    }
+
+    #[cfg(feature = "press")]
+    #[tokio::test]
+    async fn injection_errors_preserve_whether_dispatch_started() {
+        for started in [false, true] {
+            let hooks = std::sync::Arc::new(crate::server::PressHooks {
+                focus: Box::new(|_| Ok(())),
+                run_injection: Box::new(move |_, _, _, _| {
+                    Err(crate::server::InjectionError { message: "injection rejected".to_owned(), started })
+                }),
+            });
+            let error = dispatch(
+                "press",
+                Some(&json!({"key":"a","completion":"native"})),
+                &EvalEngine::new(),
+                None,
+                None,
+                Some(&hooks),
+                &Recorder::new(),
+            )
+            .await
+            .expect_err("runner failed");
+            assert_eq!(
+                error.data,
+                Some(json!({"phase":"injection", "injected": if started { json!("unknown") } else { json!(false) }}))
+            );
+        }
+    }
+
+    #[cfg(feature = "press")]
+    #[tokio::test]
+    async fn default_window_requires_host_hooks() {
+        let error = dispatch(
+            "press",
+            Some(&json!({"key": "a", "completion": "native"})),
+            &EvalEngine::new(),
+            None,
+            None,
+            None,
+            &Recorder::new(),
+        )
+        .await
+        .expect_err("missing hooks must fail closed");
+        assert_eq!(error.code, -32603);
+        assert!(error.message.contains("host focus"));
     }
 
     #[tokio::test]

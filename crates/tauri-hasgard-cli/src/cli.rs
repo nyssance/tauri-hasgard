@@ -149,7 +149,18 @@ pub(crate) enum Command {
     /// Type text character by character.
     Type { target: String, text: String },
     /// Press a keyboard key.
-    Press { key: String },
+    Press {
+        key: String,
+        /// Native mode confirms posting only; use for OS shortcuts and navigation.
+        #[arg(long, value_parser = ["webview", "native"])]
+        completion: Option<String>,
+        /// Keep native presses serialized until this JavaScript expression is truthy.
+        #[arg(long)]
+        wait_for: Option<String>,
+        /// Postcondition timeout in milliseconds.
+        #[arg(long, requires = "wait_for")]
+        timeout: Option<u32>,
+    },
     /// Select an option in a <select>.
     Select { target: String, value: String },
     /// Toggle a checkbox, or drive it to a state with --state.

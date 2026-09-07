@@ -205,8 +205,7 @@ pub(crate) async fn handle_screenshot(params: Option<&Value>) -> Result<Value, R
 #[cfg(target_os = "macos")]
 fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
     use super::{
-        EnumeratedLayerZeroWindows, ScreenshotBackend, ScreenshotError, WindowBounds, enumerate_layer_zero_windows,
-        selected_backend,
+        EnumeratedLayerZeroWindows, ScreenshotBackend, ScreenshotError, enumerate_layer_zero_windows, selected_backend,
     };
 
     let ScreenshotRequest { window_id, output_path } = req;
@@ -231,7 +230,7 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
         ),
     })?;
 
-    if target_bounds.is_none() {
+    let Some(logical_bounds) = target_bounds else {
         return Err(rpc_error(
             RPC_INVALID_PARAMS,
             codes::WINDOW_NOT_FOUND,
@@ -239,6 +238,18 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
             json!({
                 "available_windows": render_available_windows(&discovered),
             }),
+        ));
+    };
+    if !logical_bounds.width.is_finite()
+        || logical_bounds.width <= 0.0
+        || !logical_bounds.height.is_finite()
+        || logical_bounds.height <= 0.0
+    {
+        return Err(rpc_error(
+            RPC_INTERNAL_ERROR,
+            codes::CAPTURE_FAILED,
+            "window has invalid logical bounds",
+            Value::Null,
         ));
     }
 
@@ -255,8 +266,13 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
         }
     };
 
-    let logical_bounds = target_bounds.unwrap_or(WindowBounds { width: 0.0, height: 0.0 });
-    let scale_factor = compute_scale_factor(metadata.width, logical_bounds);
+    let scale_factor = match compute_scale_factor(metadata.width, logical_bounds) {
+        Ok(scale) => scale,
+        Err(error) => {
+            cleanup_tmp(&tmp_path);
+            return Err(error);
+        }
+    };
 
     if let Err(err) = std::fs::rename(&tmp_path, &output_path) {
         cleanup_tmp(&tmp_path);
@@ -435,13 +451,9 @@ fn read_png_metadata(path: &Path) -> Result<PngMetadata, RpcError> {
 }
 
 /// Derive `scale_factor` by dividing pixel width by logical (point) width.
-/// Falls back to 1.0 when the logical bounds are unknown or zero so the
-/// response never returns NaN/Inf.
+/// Invalid dimensions are errors; never invent display metadata.
 #[cfg(target_os = "macos")]
-fn compute_scale_factor(pixel_width: u32, logical: super::WindowBounds) -> f32 {
-    if logical.width <= 0.0 {
-        return 1.0;
-    }
+fn compute_scale_factor(pixel_width: u32, logical: super::WindowBounds) -> Result<f32, RpcError> {
     let scale = f64::from(pixel_width) / logical.width;
     if scale.is_finite() && scale > 0.0 {
         // Round to 2 decimal places to avoid `2.00000003` artifacts when the
@@ -453,9 +465,13 @@ fn compute_scale_factor(pixel_width: u32, logical: super::WindowBounds) -> f32 {
         let rounded = (scale * 100.0).round() / 100.0;
         #[allow(clippy::cast_possible_truncation, reason = "Retina scale factors fit in f32 without loss")]
         let scale_f32 = rounded as f32;
-        scale_f32
+        if scale_f32.is_finite() && scale_f32 > 0.0 {
+            Ok(scale_f32)
+        } else {
+            Err(rpc_error(RPC_INTERNAL_ERROR, codes::CAPTURE_FAILED, "invalid capture scale factor", Value::Null))
+        }
     } else {
-        1.0
+        Err(rpc_error(RPC_INTERNAL_ERROR, codes::CAPTURE_FAILED, "invalid capture dimensions", Value::Null))
     }
 }
 

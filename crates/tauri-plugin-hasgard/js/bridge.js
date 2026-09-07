@@ -932,11 +932,12 @@
   // element. Counting first and indexing second would let the DOM change in
   // between and silently act on a different node. A negative index counts back
   // from the end, which is what makes `last()` a single call.
-  function selectorAt(doc, selector, index) {
+  function selectorAt(doc, selector, index, allowMissing) {
     var matches = doc.querySelectorAll(selector);
     var position = index < 0 ? matches.length + index : index;
     var el = matches[position];
     if (!el) {
+      if (allowMissing) return null;
       throw new Error(
         "No element at index " + index + " for selector: " + selector + " (" + matches.length + " matched)"
       );
@@ -944,7 +945,7 @@
     return el;
   }
 
-  function resolveTarget(params) {
+  function resolveTarget(params, allowMissing) {
     // A ref already identifies one node, whichever document minted it, so the
     // frame chain is not consulted -- re-resolving would only be a chance to
     // disagree with the snapshot that produced the ref.
@@ -955,10 +956,10 @@
         if (typeof params.index !== "number" || !Number.isInteger(params.index)) {
           throw new Error("index must be an integer");
         }
-        return selectorAt(doc, params.selector, params.index);
+        return selectorAt(doc, params.selector, params.index, allowMissing);
       }
       var el = doc.querySelector(params.selector);
-      if (!el) throw new Error("No element matches selector: " + params.selector);
+      if (!el && !allowMissing) throw new Error("No element matches selector: " + params.selector);
       return el;
     }
     if (params.x != null && params.y != null) {
@@ -1506,7 +1507,8 @@
   }
 
   function visible(params) {
-    const el = resolveTarget(params);
+    const el = resolveTarget(params, true);
+    if (!el) return { visible: false };
     const style = getComputedStyle(el);
     const isVisible =
       style.display !== "none" &&
@@ -2056,7 +2058,85 @@
     return { forms: result, truncated: truncated };
   }
 
+  var pendingPresses = new Map();
+
+  // Passive observation of real keyboard events. These methods never dispatch
+  // an event or edit an input; Rust retains the native-input ordering lock.
+  function preparePress(options) {
+    var token = options.token;
+    if (pendingPresses.has(token)) throw new Error("Duplicate native press token");
+    var documents = [];
+    function collect(doc) {
+      documents.push(doc);
+      for (var frame of doc.querySelectorAll("iframe")) {
+        try {
+          if (frame.contentDocument) collect(frame.contentDocument);
+          else if (doc.activeElement === frame) throw new Error("Focused frame is not accessible for webview press completion");
+        }
+        catch (error) {
+          if (doc.activeElement === frame) throw new Error("Focused frame is not accessible for webview press completion");
+        }
+      }
+    }
+    collect(document);
+    var contexts = documents.map(function (doc) {
+      if (!doc.defaultView) throw new Error("Document detached while preparing native press completion");
+      return doc.defaultView;
+    });
+    var resolve;
+    var promise = new Promise(function (done) { resolve = done; });
+    var entry = { promise: promise, cleanup: null };
+    var pressedCodes = new Set();
+    var sawMainKey = false;
+    function removeListeners() {
+      for (var context of contexts) {
+        context.removeEventListener("keydown", pressed, true);
+        context.removeEventListener("keyup", released, true);
+      }
+    }
+    function pressed(event) {
+      if (event.isTrusted && event.code) {
+        pressedCodes.add(event.code);
+        if (!/^(Shift|Control|Alt|Meta)(Left|Right)$/.test(event.code)) sawMainKey = true;
+      }
+    }
+    function released(event) {
+      if (!event.isTrusted || !pressedCodes.delete(event.code) || pressedCodes.size !== 0 || !sawMainKey) return;
+      removeListeners();
+      resolve({ ok: true });
+    }
+    var timer = setTimeout(function () {
+      removeListeners();
+      pendingPresses.delete(token);
+      resolve({ ok: false });
+    }, 10000);
+    entry.cleanup = function () { clearTimeout(timer); removeListeners(); resolve({ ok: false }); };
+    pendingPresses.set(token, entry);
+    for (var context of contexts) {
+      context.addEventListener("keydown", pressed, true);
+      context.addEventListener("keyup", released, true);
+    }
+    return { ok: true };
+  }
+
+  function waitPress(options) {
+    var entry = pendingPresses.get(options.token);
+    if (!entry) throw new Error("Native press completion observer expired or document changed");
+    return entry.promise.then(function (result) {
+      if (!result.ok) throw new Error("Native press timed out waiting for a trusted webview keyup; use completion=native for OS shortcuts or navigation");
+      return result;
+    });
+  }
+
+  function cancelPress(options) {
+    var entry = pendingPresses.get(options.token);
+    if (entry) { entry.cleanup(); pendingPresses.delete(options.token); }
+  }
+
   window.__HASGARD__ = {
+    _preparePress: preparePress,
+    _waitPress: waitPress,
+    _cancelPress: cancelPress,
     snapshot: snapshot,
     query: query,
     filter: filterElements,

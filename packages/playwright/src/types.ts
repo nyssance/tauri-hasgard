@@ -75,6 +75,13 @@ export interface DragOffset {
 /** A held keyboard modifier. Named as the platform reports them on the event. */
 export type KeyModifier = "Alt" | "Control" | "Meta" | "Shift"
 
+/** An application postcondition to await before another native press may focus a window. */
+export interface PressOptions {
+  completion?: "webview" | "native"
+  waitFor?: string
+  timeoutMs?: number
+}
+
 export type MouseButton = "left" | "middle" | "right"
 
 /** A point inside the element, measured from its top-left corner. */

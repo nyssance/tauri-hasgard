@@ -7,6 +7,16 @@
 import type { HasgardWindow } from "@nyssance/tauri-hasgard"
 import { expect, test } from "../fixtures.js"
 
+test("missing elements are not visible while query and transport errors still fail", async ({ hasgard, window }) => {
+  await expect(window.locator("#definitely-absent")).not.toBeVisible({ timeout: 0 })
+  await expect(window.getByRole("button", { name: "definitely absent", exact: true })).not.toBeVisible({ timeout: 0 })
+  await expect(window.locator("button").nth(10000)).not.toBeVisible({ timeout: 0 })
+  await expect(expect(window.locator("[")).not.toBeVisible({ timeout: 0 })).rejects.toThrow()
+  await expect(
+    expect(hasgard.window("missing-window").locator("button")).not.toBeVisible({ timeout: 0 })
+  ).rejects.toThrow()
+})
+
 test("finds a button by the text it shows, not the accessible name that outranks it", async ({ window }) => {
   // #labelled reports "Save profile" as its snapshot name; the visible text is
   // "Submit changes". A name-based locator could only ever reach the former.
@@ -157,6 +167,16 @@ test("diffs the accessibility tree across a real interaction", async ({ window }
   expect(touched.some(element => (element.name ?? "").includes("Aiolia"))).toBe(true)
 })
 
+test("snapshot baselines stay isolated between real windows", async ({ hasgard, window }) => {
+  const settings = hasgard.window("settings")
+  await hasgard.waitForWindowReady("settings", 'html[data-hasgard-ready="true"]', 10_000)
+  await window.snapshot()
+  await settings.snapshot()
+  await expect(window.diff()).resolves.toEqual({ added: [], removed: [], changed: [] })
+  await expect(settings.diff()).resolves.toEqual({ added: [], removed: [], changed: [] })
+  await expect(window.diff({ reference: {} as never })).rejects.toThrow(/elements array/)
+})
+
 test("reports the page title and URL without a full state read", async ({ window }) => {
   await expect(window.title()).resolves.toBe("Hasgard fixture")
   await expect(window.url()).resolves.toBe("tauri://localhost")
@@ -185,7 +205,18 @@ test("captures the native window without being told its id", async ({ window }, 
   test.skip(process.platform !== "darwin", "native capture is macOS-only")
 
   const outputPath = testInfo.outputPath("native.png")
-  const shot = await window.screenshotNative({ outputPath })
+  await window.press("Shift")
+  let shot = await window.screenshotNative({ outputPath })
+  if (!shot.tcc_denied && shot.backend === "screencapture") {
+    const scale = await window.evaluate<number>("window.devicePixelRatio")
+    // Stage Manager animates a real window between thumbnail and full size.
+    // Require full-size pixels once that animation finishes, rather than
+    // treating its intermediate capture scale as the display's backing scale.
+    await expect(async () => {
+      shot = await window.screenshotNative({ outputPath })
+      expect(shot.scale_factor).toBeCloseTo(scale, 2)
+    }).toPass({ timeout: 5_000 })
+  }
 
   // Screen recording permission is a machine-level grant this suite cannot
   // make. Without it the capture still reports its metadata, so assert the
@@ -196,6 +227,9 @@ test("captures the native window without being told its id", async ({ window }, 
     expect(shot.width).toBeGreaterThan(0)
     expect(shot.height).toBeGreaterThan(0)
     expect(shot.byte_size).toBeGreaterThan(1_000)
+    if (shot.backend === "screencapture") {
+      expect(shot.scale_factor).toBeCloseTo(await window.evaluate<number>("window.devicePixelRatio"), 2)
+    }
   }
 })
 

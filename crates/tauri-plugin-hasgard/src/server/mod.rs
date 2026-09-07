@@ -20,7 +20,14 @@ pub(crate) type FocusHook = Box<dyn Fn(Option<&str>) -> Result<(), String> + Sen
 
 /// Runs a native key-injection closure on whichever thread the host platform
 /// requires, and blocks until it has finished.
-pub(crate) type InjectionRunner = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> Result<(), String> + Send + Sync>;
+pub(crate) type InjectionTask = Box<dyn FnOnce() -> Result<(), String> + Send>;
+#[derive(Debug)]
+pub(crate) struct InjectionError {
+    pub(crate) message: String,
+    pub(crate) started: bool,
+}
+pub(crate) type InjectionRunner =
+    Box<dyn Fn(Option<&str>, i64, bool, InjectionTask) -> Result<(), InjectionError> + Send + Sync>;
 
 /// Host hooks the `press` path needs from the Tauri runtime.
 ///
@@ -44,7 +51,7 @@ pub(crate) async fn handle_connection<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    const MAX_LINE_LENGTH: usize = 1_048_576;
+    const MAX_LINE_LENGTH: usize = crate::protocol::MAX_REQUEST_BYTES;
 
     let (mut reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(&mut reader);
@@ -120,3 +127,36 @@ pub use unix::{bind, run, socket_path};
 // and is not re-exported — only `run` and `socket_path` are used by plugin setup.
 #[cfg(windows)]
 pub use windows::{run, socket_path};
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn request_limit_includes_newline_and_preserves_boundary_requests() {
+        let limit = crate::protocol::MAX_REQUEST_BYTES;
+        for oversized in [false, true] {
+            let (client, server) = tokio::io::duplex(limit * 2);
+            let server_task = tokio::spawn(async move {
+                handle_connection(server, &EvalEngine::new(), None, None, None, &Recorder::new()).await
+            });
+            let request = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
+            let mut line = request.to_string();
+            line.push_str(&" ".repeat(limit - line.len() - 1 + usize::from(oversized)));
+            line.push('\n');
+            let (reader, mut writer) = tokio::io::split(client);
+            writer.write_all(line.as_bytes()).await.expect("write boundary request");
+            let mut response = String::new();
+            BufReader::new(reader).read_line(&mut response).await.expect("read response");
+            let response: Response = serde_json::from_str(&response).expect("valid response envelope");
+            if oversized {
+                assert!(response.id.is_null());
+                assert_eq!(response.error.expect("limit error").code, -32700);
+            } else {
+                assert_eq!(response.result.expect("ping result")["status"], "ok");
+            }
+            drop(writer);
+            server_task.await.expect("server task").expect("connection handler");
+        }
+    }
+}

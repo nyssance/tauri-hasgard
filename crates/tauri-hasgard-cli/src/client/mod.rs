@@ -1,8 +1,24 @@
-use crate::protocol::{Request, Response};
+use crate::protocol::{MAX_REQUEST_BYTES, Request, Response, RpcError};
 
 use anyhow::{Result, bail};
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+/// Preserve the plugin's error data across CLI and MCP presentation layers.
+#[derive(Debug)]
+pub(crate) struct RpcFailure(pub RpcError);
+
+impl std::fmt::Display for RpcFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "RPC error ({}): {}", self.0.code, self.0.message)?;
+        if let Some(data) = &self.0.data {
+            write!(formatter, " [data: {data}]")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RpcFailure {}
 
 /// JSON-RPC client over a platform-specific transport (Unix socket or Named Pipe).
 pub(crate) struct Client {
@@ -39,6 +55,9 @@ impl Client {
 
         let mut bytes = serde_json::to_vec(&request)?;
         bytes.push(b'\n');
+        if bytes.len() > MAX_REQUEST_BYTES {
+            bail!("Hasgard request is {} bytes; maximum is {MAX_REQUEST_BYTES} bytes including newline", bytes.len());
+        }
         self.writer.write_all(&bytes).await?;
         self.writer.flush().await?;
 
@@ -50,20 +69,21 @@ impl Client {
 
         let response: Response = serde_json::from_str(line.trim())?;
 
+        if response.id.is_null() {
+            let err = response.error.ok_or_else(|| anyhow::anyhow!("Uncorrelated response has no error"))?;
+            return Err(RpcFailure(err).into());
+        }
+
         if response.id != serde_json::Value::Number(id.into()) {
             bail!("Response ID mismatch: expected {id}, got {}", response.id);
         }
 
         if let Some(err) = response.error {
-            bail!("RPC error ({}): {}", err.code, err.message);
+            return Err(RpcFailure(err).into());
         }
 
-        // A missing `result` field (or explicit `"result": null`) means the
-        // server-side script completed successfully but produced no value —
-        // e.g., `element.click()` or any void expression. Treat this as
-        // success with Value::Null rather than an error so bash `&&` chains
-        // and `set -e` keep working. See #48.
-        Ok(response.result.unwrap_or(serde_json::Value::Null))
+        // Deserialization preserves explicit null and rejects an absent result.
+        response.result.ok_or_else(|| anyhow::anyhow!("RPC response is missing result"))
     }
 }
 
@@ -82,6 +102,51 @@ mod tests {
     use tokio::net::UnixListener;
 
     static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    #[tokio::test]
+    async fn shared_response_contract_over_transport() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../protocol-responses.json")).expect("cases");
+        for case in cases.as_array().expect("array") {
+            let directory = tempfile::tempdir().expect("temp directory");
+            let socket = directory.path().join("rpc.sock");
+            let listener = UnixListener::bind(&socket).expect("listen");
+            let response = case["response"].clone();
+            let handle = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.expect("accept");
+                let (reader, mut writer) = stream.into_split();
+                let mut line = String::new();
+                BufReader::new(reader).read_line(&mut line).await.expect("request");
+                writer.write_all(format!("{response}\n").as_bytes()).await.expect("response");
+            });
+            let mut client = Client::connect(&socket).await.expect("connect");
+            let result = client.call("ping", None).await;
+            if case["valid"] == true && case["response"].get("result").is_some() {
+                assert_eq!(result.expect("valid result"), case["response"]["result"], "{}", case["name"]);
+            } else {
+                let error = result.expect_err("error response or invalid envelope");
+                if case["valid"] == true {
+                    let failure = error.downcast_ref::<RpcFailure>().expect("typed RPC error");
+                    assert_eq!(serde_json::to_value(&failure.0).expect("error payload"), case["response"]["error"]);
+                }
+            }
+            handle.await.expect("server");
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_request_does_not_poison_connection() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let socket = directory.path().join("rpc.sock");
+        let handle = mock_server(&socket);
+        let mut client = Client::connect(&socket).await.expect("connect");
+        let error = client
+            .call("eval", Some(serde_json::json!({"script": "界".repeat(MAX_REQUEST_BYTES / 2)})))
+            .await
+            .expect_err("request exceeds UTF-8 limit");
+        assert!(error.to_string().contains("maximum is 1048576"));
+        assert_eq!(client.call("ping", None).await.expect("still connected"), serde_json::json!({"status": "ok"}));
+        handle.abort();
+    }
 
     /// Build a unique socket path per test invocation so parallel `cargo test`
     /// runs (same process, different tests) don't clobber each other's sockets
@@ -171,13 +236,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_missing_result_is_success() {
-        // Defensive coverage: a response with neither `result` nor `error` is
-        // technically a JSON-RPC protocol edge case. The #48 path proper is
-        // covered by `test_client_null_result_is_success` above (explicit
-        // `"result": null`); this test pins down the companion shape where
-        // the field is omitted entirely. Both end up as `Value::Null` via
-        // `unwrap_or`.
+    async fn test_client_missing_result_is_protocol_error() {
         let socket = unique_socket_path("t05d");
         let _ = std::fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket).expect("bind mock socket");
@@ -196,8 +255,8 @@ mod tests {
         });
 
         let mut client = connect_with_retry(&socket).await;
-        let result = client.call("eval", None).await.expect("eval call");
-        assert_eq!(result, serde_json::Value::Null);
+        let error = client.call("eval", None).await.expect_err("missing result must fail");
+        assert!(error.to_string().contains("exactly one of result or error"));
 
         handle.abort();
         let _ = std::fs::remove_file(&socket);

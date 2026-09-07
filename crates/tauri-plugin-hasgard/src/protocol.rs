@@ -1,3 +1,5 @@
+pub(crate) const MAX_REQUEST_BYTES: usize = 1_048_576;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// JSON-RPC 2.0 numeric error codes (subset used by this crate).
@@ -32,7 +34,7 @@ pub(crate) struct Request {
 }
 
 /// A JSON-RPC 2.0 response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct Response {
     pub jsonrpc: String,
     pub id: serde_json::Value,
@@ -40,6 +42,41 @@ pub(crate) struct Response {
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<RpcError>,
+}
+
+impl<'de> Deserialize<'de> for Response {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let object = value.as_object().ok_or_else(|| D::Error::custom("response must be an object"))?;
+        if object.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0") {
+            return Err(D::Error::custom("response jsonrpc must be 2.0"));
+        }
+        let id = object.get("id").ok_or_else(|| D::Error::custom("response id is required"))?;
+        if !id.is_null() && id.as_u64().is_none_or(|id| id > 9_007_199_254_740_991) {
+            return Err(D::Error::custom("response id must be a nonnegative safe integer or null"));
+        }
+        let has_result = object.contains_key("result");
+        let has_error = object.contains_key("error");
+        if has_result == has_error {
+            return Err(D::Error::custom("response requires exactly one of result or error"));
+        }
+        if has_result && id.is_null() {
+            return Err(D::Error::custom("successful response id must not be null"));
+        }
+        let error = object
+            .get("error")
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()
+            .map_err(D::Error::custom)?;
+        Ok(Self {
+            jsonrpc: "2.0".to_owned(),
+            id: id.clone(),
+            // Preserve explicit null: it is a valid result, unlike an absent field.
+            result: object.get("result").cloned(),
+            error,
+        })
+    }
 }
 
 /// A JSON-RPC 2.0 error object.
@@ -74,6 +111,19 @@ impl Response {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn shared_response_contract() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("protocol-responses.json")).expect("contract JSON");
+        for case in cases.as_array().expect("cases") {
+            let parsed = serde_json::from_value::<Response>(case["response"].clone());
+            assert_eq!(parsed.is_ok(), case["valid"].as_bool().expect("valid flag"), "{}: {parsed:?}", case["name"]);
+            if let Ok(response) = parsed {
+                assert_eq!(serde_json::to_value(response).expect("serialize"), case["response"], "{}", case["name"]);
+            }
+        }
+    }
 
     #[test]
     fn test_deserialize_request_with_params() {

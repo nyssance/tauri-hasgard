@@ -26,6 +26,7 @@ import type {
   NativeScreenshotOptions,
   NetworkRequestEntry,
   NetworkRequestOptions,
+  PressOptions,
   QueryDimension,
   RecorderEntry,
   RecorderResult,
@@ -515,8 +516,14 @@ export class HasgardWindow {
     await this.rpc.call("scroll", withWindow(this.label, options as unknown as Record<string, JsonValue>))
   }
 
-  async press(key: string): Promise<void> {
-    await this.rpc.call("press", withWindow(this.label, { key }))
+  async press(key: string, options?: PressOptions): Promise<void> {
+    const params: Record<string, JsonValue> = { key }
+    if (options) {
+      if (options.completion !== undefined) params.completion = options.completion
+      if (options.waitFor !== undefined) params.waitFor = options.waitFor
+      if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
+    }
+    await this.rpc.call("press", withWindow(this.label, params))
   }
 
   async diff(options: DiffOptions = {}): Promise<SnapshotDiff> {
@@ -1070,7 +1077,9 @@ export class HasgardLocator {
   }
 
   async isVisible(): Promise<boolean> {
-    return this.withTarget(async target => {
+    return this.window.runExclusive(async () => {
+      const target = await this.resolveUnique(true)
+      if (target === null) return false
       const value = expectRecord(await this.window.call("visible", this.scoped(target)), "visible result")
       return expectBoolean(value.visible, "visible.visible")
     })
@@ -1160,7 +1169,9 @@ export class HasgardLocator {
     return this.nth(-1)
   }
 
-  private async resolveUnique(): Promise<HasgardTarget> {
+  private resolveUnique(): Promise<HasgardTarget>
+  private resolveUnique(allowMissing: true): Promise<HasgardTarget | null>
+  private async resolveUnique(allowMissing = false): Promise<HasgardTarget | null> {
     // An unfiltered CSS locator resolves inside the same round trip that acts
     // on it, so the DOM cannot shift in between. A filter needs the elements'
     // text, which only the general path can read — accept the extra trip.
@@ -1173,10 +1184,12 @@ export class HasgardLocator {
     if (this.query.index !== undefined) {
       const element = elements[absoluteIndex(this.query.index, elements.length)]
       if (!element) {
+        if (allowMissing) return null
         throw new Error(`Locator has no element at index ${this.query.index} (${elements.length} matched)`)
       }
       return byRef(element.ref)
     }
+    if (elements.length === 0 && allowMissing) return null
     if (elements.length !== 1) {
       throw new Error(`Locator resolved to ${elements.length} elements; expected exactly one`)
     }

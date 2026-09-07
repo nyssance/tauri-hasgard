@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.0 — 2026-09-07
+
+- Known limitation: native keyboard rechecks still include unresolved failures.
+  The review records implementation consensus, not a fully passing native suite.
+  See `benchmarks/macos/REVIEW.md` in the repository for the verification record.
+
+- Terminate owned process groups even when endpoint metadata becomes
+  inaccessible during startup; retain and retry endpoint cleanup errors.
+
+- **Breaking:** `window.press` defaults to trusted WebView-keyup completion.
+  `{ completion: "native" }` confirms OS posting only for native shortcuts or
+  navigation. `{ waitFor, timeoutMs }` adds an application postcondition held
+  under the plugin's cross-connection keyboard lock, capped at ten seconds.
+- Preserve crashes and log tails in `HasgardProcess.diagnostics()` and fixture
+  failure attachments. A failed screenshot no longer masks the test error.
+- Remove owned stale endpoints after normal teardown and worker death while
+  preserving replacement files and live foreign sockets.
+- Reject RPC errors in both positive and negated assertions; read once even
+  when their timeout is zero.
+
+- Watch JavaScript and declarations separately in development, avoiding tsup
+  declaration generation that is incompatible with the installed TypeScript API.
+
+- Reap managed macOS applications after a Playwright worker is SIGKILLed using an
+  independent IPC supervisor. Share normal and orphan group cleanup, bound IPC
+  output buffering, and verify both real native teardown and resistant children.
+- Make fixture turn heights actually unequal and assert their rendered dimensions.
+
+- Fix Unix process-group cleanup, restart after launch failures, concurrent stop,
+  live socket preservation, connection-based readiness, and bounded diagnostics.
+- Validate JSON-RPC envelopes against shared contract cases. Preserve explicit
+  null results, reject missing results, and report uncorrelated server errors.
+- Reject requests above the plugin's 1 MiB UTF-8 line limit before sending them.
+
 ## 0.3.0
 
 - Add `locator.click(options)` with `modifiers`, `button`, `clickCount`, and

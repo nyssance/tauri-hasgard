@@ -97,9 +97,20 @@ async fn run_cli() -> Result<()> {
         let res =
             run_command(&mut client, args.command, Scope { window: args.window.as_deref(), frame: &args.frame }).await;
         spinner.finish_and_clear();
-        res?
+        res
     } else {
-        run_command(&mut client, args.command, Scope { window: args.window.as_deref(), frame: &args.frame }).await?
+        run_command(&mut client, args.command, Scope { window: args.window.as_deref(), frame: &args.frame }).await
+    };
+    let result = match result {
+        Ok(value) => value,
+        Err(error) => {
+            if args.json
+                && let Some(failure) = error.downcast_ref::<client::RpcFailure>()
+            {
+                output::format_json(&json!({"error": failure.0}))?;
+            }
+            return Err(error);
+        }
     };
 
     // Screenshot save-to-file: decode base64 data URL and write PNG
@@ -560,6 +571,7 @@ async fn run_click(
     client.call("click", with_scope(Some(params), scope)).await
 }
 
+#[allow(clippy::too_many_lines, reason = "one match keeps CLI-to-protocol mappings reviewable together")]
 async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>) -> Result<serde_json::Value> {
     match command {
         Command::Query { by, value, exact } => {
@@ -620,7 +632,19 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             p["text"] = json!(text);
             client.call("type", with_scope(Some(p), scope)).await
         }
-        Command::Press { key } => client.call("press", with_scope(Some(json!({"key": key})), scope)).await,
+        Command::Press { key, completion, wait_for, timeout } => {
+            let mut params = json!({"key": key});
+            if let Some(completion) = completion {
+                params["completion"] = json!(completion);
+            }
+            if let Some(expression) = wait_for {
+                params["waitFor"] = json!(expression);
+            }
+            if let Some(timeout) = timeout {
+                params["timeout"] = json!(timeout);
+            }
+            client.call("press", with_scope(Some(params), scope)).await
+        }
         Command::Select { target, value } => {
             let mut p = target_params(&target);
             p["value"] = json!(value);

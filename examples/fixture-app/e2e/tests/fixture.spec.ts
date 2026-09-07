@@ -39,6 +39,11 @@ test("routes commands to a real secondary window without leaking to main", async
 
 test("handles 80 unequal-height turns", async ({ window }) => {
   await expect(window.locator("[data-turn]").count()).resolves.toBe(80)
+  const heights = await window.evaluate<number[]>(
+    'Array.from(document.querySelectorAll("[data-turn]"), element => element.getBoundingClientRect().height)'
+  )
+  expect(Math.min(...heights)).toBeGreaterThan(0)
+  expect(Math.max(...heights)).toBeGreaterThan(Math.min(...heights))
   await expect(window.locator('[data-turn="80"]')).toHaveText(/Turn 80, line 4/)
 })
 

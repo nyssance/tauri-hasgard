@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite --port 14731 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "build:e2e": "tauri build --debug --no-bundle --features hasgard-testing",
+    "build:e2e": "cargo build -p tauri-hasgard-cli && tauri build --debug --no-bundle --features hasgard-testing",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "test:e2e": "bun run build:e2e && playwright test"
+    "test:e2e": "bun run build:e2e && playwright test --config e2e/playwright.config.ts",
+    "test:e2e:stress": "bun run build:e2e && HASGARD_NATIVE_STRESS=1 playwright test --config e2e/playwright.config.ts native-focus.spec.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1"
