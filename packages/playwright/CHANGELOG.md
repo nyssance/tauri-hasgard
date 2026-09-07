@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-09-07
+
+- Keep waiting for process-group disappearance when a zero-signal probe returns
+  EPERM during macOS teardown; preserve errors from actual termination signals.
+- Supersedes the blocked 0.4.0 release attempt and includes its changes below.
+
 ## 0.4.0 — 2026-09-07
 
 - Known limitation: native keyboard rechecks still include unresolved failures.

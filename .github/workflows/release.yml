@@ -115,7 +115,7 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
-          body_path: docs/release-0.4.0.md
+          body_path: docs/release-${{ github.ref_name }}.md
           files: |
             dist/tauri-hasgard-*
             dist/SHA256SUMS
