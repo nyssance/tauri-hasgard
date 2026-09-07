@@ -18,7 +18,6 @@ const hash = name =>
     .digest("hex")
 
 const macArm = `${asset("aarch64-apple-darwin")}.tar.gz`
-const macIntel = `${asset("x86_64-apple-darwin")}.tar.gz`
 const winArm = `${asset("aarch64-pc-windows-msvc")}.zip`
 const winIntel = `${asset("x86_64-pc-windows-msvc")}.zip`
 
@@ -28,15 +27,10 @@ const formula = `class TauriHasgard < Formula
   version "${version}"
   license "Apache-2.0"
 
-  on_arm do
-    url "${release}/${macArm}"
-    sha256 "${hash(macArm)}"
-  end
-
-  on_intel do
-    url "${release}/${macIntel}"
-    sha256 "${hash(macIntel)}"
-  end
+  depends_on :macos
+  depends_on arch: :arm64
+  url "${release}/${macArm}"
+  sha256 "${hash(macArm)}"
 
   def install
     bin.install "tauri-hasgard"
@@ -54,15 +48,21 @@ const scoop = {
   homepage: repository,
   license: "Apache-2.0",
   architecture: {
-    "64bit": { url: `${release}/${winIntel}`, hash: hash(winIntel) },
-    arm64: { url: `${release}/${winArm}`, hash: hash(winArm) }
+    "64bit": { url: `${release}/${winIntel}`, hash: hash(winIntel), extract_dir: asset("x86_64-pc-windows-msvc") },
+    arm64: { url: `${release}/${winArm}`, hash: hash(winArm), extract_dir: asset("aarch64-pc-windows-msvc") }
   },
   bin: "tauri-hasgard.exe",
   checkver: { github: repository },
   autoupdate: {
     architecture: {
-      "64bit": { url: `${repository}/releases/download/v$version/tauri-hasgard-$version-x86_64-pc-windows-msvc.zip` },
-      arm64: { url: `${repository}/releases/download/v$version/tauri-hasgard-$version-aarch64-pc-windows-msvc.zip` }
+      "64bit": {
+        url: `${repository}/releases/download/v$version/tauri-hasgard-$version-x86_64-pc-windows-msvc.zip`,
+        extract_dir: "tauri-hasgard-$version-x86_64-pc-windows-msvc"
+      },
+      arm64: {
+        url: `${repository}/releases/download/v$version/tauri-hasgard-$version-aarch64-pc-windows-msvc.zip`,
+        extract_dir: "tauri-hasgard-$version-aarch64-pc-windows-msvc"
+      }
     }
   }
 }

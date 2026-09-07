@@ -1,5 +1,7 @@
 ## [0.4.1] — 2026-09-07
 
+macOS support is Apple Silicon (arm64) only. Intel Macs are not supported.
+
 - Fix macOS teardown waiting when process-group existence probes return EPERM.
   Actual termination permission errors remain explicit. This release includes
   the changes from the blocked 0.4.0 release attempt.

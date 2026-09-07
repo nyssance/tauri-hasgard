@@ -1,5 +1,7 @@
 # Tauri Hasgard
 
+macOS support is Apple Silicon (arm64) only. Intel Macs are not supported.
+
 Tauri Hasgard is one automation surface for Tauri 2 applications. It combines a native Tauri plugin, a cross-platform CLI, an MCP server, and a Playwright Test fixture without pretending that a WebKit webview is a Chromium `Page`.
 
 The project is named after Hasgard, the Taurus Gold Saint from _Saint Seiya: The Lost Canvas_: strong at the boundary, predictable under pressure.
