@@ -23,7 +23,8 @@ jobs:
             allow_failure: false
           - runner: windows-2025
             target: x86_64-pc-windows-msvc
-            allow_failure: true
+            allow_failure: false
+    timeout-minutes: 30
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.allow_failure }}
     steps:
@@ -33,6 +34,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb
+      - name: Install native video encoder
+        if: runner.os == 'macOS'
+        run: command -v ffmpeg || brew install ffmpeg
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

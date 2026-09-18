@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
 import { expect, fixtureEndpoint, test } from "../fixtures.js"
@@ -111,6 +112,16 @@ test("MCP stdio drives the same native app and preserves RPC error details", asy
       clientInfo: { name: "native-fixture", version: "1" }
     })
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`)
+    await window.evaluate('sessionStorage.setItem("hasgard-mcp-scenario", "ready")')
+    const scenario = await call("tools/call", {
+      name: "hasgard.run_scenario",
+      arguments: {
+        toml: '[scenario]\nglobal_timeout_ms=5000\n[[step]]\naction="storage-get"\nkey="hasgard-mcp-scenario"\nsession=true\nexpected="ready"\n'
+      }
+    })
+    expect(scenario.isError).toBe(false)
+    expect(scenario.structuredContent.result.passed).toBe(1)
+    await window.evaluate('sessionStorage.removeItem("hasgard-mcp-scenario")')
     const listing = await call("tools/list", {})
     const press = listing.tools.find((tool: { name: string }) => tool.name === "hasgard.press")
     expect(press).toBeDefined()
@@ -143,5 +154,27 @@ test("MCP stdio drives the same native app and preserves RPC error details", asy
     clearTimeout(killTimer)
     lines.close()
     await window.evaluate('document.querySelector("#key-probe").type = "text"')
+  }
+})
+
+test("CLI TOML storage assertions preserve empty values and reject missing keys", async ({ window }, testInfo) => {
+  const path = testInfo.outputPath("storage.toml")
+  await window.evaluate('localStorage.setItem("hasgard-scenario", "")')
+  try {
+    await writeFile(
+      path,
+      '[scenario]\nglobal_timeout_ms=5000\n[[step]]\naction="storage-get"\nkey="hasgard-scenario"\nexpected=""\n'
+    )
+    const passed = await command(fixtureEndpoint(testInfo.workerIndex), ["run", path])
+    expect(passed.code, passed.stderr).toBe(0)
+    await writeFile(
+      path,
+      '[scenario]\nglobal_timeout_ms=5000\n[[step]]\naction="storage-get"\nkey="hasgard-absent"\nexpected=""\n'
+    )
+    const failed = await command(fixtureEndpoint(testInfo.workerIndex), ["run", path])
+    expect(failed.code).toBe(1)
+    expect(failed.stderr).toContain("storage key was not found")
+  } finally {
+    await window.evaluate('localStorage.removeItem("hasgard-scenario")')
   }
 })

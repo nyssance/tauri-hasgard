@@ -39,11 +39,14 @@ impl Recorder {
     }
 
     /// Deactivate recording and return all collected entries.
-    pub fn stop(&self) -> Vec<RecordEntry> {
+    pub fn stop(&self) -> Option<Vec<RecordEntry>> {
         let mut s = self.state.lock().expect("recorder lock poisoned");
+        if !s.active {
+            return None;
+        }
         s.active = false;
         s.start_time = None;
-        std::mem::take(&mut s.entries)
+        Some(std::mem::take(&mut s.entries))
     }
 
     pub fn is_active(&self) -> bool {
@@ -52,9 +55,7 @@ impl Recorder {
 
     /// Record a method call if recording is active and the method is recordable.
     ///
-    /// The `"window"` key is stripped from params internally — callers should
-    /// pass the *original* params (before `extract_window` strips them) so the
-    /// recorder can clean up itself.
+    /// Keep the original window scope so replay targets the recorded window.
     pub fn record(&self, method: &str, params: Option<&Value>) {
         if !is_recordable(method) {
             return;
@@ -68,8 +69,7 @@ impl Recorder {
         let timestamp = u64::try_from(s.start_time.expect("start_time must be set when active").elapsed().as_millis())
             .unwrap_or(u64::MAX);
 
-        let mut map = params.and_then(|v| v.as_object().cloned()).unwrap_or_default();
-        map.remove("window");
+        let map = params.and_then(|v| v.as_object().cloned()).unwrap_or_default();
 
         s.entries.push(RecordEntry { action: method.to_string(), timestamp, params: map });
     }
@@ -134,7 +134,7 @@ mod tests {
         let rec = Recorder::new();
         rec.start();
         rec.record("click", Some(&json!({"ref": "e1"})));
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert_eq!(entries.len(), 1);
         assert!(!rec.is_active());
     }
@@ -144,7 +144,7 @@ mod tests {
         let rec = Recorder::new();
         rec.start();
         rec.record("click", Some(&json!({"ref": "e1"})));
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert_eq!(entries[0].action, "click");
         assert_eq!(entries[0].params.get("ref").expect("ref recorded"), "e1");
     }
@@ -155,18 +155,18 @@ mod tests {
         rec.record("click", Some(&json!({"ref": "e1"})));
         // No entries since recorder was never started
         rec.start();
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert!(entries.is_empty());
     }
 
     #[test]
-    fn test_record_strips_window_param() {
+    fn test_record_preserves_window_param() {
         let rec = Recorder::new();
         rec.start();
         rec.record("fill", Some(&json!({"ref": "e1", "value": "hello", "window": "main"})));
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert_eq!(entries.len(), 1);
-        assert!(!entries[0].params.contains_key("window"));
+        assert_eq!(entries[0].params["window"], "main");
         assert_eq!(entries[0].params.get("value").expect("value recorded"), "hello");
     }
 
@@ -176,7 +176,7 @@ mod tests {
         rec.start();
         std::thread::sleep(std::time::Duration::from_millis(10));
         rec.record("click", Some(&json!({"ref": "e1"})));
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert!(entries[0].timestamp >= 10, "timestamp should be at least 10ms");
     }
 
@@ -194,7 +194,7 @@ mod tests {
             },
         };
         rec.add_entry(entry);
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].action, "navigate");
         assert_eq!(entries[0].timestamp, 100);
@@ -226,7 +226,7 @@ mod tests {
         let entry = RecordEntry { action: "click".to_string(), timestamp: 0, params: serde_json::Map::new() };
         rec.add_entry(entry);
         rec.start();
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert!(entries.is_empty());
     }
 
@@ -237,7 +237,15 @@ mod tests {
         rec.record("snapshot", None);
         rec.record("ping", None);
         rec.record("eval", None);
-        let entries = rec.stop();
+        let entries = rec.stop().expect("recording active");
         assert!(entries.is_empty());
+    }
+    #[test]
+    fn stopping_without_an_active_recording_is_an_error_state() {
+        let rec = Recorder::new();
+        assert!(rec.stop().is_none());
+        rec.start();
+        assert!(rec.stop().expect("empty recording").is_empty());
+        assert!(rec.stop().is_none());
     }
 }

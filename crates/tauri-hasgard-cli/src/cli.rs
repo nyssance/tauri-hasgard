@@ -320,6 +320,11 @@ pub(crate) enum Command {
     Storage(StorageArgs),
     /// Dump all form fields in the webview document.
     Forms(FormsArgs),
+    /// Record native window video (macOS, requires ffmpeg).
+    Video {
+        #[command(subcommand)]
+        action: VideoAction,
+    },
     /// Record interactions for replay
     Record {
         #[command(subcommand)]
@@ -447,6 +452,20 @@ pub(crate) enum RouteCommand {
     List,
     /// Remove every rule and its interception log.
     Clear,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum VideoAction {
+    Start {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        fps: u64,
+        #[arg(long, default_value_t = 60_000)]
+        max_duration_ms: u64,
+    },
+    Stop,
+    Status,
 }
 
 #[derive(Subcommand, Debug)]

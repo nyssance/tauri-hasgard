@@ -399,12 +399,55 @@ impl HasgardMcpServer {
             "assert_count" => self.assert_count(args, window).await,
             "assert_checked" => self.assert_bool("checked", args, window, true).await,
             "assert_url" => self.assert_url(args, window).await,
+            "video_start" => {
+                let mut params = json!({"output_path":required_string(&args,"output_path")?});
+                if let Some(fps) = optional_usize(&args, "fps")? {
+                    params["fps"] = json!(fps);
+                }
+                if let Some(ms) = optional_usize(&args, "max_duration_ms")? {
+                    params["max_duration_ms"] = json!(ms);
+                }
+                self.call_app_tool("video.start", Some(params), window).await
+            }
+            "video_stop" => self.call_app_tool("video.stop", None, window).await,
+            "video_status" => self.call_app_tool("video.status", None, window).await,
             "record_start" => self.call_app_tool("record.start", None, window).await,
             "record_stop" => self.call_app_tool("record.stop", None, window).await,
             "record_status" => self.call_app_tool("record.status", None, window).await,
             "replay" => self.call_replay_tool(args, window).await,
+            "run_scenario" => self.call_scenario_tool(&args, window.as_deref()).await,
             _ => Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, format!("unknown tool: {name}"), None)),
         }
+    }
+
+    async fn call_scenario_tool(&self, args: &JsonObject, window: Option<&str>) -> Result<CallToolResult, McpError> {
+        let content = required_string(args, "toml")?;
+        let fail_fast = optional_bool(args, "fail_fast")?;
+        let scenario = crate::scenario::parse_scenario(&content).map_err(|e| invalid_params(e.to_string()))?;
+        // MCP remains attached to its configured application; TOML cannot redirect it.
+        if scenario.connect.is_some() {
+            return Err(invalid_params("MCP scenarios must omit [connect]; use the MCP server socket configuration"));
+        }
+        let mut client = match self.connect_client().await {
+            Ok(client) => client,
+            Err(e) => return Ok(tool_error(&e)),
+        };
+        Ok(match crate::scenario::run_scenario(&mut client, &scenario, window, fail_fast).await {
+            Ok(report) => {
+                let steps: Vec<Value> = report.results.iter().map(|step| match &step.outcome {
+                    crate::scenario::StepOutcome::Passed { duration } => json!({"name":step.name,"status":"passed","duration_ms":duration.as_millis()}),
+                    crate::scenario::StepOutcome::Failed { duration, message } => json!({"name":step.name,"status":"failed","error":message,"duration_ms":duration.as_millis()}),
+                    crate::scenario::StepOutcome::Skipped => json!({"name":step.name,"status":"skipped"}),
+                }).collect();
+                let result = json!({"name":report.name,"passed":report.passed(),"failed":report.failed(),"skipped":report.skipped(),"steps":steps});
+                if report.all_passed() {
+                    tool_success(result)
+                } else {
+                    CallToolResult::structured_error(json!({"result":result}))
+                }
+            }
+            Err(e) => tool_error(&e),
+        })
     }
 
     async fn target_call(
@@ -959,6 +1002,30 @@ fn tool_specs() -> Vec<ToolSpec> {
             idempotent: true,
         },
         ToolSpec {
+            name: "video_start",
+            description: "Start bounded native window MP4 recording on macOS; requires ffmpeg and Screen Recording permission.",
+            schema: video_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+        },
+        ToolSpec {
+            name: "video_stop",
+            description: "Stop recording and return the published MP4; propagates capture/encoder failures.",
+            schema: empty_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+        },
+        ToolSpec {
+            name: "video_status",
+            description: "Read native video session status.",
+            schema: empty_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: false,
+        },
+        ToolSpec {
             name: "record_start",
             description: "Start recording app interactions.",
             schema: empty_schema,
@@ -978,6 +1045,14 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "record_stop",
             description: "Stop recording and return recorded entries.",
             schema: empty_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+        },
+        ToolSpec {
+            name: "run_scenario",
+            description: "Run TOML scenario steps against this application; failures are tool errors. No [connect] overrides.",
+            schema: scenario_schema,
             read_only: false,
             destructive: false,
             idempotent: false,
@@ -1856,6 +1931,27 @@ fn assert_count_schema() -> Arc<JsonObject> {
     )
 }
 
+fn video_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("output_path", string_prop("Absolute .mp4 output path; must not exist.")),
+            ("fps", json!({"type":"integer","minimum":1,"maximum":10})),
+            ("max_duration_ms", json!({"type":"integer","minimum":100,"maximum":60000})),
+        ]),
+        &["output_path"],
+    )
+}
+
+fn scenario_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("toml", string_prop("TOML scenario with one or more [[step]] entries.")),
+            ("fail_fast", json!({"type":"boolean","description":"Override scenario fail_fast."})),
+        ]),
+        &["toml"],
+    )
+}
+
 fn replay_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -1913,6 +2009,17 @@ fn enum_prop(description: &str, values: &[&str]) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn scenario_rejects_invalid_input_before_connecting() {
+        let server = super::HasgardMcpServer::new(Some(std::path::PathBuf::from("/no-such-application")), None);
+        for toml in
+            ["", "[[step]]\naction='fill'\ntarget='#x'", "[connect]\nsocket='/another-app'\n[[step]]\naction='wait'"]
+        {
+            let args = serde_json::json!({"toml":toml}).as_object().expect("object").clone();
+            assert!(server.call_tool_by_name("run_scenario", args).await.is_err());
+        }
+    }
+
     use super::*;
     #[cfg(unix)]
     use crate::protocol::{Request, Response};
@@ -1972,6 +2079,7 @@ mod tests {
             "record_stop",
             "replay",
             "route",
+            "run_scenario",
             "screenshot",
             "screenshot_native",
             "scroll",
@@ -1988,6 +2096,9 @@ mod tests {
             "type",
             "url",
             "value",
+            "video_start",
+            "video_status",
+            "video_stop",
             "wait",
             "watch",
             "wheel",

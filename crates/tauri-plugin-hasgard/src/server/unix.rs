@@ -4,8 +4,7 @@ use crate::error::Error;
 use crate::eval::EvalEngine;
 use crate::recorder::Recorder;
 
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::sync::Arc;
 use tokio::net::UnixListener;
 
@@ -15,28 +14,21 @@ use tokio::net::UnixListener;
 pub struct SocketGuard {
     path: std::path::PathBuf,
     inode: u64,
+    device: u64,
 }
 
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         use std::os::unix::fs::MetadataExt;
         // Only unlink if the on-disk inode still matches ours
-        if let Ok(meta) = std::fs::metadata(&self.path)
+        if let Ok(meta) = std::fs::symlink_metadata(&self.path)
+            && meta.file_type().is_socket()
             && meta.ino() == self.inode
+            && meta.dev() == self.device
         {
             let _ = std::fs::remove_file(&self.path);
             tracing::info!(path = %self.path.display(), "socket removed");
         }
-    }
-}
-
-/// Get inode from a raw file descriptor via `fstat`.
-/// This is race-free: it queries the kernel FD, not the filesystem path.
-fn inode_from_raw_fd(fd: std::os::unix::io::RawFd) -> u64 {
-    // SAFETY: fstat only reads from a valid fd and writes to our stack buffer.
-    unsafe {
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        if libc::fstat(fd, stat.as_mut_ptr()) == 0 { stat.assume_init().st_ino } else { 0 }
     }
 }
 
@@ -88,11 +80,9 @@ pub fn socket_path(identifier: &str) -> std::path::PathBuf {
 /// no live server is listening.
 /// Returns a std listener and a [`SocketGuard`] that cleans up on drop.
 pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixListener, SocketGuard), Error> {
-    // SAFETY: umask is always safe to call; we restore the old mask immediately.
-    let old_mask = unsafe { libc::umask(0o177) };
+    // umask is process-wide: changing it here races unrelated application IO.
+    // Set socket permissions before accepting; peers are also UID-checked.
     let first_bind = std::os::unix::net::UnixListener::bind(socket_path);
-    // SAFETY: restoring the umask we just saved.
-    unsafe { libc::umask(old_mask) };
 
     let listener = match first_bind {
         Ok(l) => l,
@@ -110,12 +100,7 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
                 Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
                     // Stale socket from a crashed process — safe to remove and retry.
                     let _ = std::fs::remove_file(socket_path);
-                    // SAFETY: umask is always safe to call; we restore the old mask immediately.
-                    let old_mask = unsafe { libc::umask(0o177) };
-                    let retry_bind = std::os::unix::net::UnixListener::bind(socket_path);
-                    // SAFETY: restoring the umask we just saved.
-                    unsafe { libc::umask(old_mask) };
-                    retry_bind?
+                    std::os::unix::net::UnixListener::bind(socket_path)?
                 }
                 Err(e) => {
                     return Err(Error::Io(e));
@@ -125,6 +110,10 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
         Err(e) => return Err(Error::Io(e)),
     };
 
+    // FD metadata identifies the kernel socket, not its filesystem entry.
+    let metadata = std::fs::symlink_metadata(socket_path)?;
+    let guard = SocketGuard { path: socket_path.to_path_buf(), inode: metadata.ino(), device: metadata.dev() };
+
     // Restrict socket to owner-only access (defense-in-depth alongside XDG_RUNTIME_DIR).
     std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
 
@@ -132,9 +121,7 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
     listener.set_nonblocking(true)?;
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), path = %socket_path.display(), "tauri-hasgard socket listening");
-    let inode = inode_from_raw_fd(listener.as_raw_fd());
-
-    Ok((listener, SocketGuard { path: socket_path.to_path_buf(), inode }))
+    Ok((listener, guard))
 }
 
 /// Run the accept loop on a pre-bound std listener. Converts to tokio internally.
@@ -335,5 +322,26 @@ mod tests {
         assert_eq!(mode, 0o600, "socket must be owner-only (0o600), got {mode:#o}");
         drop(listener);
         drop(guard);
+    }
+    #[test]
+    fn guard_removes_its_pathname_socket() {
+        let socket = unique_socket_path();
+        let (listener, guard) = bind(&socket).expect("bind");
+        drop(listener);
+        drop(guard);
+        assert!(!socket.exists(), "guard left its socket behind");
+    }
+
+    #[test]
+    fn guard_preserves_a_replacement_socket() {
+        let socket = unique_socket_path();
+        let (listener, guard) = bind(&socket).expect("bind");
+        std::fs::remove_file(&socket).expect("unlink original");
+        let replacement = std::os::unix::net::UnixListener::bind(&socket).expect("replacement");
+        drop(guard);
+        assert!(socket.exists(), "guard removed replacement");
+        drop(listener);
+        drop(replacement);
+        std::fs::remove_file(socket).expect("cleanup replacement");
     }
 }

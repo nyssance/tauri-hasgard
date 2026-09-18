@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest"
-import { HasgardRpcClient } from "./rpc-client.js"
+import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 import { HasgardApplication, HasgardWindow } from "./window.js"
 
 test("waitForWindow does not return an about:blank or loading webview", async () => {
@@ -80,6 +80,37 @@ test("waitForWindowReady polls the current document instead of installing one lo
   expect(window.label).toBe("settings")
   expect(countCall).toBe(2)
   expect(call).not.toHaveBeenCalledWith("wait", expect.anything())
+})
+
+test("window readiness retries only the explicit handshake-pending error", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const pending = new HasgardRpcError(-32002, "handshake pending", undefined)
+  const denied = new HasgardRpcError(-32603, "access denied", undefined)
+  let attempts = 0
+  let failure: Error = pending
+  vi.spyOn(rpc, "call").mockImplementation(async method => {
+    if (method === "windows.list") return { windows: [{ label: "main", url: "tauri://localhost/", title: "App" }] }
+    if (method === "state") {
+      attempts++
+      if (attempts === 1) throw failure
+      return {
+        url: "tauri://localhost/",
+        title: "App",
+        readyState: "complete",
+        viewport: { width: 1, height: 1 },
+        scroll: { x: 0, y: 0 },
+        plugin_version: "test"
+      }
+    }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+  const app = new HasgardApplication(rpc)
+  expect((await app.waitForWindow("main", 500)).label).toBe("main")
+  expect(attempts).toBe(2)
+  attempts = 0
+  failure = denied
+  await expect(app.waitForWindow("main", 500)).rejects.toBe(denied)
+  expect(attempts).toBe(1)
 })
 
 test("role locator refreshes the snapshot and sends the resolved ref to the requested window", async () => {
@@ -1089,4 +1120,28 @@ test("clear reports how many rules were removed", async () => {
 
   await expect(new HasgardWindow(rpc, "main").routes.clear()).resolves.toEqual({ removed: 3 })
   expect(sent).toEqual([["route.clear", { window: "main" }]])
+})
+
+test("video operations retain the selected window and propagate errors", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const window = new HasgardWindow(rpc, "settings")
+  call.mockResolvedValueOnce({ status: "recording" })
+  await window.startVideo({ outputPath: "/tmp/test.mp4", fps: 2, maxDurationMs: 1000 })
+  expect(call).toHaveBeenLastCalledWith("video.start", {
+    window: "settings",
+    output_path: "/tmp/test.mp4",
+    fps: 2,
+    max_duration_ms: 1000
+  })
+  call.mockResolvedValueOnce({ output_path: "/tmp/test.mp4", frames: 2, duration_ms: 1000, byte_size: 300 })
+  await expect(window.stopVideo()).resolves.toEqual({
+    outputPath: "/tmp/test.mp4",
+    frames: 2,
+    durationMs: 1000,
+    byteSize: 300
+  })
+  expect(call).toHaveBeenLastCalledWith("video.stop", { window: "settings" })
+  call.mockRejectedValueOnce(new Error("encoder failed"))
+  await expect(window.stopVideo()).rejects.toThrow("encoder failed")
 })

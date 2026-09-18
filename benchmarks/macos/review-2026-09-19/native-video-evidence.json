@@ -1,0 +1,13 @@
+{
+  "commit": "ee5edf7e67e4d801de49cd6666642d7144690caa",
+  "ciRun": "https://github.com/nyssance/tauri-hasgard/actions/runs/35382063439",
+  "artifact": "playwright-report-aarch64-apple-darwin",
+  "attachment": "native-video-result",
+  "result": {
+    "captured": true,
+    "outputPath": "/Users/runner/work/tauri-hasgard/tauri-hasgard/examples/fixture-app/test-results/surface-native-video-targe-1bf31-mission-failures-explicitly/native-window.mp4",
+    "frames": 2,
+    "durationMs": 1072,
+    "byteSize": 24406
+  }
+}

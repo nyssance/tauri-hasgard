@@ -119,8 +119,7 @@ pub(crate) async fn dispatch(
         }
     }
 
-    // Save original params before window extraction so the recorder can strip
-    // "window" internally.
+    // Preserve original window scope in recordings.
     let original_params = params;
 
     let (window, owned_params) = extract_window(params);
@@ -157,7 +156,20 @@ pub(crate) async fn dispatch(
         }),
         "click" | "fill" | "type" | "select" | "check" | "scroll" | "drag" | "drop" | "text" | "html" | "value"
         | "attrs" | "eval" | "ipc" | "navigate" | "url" | "title" | "visible" | "count" | "checked" | "disabled"
-        | "boundingBox" | "focus" | "blur" | "hover" | "dblclick" | "setInputFiles" | "wheel" => {
+        | "boundingBox" | "blur" | "hover" | "dblclick" | "setInputFiles" | "wheel" => {
+            handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
+        }
+        "focus" => {
+            #[cfg(feature = "press")]
+            let _order = PRESS_ORDER_LOCK.lock().await;
+            let hooks = press_hooks
+                .ok_or_else(|| RpcError { code: -32603, message: "No native focus hook available".into(), data: None })?
+                .clone();
+            let window_label = window.clone();
+            tokio::task::spawn_blocking(move || (hooks.focus)(window_label.as_deref()))
+                .await
+                .map_err(|e| RpcError { code: -32603, message: e.to_string(), data: None })?
+                .map_err(|message| RpcError { code: -32603, message, data: None })?;
             handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
         }
         // `state` is a bridge-derived method (url/title/ready), but the dispatch
@@ -196,12 +208,66 @@ pub(crate) async fn dispatch(
         "route.add" => handle_eval_method("route", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "route.list" => handle_eval_method("routes", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "route.clear" => handle_eval_method("clearRoutes", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "video.start" | "video.stop" | "video.status" => {
+            #[cfg(target_os = "macos")]
+            {
+                let label = win.unwrap_or("main").to_owned();
+                let videos = engine.videos.clone();
+                let params = params.cloned().unwrap_or_else(|| serde_json::json!({}));
+                let native_id = if method == "video.start" {
+                    let listing = list_fn.ok_or_else(|| RpcError {
+                        code: -32603,
+                        message: "No window manager available".into(),
+                        data: None,
+                    })?()
+                    .map_err(|message| RpcError { code: -32603, message, data: None })?;
+                    let id = listing
+                        .get("windows")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|windows| {
+                            windows.iter().find(|w| w.get("label").and_then(serde_json::Value::as_str) == Some(&label))
+                        })
+                        .and_then(|w| w.get("native_id"))
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|id| u32::try_from(id).ok())
+                        .ok_or_else(|| RpcError {
+                            code: -32602,
+                            message: format!("No native window ID for '{label}'"),
+                            data: None,
+                        })?;
+                    Some(id)
+                } else {
+                    None
+                };
+                let method = method.to_owned();
+                tokio::task::spawn_blocking(move || match method.as_str() {
+                    "video.start" => videos.start(&label, native_id.expect("start resolves native ID"), &params),
+                    "video.stop" => videos.stop(&label),
+                    _ => videos.status(&label),
+                })
+                .await
+                .map_err(|e| RpcError { code: -32603, message: e.to_string(), data: None })?
+                .map_err(|message| RpcError { code: -32603, message, data: None })
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err(RpcError {
+                    code: -32603,
+                    message: "Native video recording is supported on macOS only".into(),
+                    data: None,
+                })
+            }
+        }
         "record.start" => {
             recorder.start();
             Ok(serde_json::json!({"status": "recording"}))
         }
         "record.stop" => {
-            let entries = recorder.stop();
+            let entries = recorder.stop().ok_or_else(|| RpcError {
+                code: -32602,
+                message: "No active recording; call record.start first".to_owned(),
+                data: None,
+            })?;
             let count = entries.len();
             Ok(serde_json::json!({"entries": entries, "count": count}))
         }
@@ -259,11 +325,15 @@ async fn handle_diff(
         data: None,
     })?;
     let (id, rx) = engine.register();
-    let wrapped = EvalEngine::wrap_script(id, &script);
+    let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
 
-    if let Err(e) = eval_fn(window, wrapped) {
+    if let Err(e) = eval_fn(window, Some(id), wrapped) {
         engine.resolve(id, Err(format!("Eval failed: {e}")));
-        return Err(RpcError { code: -32603, message: format!("Eval failed: {e}"), data: None });
+        return Err(RpcError {
+            code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
+            message: format!("Eval failed: {e}"),
+            data: None,
+        });
     }
 
     let result = engine.wait(id, rx, DEFAULT_TIMEOUT).await.map_err(|e| RpcError {
@@ -481,7 +551,7 @@ async fn handle_press(
         // The bridge also expires observers itself, so navigation or a dead
         // eval channel cannot leave a permanent listener behind.
         if let Some(eval_fn) = eval_fn {
-            let _ = eval_fn(window, format!("window.__HASGARD__._cancelPress({completion_params})"));
+            let _ = eval_fn(window, None, format!("window.__HASGARD__._cancelPress({completion_params})"));
         }
     }
     completed.map_err(|mut error| {
@@ -540,12 +610,16 @@ async fn handle_eval_method(
     let script =
         build_bridge_call(method, params).map_err(|msg| RpcError { code: -32602, message: msg, data: None })?;
     let (id, rx) = engine.register();
-    let wrapped = EvalEngine::wrap_script(id, &script);
+    let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
 
-    if let Err(e) = eval_fn(window, wrapped) {
+    if let Err(e) = eval_fn(window, Some(id), wrapped) {
         // Clean up pending entry on eval_fn failure
         engine.resolve(id, Err(format!("Eval failed: {e}")));
-        return Err(RpcError { code: -32603, message: format!("Eval failed: {e}"), data: None });
+        return Err(RpcError {
+            code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
+            message: format!("Eval failed: {e}"),
+            data: None,
+        });
     }
 
     engine.wait(id, rx, timeout).await.map_err(|e| RpcError {
@@ -562,6 +636,17 @@ fn build_bridge_call(method: &str, params: Option<&serde_json::Value>) -> Result
         Some(v) if !v.is_null() => v.to_string(),
         _ => "{}".to_owned(),
     };
+
+    if method == "navigate" {
+        let url = params
+            .and_then(|p| p.get("url"))
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "navigate requires a URL string".to_owned())?;
+        let url_js = serde_json::to_string(url).map_err(|e| e.to_string())?;
+        return Ok(format!(
+            "(()=>{{const destination=new URL({url_js},location.href);const current=new URL(location.href);if(destination.protocol!==current.protocol||destination.host!==current.host)throw new Error('Cross-origin navigation is not permitted by Hasgard');return window.__HASGARD__.navigate({args});}})()"
+        ));
+    }
 
     if method == "ipc" {
         // ipc calls Tauri's backend invoke directly
@@ -580,6 +665,7 @@ fn build_bridge_call(method: &str, params: Option<&serde_json::Value>) -> Result
 }
 
 /// Process the IPC callback from the JS bridge (ADR-001).
+#[cfg(test)]
 pub(crate) fn handle_callback(engine: &EvalEngine, id: u64, result: Option<String>, error: Option<String>) {
     let outcome = match (result, error) {
         (Some(result), None) => {
@@ -591,28 +677,40 @@ pub(crate) fn handle_callback(engine: &EvalEngine, id: u64, result: Option<Strin
     engine.resolve(id, outcome);
 }
 
-/// Tauri IPC command for the eval callback handler.
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value, reason = "tauri::command contract — macro wrapper is the real consumer")]
-pub(crate) fn callback(
-    eval_engine: tauri::State<'_, EvalEngine>, id: u64, result: Option<String>, error: Option<String>,
-) {
-    handle_callback(&eval_engine, id, result, error);
+fn callback_outcome(result: Option<String>, error: Option<String>) -> Result<serde_json::Value, String> {
+    match (result, error) {
+        (Some(result), None) => serde_json::from_str(&result).map_err(|e| format!("Invalid callback result JSON: {e}")),
+        (None, Some(error)) => Err(error),
+        _ => Err("Callback requires exactly one of result or error".to_owned()),
+    }
 }
 
-/// Legacy Tauri IPC command for the `__callback` handler.
-///
-/// `#[tauri::command]` binds `State<'_, T>` by value — the generated wrapper
-/// is the true consumer, so clippy's view of the body is incomplete. Cannot
-/// be rewritten as `&State` (tauri command macro rejects it). Documented
-/// here rather than suppressed; this is the only call site that cannot
-/// satisfy `needless_pass_by_value`.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value, reason = "tauri::command contract — macro wrapper is the real consumer")]
-pub(crate) fn __callback(
-    eval_engine: tauri::State<'_, EvalEngine>, id: u64, result: Option<String>, error: Option<String>,
-) {
-    handle_callback(&eval_engine, id, result, error);
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn callback<R: tauri::Runtime>(
+    eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
+    error: Option<String>, nonce: Option<String>,
+) -> Result<(), String> {
+    let url = webview.url().map_err(|e| e.to_string())?;
+    if id == 0 {
+        let reported = result.ok_or_else(|| "Handshake requires page URL".to_owned())?;
+        let reported = tauri::Url::parse(&reported).map_err(|e| e.to_string())?;
+        if error.is_some() || crate::eval::origin(&reported)? != crate::eval::origin(&url)? {
+            return Err("Handshake origin changed".to_owned());
+        }
+        return eval_engine.complete_handshake(webview.label(), &url, nonce.as_deref());
+    }
+    eval_engine.resolve_from(id, webview.label(), &url, nonce.as_deref(), callback_outcome(result, error));
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn __callback<R: tauri::Runtime>(
+    eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
+    error: Option<String>, nonce: Option<String>,
+) -> Result<(), String> {
+    callback(eval_engine, webview, id, result, error, nonce)
 }
 
 #[cfg(test)]
@@ -837,7 +935,8 @@ mod tests {
         // Let's use a sync eval_fn and resolve manually.
         // Actually the reference check happens BEFORE the eval call, so we can check:
         // eval_fn present + no reference in params + no last_snapshot → -32602
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(|_w: Option<&str>, _script: String| Ok(()));
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
         let result = dispatch("diff", None, &engine, Some(&eval_fn), None, None, &Recorder::new()).await;
         let err = result.expect_err("dispatch returns Err");
         assert_eq!(err.code, -32602);
@@ -1153,13 +1252,14 @@ mod tests {
             std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let captured_clone = captured.clone();
         let engine_clone = engine.clone();
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(move |_w: Option<&str>, script: String| {
-            *captured_clone.lock().expect("captured mutex") = script;
-            // Resolve the callback immediately to avoid blocking for the default 10s timeout.
-            // ID 1 is the first registered callback on a fresh EvalEngine.
-            engine_clone.resolve(1, Ok(serde_json::json!({"ok": true})));
-            Ok(())
-        });
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, script: String| {
+                *captured_clone.lock().expect("captured mutex") = script;
+                // Resolve the callback immediately to avoid blocking for the default 10s timeout.
+                // ID 1 is the first registered callback on a fresh EvalEngine.
+                engine_clone.resolve(1, Ok(serde_json::json!({"ok": true})));
+                Ok(())
+            });
         let params = serde_json::json!({"ref": "el-1", "window": "settings"});
         let _ = dispatch("click", Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new()).await;
         let script = captured.lock().expect("captured mutex").clone();
@@ -1254,7 +1354,7 @@ mod tests {
             .await
             .expect("dispatch succeeds");
         assert_eq!(result["status"], "ok");
-        let entries = recorder.stop();
+        let entries = recorder.stop().expect("recording active");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].action, "navigate");
     }
@@ -1320,7 +1420,8 @@ mod tests {
         let engine = EvalEngine::new();
         // eval_fn that accepts the script but never resolves the callback —
         // the timeout decides who wins.
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(|_w: Option<&str>, _script: String| Ok(()));
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
 
         let params = json!({
             "selector": "[data-testid=\"never-exists\"]",
@@ -1348,7 +1449,8 @@ mod tests {
         // default. The Rust channel must still outlive that default so the
         // bridge gets to surface its own `Timeout waiting for …` rejection.
         let engine = EvalEngine::new();
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(|_w: Option<&str>, _script: String| Ok(()));
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
 
         let start = tokio::time::Instant::now();
         let _err = dispatch(
@@ -1372,7 +1474,8 @@ mod tests {
         // Regression guard: `wait` and `watch` share the helper, so the
         // existing `watch` behavior must remain intact.
         let engine = EvalEngine::new();
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(|_w: Option<&str>, _script: String| Ok(()));
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
 
         let start = tokio::time::Instant::now();
         let _err = dispatch(
@@ -1398,12 +1501,13 @@ mod tests {
         // channel error — the buffer is a ceiling, not a per-call cost.
         let engine = EvalEngine::new();
         let engine_clone = engine.clone();
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(move |_w: Option<&str>, _script: String| {
-            // The first registered callback on a fresh engine has id == 1
-            // (see EvalEngine::register / next_id init in eval.rs).
-            engine_clone.resolve(1, Ok(json!({"found": true})));
-            Ok(())
-        });
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, _script: String| {
+                // The first registered callback on a fresh engine has id == 1
+                // (see EvalEngine::register / next_id init in eval.rs).
+                engine_clone.resolve(1, Ok(json!({"found": true})));
+                Ok(())
+            });
 
         let result = dispatch(
             "wait",
@@ -1426,11 +1530,12 @@ mod tests {
         // from a single `state` call (issue #135).
         let engine = EvalEngine::new();
         let engine_clone = engine.clone();
-        let eval_fn: crate::server::EvalFn = std::sync::Arc::new(move |_w: Option<&str>, _script: String| {
-            // First register on a fresh engine has id == 1 (see eval.rs).
-            engine_clone.resolve(1, Ok(json!({"url": "http://localhost/", "title": "App", "ready": true})));
-            Ok(())
-        });
+        let eval_fn: crate::server::EvalFn =
+            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, _script: String| {
+                // First register on a fresh engine has id == 1 (see eval.rs).
+                engine_clone.resolve(1, Ok(json!({"url": "http://localhost/", "title": "App", "ready": true})));
+                Ok(())
+            });
 
         let result = dispatch("state", None, &engine, Some(&eval_fn), None, None, &Recorder::new())
             .await
@@ -1439,5 +1544,12 @@ mod tests {
         assert_eq!(result["url"], json!("http://localhost/"));
         assert_eq!(result["ready"], json!(true));
         assert_eq!(result["plugin_version"], json!(env!("CARGO_PKG_VERSION")));
+    }
+    #[tokio::test]
+    async fn record_stop_without_start_returns_an_rpc_error() {
+        let error = dispatch("record.stop", None, &EvalEngine::new(), None, None, None, &Recorder::new())
+            .await
+            .expect_err("no active recording");
+        assert!(error.message.contains("No active recording"));
     }
 }

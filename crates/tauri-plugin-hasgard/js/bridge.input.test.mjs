@@ -369,3 +369,37 @@ test("clearDialogs forgets the log but keeps the policy", () => {
   assert.equal(hasgard.dialogs().dialogs.length, 0);
   assert.equal(hasgard.dialogs().policy.action, "accept");
 });
+
+// Isolated bridge-unit checks; native DOM behavior remains covered by fixture E2E.
+test("check selects a radio idempotently and emits events only on change", () => {
+  const radio = el("input", { type: "radio" });
+  radio.checked = false;
+  const bridge = loadBridge(el("body", {}, [radio]));
+  bridge.check({ selector: "input" });
+  bridge.check({ selector: "input" });
+  assert.equal(radio.checked, true);
+  assert.deepEqual(radio.events.map(e => e.type), ["input", "change"]);
+});
+
+test("check rejects non-checkable targets without creating checked state", () => {
+  for (const target of [el("div"), el("input", { type: "text" })]) {
+    const bridge = loadBridge(el("body", {}, [target]));
+    assert.throws(() => bridge.check({ selector: target.tagName.toLowerCase() }), /checkbox|radio/);
+    assert.equal(Object.hasOwn(target, "checked"), false);
+  }
+});
+
+test("check preserves explicit checkbox state and rejects radio uncheck", () => {
+  const checkbox = el("input", { type: "checkbox" });
+  checkbox.checked = false;
+  let bridge = loadBridge(el("body", {}, [checkbox]));
+  bridge.check({ selector: "input", checked: true });
+  bridge.check({ selector: "input", checked: true });
+  assert.equal(checkbox.checked, true);
+  assert.deepEqual(checkbox.events.map(e => e.type), ["input", "change"]);
+  const radio = el("input", { type: "radio" });
+  radio.checked = true;
+  bridge = loadBridge(el("body", {}, [radio]));
+  assert.throws(() => bridge.check({ selector: "input", checked: false }), /radio/);
+  assert.equal(radio.checked, true);
+});

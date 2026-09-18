@@ -30,6 +30,7 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "io-util"] }
 tracing.workspace = true
 thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 tauri = { version = "2", features = ["unstable"] }
 enigo = { version = "0.6.1", optional = true }
 
@@ -51,6 +52,7 @@ windows = { version = "0.62", features = [
 enigo = { version = "0.6.1", features = ["wayland"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+tempfile = "3.27"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEvent", "CGEventTypes"] }

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { basename } from "node:path"
-import { HasgardRpcClient } from "./rpc-client.js"
+import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 import type {
   BoundingBox,
   ClickOptions,
@@ -350,9 +350,11 @@ export class HasgardApplication {
     while (Date.now() <= deadline) {
       if ((await this.windows()).some(window => window.label === label)) {
         const window = this.window(label)
-        const state = await window.state()
-        if (state.url !== "about:blank" && state.readyState !== "loading") {
-          return window
+        try {
+          const state = await window.state()
+          if (state.url !== "about:blank" && state.readyState !== "loading") return window
+        } catch (error) {
+          if (!(error instanceof HasgardRpcError) || error.code !== -32002) throw error
         }
       }
       await new Promise(resolve => setTimeout(resolve, 50))
@@ -649,6 +651,35 @@ export class HasgardWindow {
     const prefix = "data:image/png;base64,"
     if (!dataUrl.startsWith(prefix)) throw new Error("screenshot result is not a PNG data URL")
     return Buffer.from(dataUrl.slice(prefix.length), "base64")
+  }
+
+  /** Start a bounded recording of this native window. macOS only; requires ffmpeg. */
+  async startVideo(options: { outputPath: string; fps?: number; maxDurationMs?: number }): Promise<void> {
+    await this.rpc.call("video.start", {
+      window: this.label,
+      output_path: options.outputPath,
+      ...(options.fps === undefined ? {} : { fps: options.fps }),
+      ...(options.maxDurationMs === undefined ? {} : { max_duration_ms: options.maxDurationMs })
+    })
+  }
+
+  /** Stop recording; capture and encoder failures reject rather than returning an empty artifact. */
+  async stopVideo(): Promise<{ outputPath: string; frames: number; durationMs: number; byteSize: number }> {
+    const value = expectRecord(await this.rpc.call("video.stop", { window: this.label }), "video.stop result")
+    return {
+      outputPath: expectString(value.output_path, "video.output_path"),
+      frames: expectNumber(value.frames, "video.frames"),
+      durationMs: expectNumber(value.duration_ms, "video.duration_ms"),
+      byteSize: expectNumber(value.byte_size, "video.byte_size")
+    }
+  }
+
+  async videoStatus(): Promise<{ active: boolean; pendingResult: boolean }> {
+    const value = expectRecord(await this.rpc.call("video.status", { window: this.label }), "video.status result")
+    return {
+      active: expectBoolean(value.active, "video.active"),
+      pendingResult: expectBoolean(value.pending_result, "video.pending_result")
+    }
   }
 
   /**
