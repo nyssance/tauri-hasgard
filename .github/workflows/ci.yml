@@ -24,6 +24,7 @@ jobs:
       - run: bun test crates/tauri-plugin-hasgard/js/*.test.mjs
 
   rust:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
