@@ -1226,15 +1226,19 @@
   // running it twice undoes itself, so a retry silently inverts the result.
   function check(params) {
     const el = resolveTarget(params);
-    if (params.checked != null) {
-      if (typeof params.checked !== "boolean") {
-        throw new Error("check: 'checked' must be a boolean");
-      }
-      if (el.checked === params.checked) return { ok: true };
-      el.checked = params.checked;
-    } else {
-      el.checked = !el.checked;
+    if (el.tagName !== "INPUT" || (el.type !== "checkbox" && el.type !== "radio")) {
+      throw new Error("check: target must be a checkbox or radio input");
     }
+    if (params.checked != null && typeof params.checked !== "boolean") {
+      throw new Error("check: 'checked' must be a boolean");
+    }
+    if (el.type === "radio" && params.checked === false) {
+      throw new Error("check: cannot uncheck a radio; select another radio in its group");
+    }
+    const desired = params.checked != null ? params.checked : el.type === "radio" ? true : !el.checked;
+    if (el.checked === desired) return { ok: true };
+    el.checked = desired;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return { ok: true };
   }

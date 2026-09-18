@@ -10,6 +10,7 @@ pub(crate) mod key;
 mod macos_keyboard;
 pub(crate) mod protocol;
 pub(crate) mod recorder;
+mod video;
 // Native screenshot capture for the `screenshot_native` JSON-RPC method.
 // macOS-only today; non-macOS callers receive `PERMISSION_DENIED`.
 pub(crate) mod screenshot;
@@ -51,7 +52,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     #[cfg(all(any(unix, windows), debug_assertions))]
     {
         tauri::plugin::Builder::new("hasgard")
-            .js_init_script(BRIDGE_JS.to_owned())
+            .js_init_script(format!("{BRIDGE_JS}\nwindow.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback', {{id:0,result:location.href}}).catch(e => console.error('Hasgard handshake failed', e));"))
             .setup(|app, _api| {
                 let engine = EvalEngine::new();
                 app.manage(engine.clone());
@@ -62,7 +63,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                     None => server::socket_path(&identifier),
                 };
 
-                let eval_fn = make_eval_fn(app);
+                let eval_fn = make_eval_fn(app, engine.clone());
                 let list_fn = make_list_fn(app);
                 let press_hooks = make_press_hooks(app);
 
@@ -127,9 +128,9 @@ fn sanitize_identifier(raw: &str) -> String {
 /// If `window` is `Some(label)`, targets that specific window (error if not found).
 /// If `window` is `None`, targets the conventional `main` window.
 #[cfg(all(any(unix, windows), debug_assertions))]
-fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> EvalFn {
+fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine) -> EvalFn {
     let handle = app.clone();
-    Arc::new(move |window: Option<&str>, script: String| {
+    Arc::new(move |window: Option<&str>, id: Option<u64>, script: String| {
         let target = if let Some(label) = window {
             handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?
         } else {
@@ -138,7 +139,20 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> EvalFn {
         // Results come back via the `__callback` IPC command (see
         // EvalEngine::wrap_script). This eval is fire-and-forget; the IPC handler
         // resolves the pending request, not this closure.
-        target.eval(&script).map_err(|e| e.to_string())
+        let source = engine.check_origin(target.label(), &target.url().map_err(|e| e.to_string())?)?;
+        if let Some(id) = id {
+            engine.bind_source(id, target.label(), &source)?;
+        }
+        let expected = serde_json::to_string(&source).map_err(|e| e.to_string())?;
+        let mismatch = id.map_or_else(String::new, |id| format!(
+            "window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:{id},error:'Origin changed before execution'}});"
+        ));
+        // Native URL checks alone race queued WebView eval. Pin again inside JS,
+        // before any requested expression or side effect executes.
+        let pinned = format!(
+            "(()=>{{const u=new URL(location.href);if(u.protocol+'//'+u.host!=={expected}){{{mismatch}return;}}{script}}})();"
+        );
+        target.eval(&pinned).map_err(|e| e.to_string())
     })
 }
 

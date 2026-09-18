@@ -51,6 +51,7 @@ windows = { version = "0.62", features = [
 enigo = { version = "0.6.1", features = ["wayland"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+tempfile = "3.27"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEvent", "CGEventTypes"] }

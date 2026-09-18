@@ -179,7 +179,9 @@ test("snapshot baselines stay isolated between real windows", async ({ hasgard, 
 
 test("reports the page title and URL without a full state read", async ({ window }) => {
   await expect(window.title()).resolves.toBe("Hasgard fixture")
-  await expect(window.url()).resolves.toBe("tauri://localhost")
+  await expect(window.url()).resolves.toBe(
+    process.platform === "win32" ? "http://tauri.localhost/" : "tauri://localhost"
+  )
 })
 
 // `nativeId` is present only where native capture exists, so a client can tell
@@ -570,4 +572,51 @@ test("clear lets traffic through again", async ({ window }) => {
   // unrouted request here gets the app's own index.html, which contains plenty
   // of words the stub body might have shared.
   expect(await probeNetwork(window, "#do-fetch")).not.toBe("fetch:500:blocked")
+})
+
+test("radio selection is idempotent and keeps native group exclusivity", async ({ window }) => {
+  await window.evaluate(`(() => {
+    const host = document.createElement('div'); host.id = 'radio-regression';
+    host.innerHTML = '<input id="radio-a" type="radio" name="regression-choice"><input id="radio-b" type="radio" name="regression-choice">';
+    document.body.append(host);
+  })()`)
+  try {
+    await window.locator("#radio-a").toggle()
+    await window.locator("#radio-a").toggle()
+    await expect(window.locator("#radio-a").isChecked()).resolves.toBe(true)
+    await window.locator("#radio-b").check()
+    await expect(window.locator("#radio-a").isChecked()).resolves.toBe(false)
+    await expect(window.locator("#radio-b").isChecked()).resolves.toBe(true)
+    await expect(window.locator("#radio-b").uncheck()).rejects.toThrow(/radio/)
+    await expect(window.locator("#radio-regression").check()).rejects.toThrow(/checkbox|radio/)
+  } finally {
+    await window.evaluate("document.getElementById('radio-regression').remove()")
+  }
+})
+
+test("cross-origin navigation fails before changing the real webview", async ({ window }) => {
+  const before = await window.url()
+  await expect(window.navigate("https://example.invalid/hasgard")).rejects.toThrow(/Cross-origin/)
+  await expect(window.url()).resolves.toBe(before)
+  await expect(window.title()).resolves.toBe("Hasgard fixture")
+})
+
+test("native video targets a window and reports permission failures explicitly", async ({ window }, testInfo) => {
+  test.skip(process.platform !== "darwin", "Native compositor recording is macOS-only")
+  const outputPath = testInfo.outputPath("native-window.mp4")
+  try {
+    await window.startVideo({ outputPath, fps: 2, maxDurationMs: 1000 })
+  } catch (error) {
+    // Hosted runners may not have TCC screen-recording permission. This is an
+    // explicit capability failure, never a successful empty video.
+    expect(String(error)).toMatch(/Screen Recording permission|native recording process timed out/)
+    await expect(window.videoStatus()).resolves.toEqual({ active: false, pendingResult: false })
+    return
+  }
+  const result = await window.stopVideo()
+  expect(result.outputPath).toBe(outputPath)
+  expect(result.frames).toBeGreaterThan(0)
+  expect(result.byteSize).toBeGreaterThan(0)
+  await expect(window.videoStatus()).resolves.toEqual({ active: false, pendingResult: false })
+  await expect(window.stopVideo()).rejects.toThrow(/no video session/)
 })

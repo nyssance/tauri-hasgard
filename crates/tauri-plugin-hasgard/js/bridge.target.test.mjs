@@ -30,6 +30,7 @@ function makeElement(props = {}) {
   return Object.assign(
     {
       tagName: "INPUT",
+      type: "checkbox",
       events: [],
       attributes: {},
       scrollTop: 0,
@@ -99,7 +100,7 @@ test("check with an explicit state drives an unchecked box to checked", () => {
   hasgard.check({ selector: "#agree", checked: true });
 
   assert.equal(el.checked, true);
-  assert.deepEqual(el.events, ["change"]);
+  assert.deepEqual(el.events, ["input", "change"]);
 });
 
 test("check without a state still toggles, keeping the documented CLI contract", () => {
@@ -109,7 +110,7 @@ test("check without a state still toggles, keeping the documented CLI contract",
   hasgard.check({ selector: "#agree" });
 
   assert.equal(el.checked, false);
-  assert.deepEqual(el.events, ["change"]);
+  assert.deepEqual(el.events, ["input", "change"]);
 });
 
 test("check rejects a non-boolean state instead of coercing it", () => {

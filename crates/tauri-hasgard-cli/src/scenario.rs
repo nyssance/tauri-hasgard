@@ -56,6 +56,7 @@ pub(crate) struct Step {
     pub(crate) value: Option<String>,
     pub(crate) text: Option<String>,
     pub(crate) key: Option<String>,
+    pub(crate) session: Option<bool>,
     pub(crate) url: Option<String>,
     pub(crate) script: Option<String>,
     pub(crate) expected: Option<String>,
@@ -126,10 +127,28 @@ impl ScenarioReport {
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read scenario file: {}", path.display()))?;
-    toml::from_str(&content).with_context(|| format!("Failed to parse scenario TOML: {}", path.display()))
+    parse_scenario(&content).with_context(|| format!("Failed to parse scenario TOML: {}", path.display()))
+}
+
+pub(crate) fn parse_scenario(content: &str) -> Result<Scenario> {
+    let scenario: Scenario = toml::from_str(content)?;
+    anyhow::ensure!(!scenario.step.is_empty(), "scenario requires at least one step");
+    Ok(scenario)
 }
 
 pub(crate) async fn run_scenario(
+    client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>,
+) -> Result<ScenarioReport> {
+    let run = run_scenario_steps(client, scenario, window, fail_fast_override);
+    match scenario.scenario.global_timeout_ms {
+        Some(ms) => tokio::time::timeout(Duration::from_millis(ms), run)
+            .await
+            .map_err(|_| anyhow::anyhow!("scenario exceeded global timeout of {ms}ms"))?,
+        None => run.await,
+    }
+}
+
+async fn run_scenario_steps(
     client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>,
 ) -> Result<ScenarioReport> {
     let meta = &scenario.scenario;
@@ -194,14 +213,14 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "fill" => {
             let t = require_target(step)?;
-            let value = step.value.as_deref().unwrap_or("");
+            let value = step.value.as_deref().ok_or_else(|| anyhow::anyhow!("{} requires value", step.action))?;
             let mut p = target_params(t);
             p["value"] = json!(value);
             client.call("fill", with_scope(Some(p), Scope { window, ..Scope::default() })).await
         }
         "type" => {
             let t = require_target(step)?;
-            let text = step.text.as_deref().unwrap_or("");
+            let text = step.text.as_deref().ok_or_else(|| anyhow::anyhow!("type requires text"))?;
             let mut p = target_params(t);
             p["text"] = json!(text);
             client.call("type", with_scope(Some(p), Scope { window, ..Scope::default() })).await
@@ -212,7 +231,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "select" => {
             let t = require_target(step)?;
-            let value = step.value.as_deref().unwrap_or("");
+            let value = step.value.as_deref().ok_or_else(|| anyhow::anyhow!("{} requires value", step.action))?;
             let mut p = target_params(t);
             p["value"] = json!(value);
             client.call("select", with_scope(Some(p), Scope { window, ..Scope::default() })).await
@@ -293,13 +312,28 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             }
             Ok(result)
         }
+        "storage-get" => {
+            let key = step.key.as_deref().ok_or_else(|| anyhow::anyhow!("storage-get requires key"))?;
+            let result = client
+                .call(
+                    "storage.get",
+                    with_scope(
+                        Some(json!({"key":key, "session":step.session.unwrap_or(false)})),
+                        Scope { window, ..Scope::default() },
+                    ),
+                )
+                .await?;
+            validate_storage_result(&result, step.expected.as_deref())?;
+            Ok(result)
+        }
         "assert-text" => {
             let t = require_target(step)?;
             let expected =
                 step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-text requires 'expected'"))?;
             let result =
                 client.call("text", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await?;
-            let actual = result.as_str().unwrap_or_default();
+            let actual =
+                result.as_str().ok_or_else(|| anyhow::anyhow!("{} returned a non-string result", step.action))?;
             anyhow::ensure!(actual == expected, "expected text {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
@@ -316,7 +350,10 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             let result = client
                 .call("visible", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() }))
                 .await?;
-            let visible = result.get("visible").and_then(Value::as_bool).unwrap_or(false);
+            let visible = result
+                .get("visible")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| anyhow::anyhow!("visible response requires boolean visible"))?;
             anyhow::ensure!(visible, "element is not visible");
             Ok(json!({"ok": true}))
         }
@@ -325,7 +362,10 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             let result = client
                 .call("visible", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() }))
                 .await?;
-            let visible = result.get("visible").and_then(Value::as_bool).unwrap_or(true);
+            let visible = result
+                .get("visible")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| anyhow::anyhow!("visible response requires boolean visible"))?;
             anyhow::ensure!(!visible, "element is visible");
             Ok(json!({"ok": true}))
         }
@@ -335,19 +375,37 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
                 step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-value requires 'expected'"))?;
             let result =
                 client.call("value", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await?;
-            let actual = result.as_str().unwrap_or_default();
+            let actual =
+                result.as_str().ok_or_else(|| anyhow::anyhow!("{} returned a non-string result", step.action))?;
             anyhow::ensure!(actual == expected, "expected value {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
         "assert-url" => {
             let expected = step.expected.as_deref().ok_or_else(|| anyhow::anyhow!("assert-url requires 'expected'"))?;
             let result = client.call("url", with_scope(None, Scope { window, ..Scope::default() })).await?;
-            let actual = result.as_str().unwrap_or_default();
+            let actual =
+                result.as_str().ok_or_else(|| anyhow::anyhow!("{} returned a non-string result", step.action))?;
             anyhow::ensure!(actual.contains(expected), "URL does not contain {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
         other => anyhow::bail!("unknown step action: {other:?}"),
     }
+}
+
+fn validate_storage_result(result: &Value, expected: Option<&str>) -> Result<()> {
+    let found = result
+        .get("found")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| anyhow::anyhow!("storage.get requires boolean found"))?;
+    anyhow::ensure!(found, "storage key was not found");
+    let actual = result
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("storage.get requires string value when found"))?;
+    if let Some(expected) = expected {
+        anyhow::ensure!(actual == expected, "expected storage value {expected:?}, got {actual:?}");
+    }
+    Ok(())
 }
 
 fn require_target(step: &Step) -> Result<&str> {
@@ -507,6 +565,18 @@ pub(crate) fn write_junit_xml(report: &ScenarioReport, path: &Path) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn storage_result_rejects_missing_malformed_and_mismatch() {
+        for value in
+            [serde_json::json!({}), serde_json::json!({"found":false}), serde_json::json!({"found":true,"value":1})]
+        {
+            assert!(super::validate_storage_result(&value, None).is_err());
+        }
+        assert!(super::validate_storage_result(&serde_json::json!({"found":true,"value":""}), Some("")).is_ok());
+        assert!(super::validate_storage_result(&serde_json::json!({"found":true,"value":"a"}), Some("b")).is_err());
+        assert!(super::parse_scenario("").is_err());
+    }
+
     use super::*;
     use std::time::Duration;
 
@@ -618,6 +688,7 @@ action = "ping"
             value: None,
             text: None,
             key: None,
+            session: None,
             url: None,
             script: None,
             expected: None,
@@ -643,6 +714,7 @@ action = "ping"
             value: None,
             text: None,
             key: None,
+            session: None,
             url: None,
             script: None,
             expected: None,

@@ -418,6 +418,16 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
         Command::Storage(storage_args) => run_storage_command(client, storage_args, scope.window).await,
         Command::Forms(args) => run_forms_command(client, args, scope).await,
         Command::Drop { target, file } => run_drop_command(client, &target, file, scope.window).await,
+        Command::Video { action } => {
+            let (method, params) = match action {
+                cli::VideoAction::Start { output, fps, max_duration_ms } => {
+                    ("video.start", Some(json!({"output_path":output,"fps":fps,"max_duration_ms":max_duration_ms})))
+                }
+                cli::VideoAction::Stop => ("video.stop", None),
+                cli::VideoAction::Status => ("video.status", None),
+            };
+            client.call(method, with_scope(params, scope)).await
+        }
         Command::Record { action } => run_record_command(client, action, scope).await,
         Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), scope.window).await,
         cmd => run_dom_command(client, cmd, scope).await,
@@ -1193,7 +1203,14 @@ fn export_shell_script(entries: &[Value]) -> String {
         }
         prev_ts = timestamp;
 
-        script.push_str(&entry_to_cli_command(action, entry));
+        let command = entry_to_cli_command(action, entry);
+        if let (Some(window), Some(arguments)) =
+            (entry.get("window").and_then(Value::as_str), command.strip_prefix("tauri-hasgard "))
+        {
+            let _ = write!(script, "tauri-hasgard --window {} {arguments}", shell_escape(window));
+        } else {
+            script.push_str(&command);
+        }
         script.push('\n');
     }
 
@@ -1353,16 +1370,7 @@ async fn run_scenario_command(
     };
 
     let fail_fast_override = if no_fail_fast { Some(false) } else { None };
-    let global_ms = loaded.scenario.global_timeout_ms;
-    let report = match global_ms {
-        Some(ms) => {
-            let t = std::time::Duration::from_millis(ms);
-            tokio::time::timeout(t, scenario::run_scenario(&mut client, &loaded, window, fail_fast_override))
-                .await
-                .map_err(|_| anyhow::anyhow!("scenario exceeded global timeout of {ms}ms"))??
-        }
-        None => scenario::run_scenario(&mut client, &loaded, window, fail_fast_override).await?,
-    };
+    let report = scenario::run_scenario(&mut client, &loaded, window, fail_fast_override).await?;
 
     scenario::print_report(&report);
 
@@ -1514,6 +1522,16 @@ fn newest_socket_in_dir(dir: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shell_export_preserves_each_recorded_window() {
+        let script = super::export_shell_script(&[
+            serde_json::json!({"action":"click","timestamp":0,"selector":"#save","window":"settings"}),
+            serde_json::json!({"action":"click","timestamp":1,"selector":"#save","window":"main"}),
+        ]);
+        assert!(script.contains("tauri-hasgard --window 'settings' click '#save'"));
+        assert!(script.contains("tauri-hasgard --window 'main' click '#save'"));
+    }
+
     use super::*;
     use serial_test::serial;
 

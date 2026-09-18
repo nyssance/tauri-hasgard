@@ -1090,3 +1090,27 @@ test("clear reports how many rules were removed", async () => {
   await expect(new HasgardWindow(rpc, "main").routes.clear()).resolves.toEqual({ removed: 3 })
   expect(sent).toEqual([["route.clear", { window: "main" }]])
 })
+
+test("video operations retain the selected window and propagate errors", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const window = new HasgardWindow(rpc, "settings")
+  call.mockResolvedValueOnce({ status: "recording" })
+  await window.startVideo({ outputPath: "/tmp/test.mp4", fps: 2, maxDurationMs: 1000 })
+  expect(call).toHaveBeenLastCalledWith("video.start", {
+    window: "settings",
+    output_path: "/tmp/test.mp4",
+    fps: 2,
+    max_duration_ms: 1000
+  })
+  call.mockResolvedValueOnce({ output_path: "/tmp/test.mp4", frames: 2, duration_ms: 1000, byte_size: 300 })
+  await expect(window.stopVideo()).resolves.toEqual({
+    outputPath: "/tmp/test.mp4",
+    frames: 2,
+    durationMs: 1000,
+    byteSize: 300
+  })
+  expect(call).toHaveBeenLastCalledWith("video.stop", { window: "settings" })
+  call.mockRejectedValueOnce(new Error("encoder failed"))
+  await expect(window.stopVideo()).rejects.toThrow("encoder failed")
+})

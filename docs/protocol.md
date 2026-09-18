@@ -142,3 +142,47 @@ must include their `elements` arrays; missing data is an error.
 On macOS, a press is rejected before injection if Shift, Control, Option, or
 Command remains held at dispatch time. Release modifiers before retrying an
 `injected: false` failure. A failure after dispatch starts remains `injected: "unknown"`; the client must not automatically resend the gesture.
+
+## Origin binding
+
+Before automation, each webview completes an IPC handshake subject to the app's
+Tauri capabilities. Hasgard binds every pending evaluation to that window and
+origin, rechecks the origin inside queued JavaScript before executing it, and
+rejects callbacks after an origin change. A callback from another window cannot
+consume the request. Opaque origins are rejected. The `navigate` method permits
+same-origin destinations only; external pages must not inherit automation access.
+
+## Native video (macOS)
+
+All clients use `video.start`, `video.stop`, and `video.status`, with the normal
+optional `window` label. Start requires an absolute, nonexistent `output_path`
+ending in `.mp4`. Optional `fps` is 1–10 (default 5); `max_duration_ms` is
+100–60000 (default 60000). The native ID is resolved from the app's own window
+listing; no desktop-wide capture or guessed window ID is used.
+
+Recording requires Screen Recording permission and `ffmpeg` on PATH.
+Start checks the encoder and captures the first frame before reporting success.
+Stop returns `output_path`, `window_id`, `frames`, `duration_ms`, `byte_size`,
+and `backend`. Status returns `active` and `pending_result`; call stop to
+collect results even after automatic completion. An existing session must be
+collected before another starts for that window.
+
+Frames use the native macOS compositor through `screencapture`. Capture rate is
+best effort; encoding uses measured frame durations. Resizing retains the first
+frame's output dimensions with letterboxing. Audio is not recorded. Capture and
+encoding failures reject; temporary frames are removed, children have deadlines
+and are reaped, and the final MP4 is published atomically without overwriting an
+existing destination. Unsupported platforms return an explicit error.
+
+## TOML scenarios through MCP
+
+`hasgard.run_scenario` takes `toml` (required string), optional `window`, and
+optional `fail_fast`. It runs the same implementation as CLI `run`, including
+global/step deadlines and failure reporting. Failed steps set MCP `isError`.
+The response includes step statuses and passed/failed/skipped counts.
+MCP scenarios reject `[connect]`: the server's configured application remains
+the target.
+
+The `storage-get` step requires `key`; optional `session = true` selects session
+storage and optional `expected` asserts exact equality. Missing keys fail.
+An existing empty string is a valid value, including `expected = ""`.

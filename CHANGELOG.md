@@ -7,6 +7,24 @@ bump may carry breaking changes.
 The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, and
 `@nyssance/tauri-hasgard` — share one version.
 
+## [Unreleased]
+
+- Bind queued automation and callbacks to an ACL-authorized window origin;
+  reject cross-origin navigation before it changes the page.
+- Add native macOS window MP4 recording across RPC, CLI, MCP, and the test client,
+  with bounded capture/encoding, atomic publication, and child cleanup.
+- Expose the shared TOML runner through MCP; add storage-get assertions and
+  reject missing values and malformed assertion results.
+- Focus the native WebView before DOM focus; fix the Windows fixture URL
+  expectation and require Windows native E2E to pass.
+
+- Keep repeated radio selection checked, reject non-checkable targets and radio
+  uncheck, and emit input/change events only when checked state changes.
+- Clean up Unix socket paths using filesystem identity; preserve replacement
+  sockets and avoid changing the application's process-wide umask.
+- Reject record.stop without an active recording through the shared RPC protocol.
+- Preserve recorded window scope in JSON replay and shell exports.
+
 ## [0.4.1] — 2026-09-07
 
 - Keep waiting for process-group disappearance when a zero-signal probe returns

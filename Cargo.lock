@@ -3691,6 +3691,7 @@ dependencies = [
  "serial_test",
  "tauri",
  "tauri-plugin",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

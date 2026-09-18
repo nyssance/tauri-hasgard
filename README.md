@@ -52,7 +52,7 @@ cargo add tauri-plugin-hasgard
 
 ```toml
 [dependencies]
-tauri-plugin-hasgard = "0.3"
+tauri-plugin-hasgard = "0.4"
 ```
 
 ```rust
@@ -94,7 +94,7 @@ cargo install tauri-hasgard-cli
 ```
 
 The Homebrew formula lives in `nyssance/tap`, not in homebrew-core, so the
-`nyssance/tap/` prefix is required. Prebuilt archives for all six supported
+`nyssance/tap/` prefix is required. Prebuilt archives for all five supported
 targets are attached to each [GitHub Release](https://github.com/nyssance/tauri-hasgard/releases).
 
 Use it directly:
@@ -161,6 +161,23 @@ test("opens settings", async ({ hasgard, window }) => {
 ```
 
 Hasgard uses Playwright Test for fixtures, isolation, retries, reporters, and parallel workers. The worker-scoped `hasgard` fixture is a `HasgardApplication`; the test-scoped `window` fixture is the configured primary `HasgardWindow`. There is deliberately no `page` fixture: native Tauri webviews do not implement the complete Playwright `Page` contract.
+
+## Scenarios and native video
+
+CLI and MCP share the TOML scenario runner, including storage assertions and
+deadlines. MCP exposes it as `hasgard.run_scenario`.
+
+On macOS, record one native window with ffmpeg installed:
+
+```sh
+tauri-hasgard --window settings video start --output /tmp/settings.mp4 --max-duration-ms 10000
+tauri-hasgard --window settings video stop
+```
+
+The test client exposes `window.startVideo({ outputPath })`,
+`window.stopVideo()`, and `window.videoStatus()`. See the
+[protocol](docs/protocol.md) for permission requirements, limits, origin binding,
+and error behavior.
 
 ## Status
 

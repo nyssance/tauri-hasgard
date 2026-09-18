@@ -16,7 +16,17 @@ pub(crate) enum EvalError {
     ChannelClosed,
 }
 
-type PendingMap = HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>;
+struct Pending {
+    sender: oneshot::Sender<Result<serde_json::Value, String>>,
+    source: Option<(String, String)>,
+}
+type PendingMap = HashMap<u64, Pending>;
+
+pub(crate) fn origin(url: &tauri::Url) -> Result<String, String> {
+    let host = url.host_str().ok_or_else(|| "Opaque origins are not supported for automation".to_owned())?;
+    let port = url.port().map_or_else(String::new, |port| format!(":{port}"));
+    Ok(format!("{}://{host}{port}", url.scheme()))
+}
 
 struct PendingGuard<'a> {
     pending: &'a Mutex<PendingMap>,
@@ -36,7 +46,10 @@ impl Drop for PendingGuard<'_> {
 #[derive(Clone)]
 pub(crate) struct EvalEngine {
     pending: Arc<Mutex<PendingMap>>,
+    #[cfg(target_os = "macos")]
+    pub(crate) videos: Arc<crate::video::Videos>,
     next_id: Arc<AtomicU64>,
+    allowed: Arc<Mutex<HashMap<String, std::collections::HashSet<String>>>>,
     last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
@@ -44,7 +57,10 @@ impl EvalEngine {
     pub fn new() -> Self {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(target_os = "macos")]
+            videos: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
+            allowed: Arc::new(Mutex::new(HashMap::new())),
             last_snapshot: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -67,7 +83,7 @@ impl EvalEngine {
     pub fn register(&self) -> (u64, oneshot::Receiver<Result<serde_json::Value, String>>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().expect("pending lock poisoned").insert(id, tx);
+        self.pending.lock().expect("pending lock poisoned").insert(id, Pending { sender: tx, source: None });
         (id, rx)
     }
 
@@ -77,11 +93,57 @@ impl EvalEngine {
 
         match sender {
             Some(tx) => {
-                let _ = tx.send(result);
+                let _ = tx.sender.send(result);
             }
             None => {
                 tracing::warn!(id, "resolve called for unknown eval ID");
             }
+        }
+    }
+
+    /// Only ACL-authorized IPC callbacks may establish an automation origin.
+    pub fn authorize(&self, window: &str, url: &tauri::Url) -> Result<(), String> {
+        self.allowed.lock().expect("allowed lock poisoned").entry(window.to_owned()).or_default().insert(origin(url)?);
+        Ok(())
+    }
+
+    pub fn check_origin(&self, window: &str, url: &tauri::Url) -> Result<String, String> {
+        let source = origin(url)?;
+        if !self
+            .allowed
+            .lock()
+            .expect("allowed lock poisoned")
+            .get(window)
+            .is_some_and(|origins| origins.contains(&source))
+        {
+            return Err(format!(
+                "Automation origin {source} has not completed an ACL-authorized handshake for window '{window}'"
+            ));
+        }
+        Ok(source)
+    }
+
+    pub fn bind_source(&self, id: u64, window: &str, source: &str) -> Result<(), String> {
+        let mut pending = self.pending.lock().expect("pending lock poisoned");
+        let request = pending.get_mut(&id).ok_or_else(|| "Eval request already expired".to_owned())?;
+        request.source = Some((window.to_owned(), source.to_owned()));
+        Ok(())
+    }
+
+    pub fn resolve_from(&self, id: u64, window: &str, url: &tauri::Url, result: Result<serde_json::Value, String>) {
+        let mut pending = self.pending.lock().expect("pending lock poisoned");
+        let Some(request) = pending.get(&id) else { return };
+        let Some((expected_window, expected_origin)) = &request.source else { return };
+        // Another window cannot consume or forge the pending result.
+        if expected_window != window {
+            return;
+        }
+        let result = match origin(url) {
+            Ok(actual) if &actual == expected_origin => result,
+            _ => Err("Window origin changed while automation was pending".to_owned()),
+        };
+        if let Some(request) = pending.remove(&id) {
+            let _ = request.sender.send(result);
         }
     }
 
@@ -124,6 +186,29 @@ impl EvalEngine {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn callbacks_are_bound_to_window_and_origin() {
+        let engine = super::EvalEngine::new();
+        let a = tauri::Url::parse("http://localhost:3000/a").expect("url");
+        let same = tauri::Url::parse("http://localhost:3000/b").expect("url");
+        let other = tauri::Url::parse("http://localhost:3001/a").expect("url");
+        assert!(engine.check_origin("main", &a).is_err());
+        engine.authorize("main", &a).expect("hello");
+        assert!(engine.check_origin("settings", &a).is_err());
+        assert!(engine.check_origin("main", &other).is_err());
+        let (id, mut rx) = engine.register();
+        engine.bind_source(id, "main", &super::origin(&a).expect("origin")).expect("bind");
+        engine.resolve_from(id, "settings", &a, Ok(serde_json::json!("forged")));
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+        engine.resolve_from(id, "main", &same, Ok(serde_json::json!("correct")));
+        assert_eq!(rx.await.expect("callback").expect("result"), "correct");
+        let (id, rx) = engine.register();
+        engine.bind_source(id, "main", &super::origin(&a).expect("origin")).expect("bind");
+        engine.resolve_from(id, "main", &other, Ok(serde_json::json!("late")));
+        assert!(rx.await.expect("callback").is_err());
+        assert!(super::origin(&tauri::Url::parse("data:text/plain,hi").expect("url")).is_err());
+    }
+
     use super::*;
     use serde_json::json;
 

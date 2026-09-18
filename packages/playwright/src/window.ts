@@ -651,6 +651,35 @@ export class HasgardWindow {
     return Buffer.from(dataUrl.slice(prefix.length), "base64")
   }
 
+  /** Start a bounded recording of this native window. macOS only; requires ffmpeg. */
+  async startVideo(options: { outputPath: string; fps?: number; maxDurationMs?: number }): Promise<void> {
+    await this.rpc.call("video.start", {
+      window: this.label,
+      output_path: options.outputPath,
+      ...(options.fps === undefined ? {} : { fps: options.fps }),
+      ...(options.maxDurationMs === undefined ? {} : { max_duration_ms: options.maxDurationMs })
+    })
+  }
+
+  /** Stop recording; capture and encoder failures reject rather than returning an empty artifact. */
+  async stopVideo(): Promise<{ outputPath: string; frames: number; durationMs: number; byteSize: number }> {
+    const value = expectRecord(await this.rpc.call("video.stop", { window: this.label }), "video.stop result")
+    return {
+      outputPath: expectString(value.output_path, "video.output_path"),
+      frames: expectNumber(value.frames, "video.frames"),
+      durationMs: expectNumber(value.duration_ms, "video.duration_ms"),
+      byteSize: expectNumber(value.byte_size, "video.byte_size")
+    }
+  }
+
+  async videoStatus(): Promise<{ active: boolean; pendingResult: boolean }> {
+    const value = expectRecord(await this.rpc.call("video.status", { window: this.label }), "video.status result")
+    return {
+      active: expectBoolean(value.active, "video.active"),
+      pendingResult: expectBoolean(value.pending_result, "video.pending_result")
+    }
+  }
+
   /**
    * Capture this window through the native compositor, writing a PNG to
    * `outputPath`. macOS only.
