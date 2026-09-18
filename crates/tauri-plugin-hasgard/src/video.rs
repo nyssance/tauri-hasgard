@@ -21,13 +21,13 @@ mod macos {
     struct Session {
         abort: Arc<AtomicBool>,
         stop: mpsc::Sender<()>,
-        worker: Option<JoinHandle<Result<Value, String>>>,
+        worker: Mutex<Option<JoinHandle<Result<Value, String>>>>,
     }
     impl Drop for Session {
         fn drop(&mut self) {
             self.abort.store(true, Ordering::Release);
             let _ = self.stop.send(());
-            if let Some(worker) = self.worker.take() {
+            if let Some(worker) = self.worker.get_mut().expect("worker lock poisoned").take() {
                 // Every child has a deadline and is reaped. Drop cannot orphan an encoder.
                 let _ = worker.join();
             }
@@ -35,7 +35,10 @@ mod macos {
     }
 
     #[derive(Default)]
-    pub(crate) struct Videos(Mutex<HashMap<String, Session>>);
+    pub(crate) struct Videos {
+        sessions: Mutex<HashMap<String, Arc<Session>>>,
+        closed: AtomicBool,
+    }
 
     struct ChildGuard(Child);
     impl Drop for ChildGuard {
@@ -118,26 +121,30 @@ mod macos {
             }
             let fps = integer(params, "fps", 5, 1, 10)?;
             let max_ms = integer(params, "max_duration_ms", 60_000, 100, 60_000)?;
-            let parent = output.parent().ok_or("video output has no parent")?;
-            let mut sessions = self.0.lock().map_err(|e| e.to_string())?;
+            let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
+            if self.closed.load(Ordering::Acquire) {
+                return Err("video service is shutting down".into());
+            }
             if sessions.contains_key(window) {
                 return Err(format!("window '{window}' already has a video session"));
-            }
-            // Verify dependency and first real frame before returning success.
-            run_bounded(Command::new("ffmpeg").arg("-version"), Duration::from_secs(3), None)?;
-            let dir =
-                tempfile::Builder::new().prefix(".hasgard-video-").tempdir_in(parent).map_err(|e| e.to_string())?;
-            capture(id, &dir.path().join("frame-000000.png"), None)?;
-            let (width, height) =
-                image::image_dimensions(dir.path().join("frame-000000.png")).map_err(|e| e.to_string())?;
-            if width == 0 || height == 0 {
-                return Err("native capture has zero dimensions".to_owned());
             }
             let (stop, receiver) = mpsc::channel();
             let abort = Arc::new(AtomicBool::new(false));
             let worker_abort = abort.clone();
             let output_clone = output.clone();
+            let (ready_tx, ready_rx) = mpsc::sync_channel(1);
             let worker = thread::Builder::new().name("hasgard-video".into()).spawn(move || {
+                let first = (|| {
+                    run_bounded(Command::new("ffmpeg").arg("-version"), Duration::from_secs(3), Some(&worker_abort))?;
+                    let parent = output_clone.parent().ok_or("video output has no parent")?;
+                    let dir = tempfile::Builder::new().prefix(".hasgard-video-").tempdir_in(parent).map_err(|e| e.to_string())?;
+                    capture(id, &dir.path().join("frame-000000.png"), Some(&worker_abort))?;
+                    let (width, height) = image::image_dimensions(dir.path().join("frame-000000.png")).map_err(|e| e.to_string())?;
+                    if width == 0 || height == 0 { return Err("native capture has zero dimensions".to_owned()); }
+                    Ok((dir, width, height))
+                })();
+                let _ = ready_tx.send(first.as_ref().map(|_| ()).map_err(Clone::clone));
+                let (dir, width, height) = first?;
                 let start = Instant::now();
                 let mut timestamps = vec![Duration::ZERO];
                 let interval = Duration::from_nanos(1_000_000_000 / fps);
@@ -172,41 +179,71 @@ mod macos {
                 std::fs::hard_link(&encoded, &output_clone).map_err(|e| format!("publish video: {e}"))?;
                 Ok(json!({"output_path":output_clone,"frames":timestamps.len(),"duration_ms":elapsed.as_millis(),"byte_size":bytes,"window_id":id,"backend":"screencapture+ffmpeg"}))
             }).map_err(|e| e.to_string())?;
-            sessions.insert(window.to_owned(), Session { stop, abort, worker: Some(worker) });
+            let session = Arc::new(Session { stop, abort, worker: Mutex::new(Some(worker)) });
+            sessions.insert(window.to_owned(), session.clone());
+            drop(sessions);
+            if let Err(error) =
+                ready_rx.recv().map_err(|_| "video startup worker disconnected".to_owned()).and_then(|r| r)
+            {
+                self.remove_session(window, &session);
+                return Err(error);
+            }
             Ok(json!({"status":"recording","output_path":output,"window_id":id,"fps":fps,"max_duration_ms":max_ms}))
         }
 
+        fn remove_session(&self, window: &str, session: &Arc<Session>) {
+            let mut sessions = self.sessions.lock().expect("video sessions lock poisoned");
+            if sessions.get(window).is_some_and(|current| Arc::ptr_eq(current, session)) {
+                sessions.remove(window);
+            }
+        }
+
         pub fn shutdown(&self) {
-            let sessions = std::mem::take(&mut *self.0.lock().expect("video sessions lock poisoned"));
-            // Signal every worker before joining any worker.
+            let sessions = {
+                let mut sessions = self.sessions.lock().expect("video sessions lock poisoned");
+                self.closed.store(true, Ordering::Release);
+                std::mem::take(&mut *sessions)
+            };
             for session in sessions.values() {
                 session.abort.store(true, Ordering::Release);
                 let _ = session.stop.send(());
             }
-            drop(sessions);
+            for session in sessions.values() {
+                // A concurrent stop owns this lock until its join finishes.
+                if let Some(worker) = session.worker.lock().expect("worker lock poisoned").take() {
+                    let _ = worker.join();
+                }
+            }
         }
 
         pub fn stop(&self, window: &str) -> Result<Value, String> {
-            let mut session = self
-                .0
+            let session = self
+                .sessions
                 .lock()
                 .map_err(|e| e.to_string())?
-                .remove(window)
+                .get(window)
+                .cloned()
                 .ok_or_else(|| format!("window '{window}' has no video session"))?;
             let _ = session.stop.send(());
-            session
-                .worker
+            let mut worker = session.worker.lock().map_err(|e| e.to_string())?;
+            let result = worker
                 .take()
-                .ok_or("video worker missing")?
+                .ok_or("video result already collected")?
                 .join()
-                .map_err(|_| "video worker panicked".to_owned())?
+                .map_err(|_| "video worker panicked".to_owned())
+                .and_then(|result| result);
+            drop(worker);
+            self.remove_session(window, &session);
+            result
         }
 
         pub fn status(&self, window: &str) -> Result<Value, String> {
-            let sessions = self.0.lock().map_err(|e| e.to_string())?;
+            let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
             let session = sessions.get(window);
-            Ok(json!({"active":session.is_some_and(|s| s.worker.as_ref().is_some_and(|w| !w.is_finished())),
-                "pending_result":session.is_some()}))
+            Ok(
+                json!({"active":session.is_some_and(|s| s.worker.lock().expect("worker lock poisoned").as_ref().is_some_and(|w| !w.is_finished())),
+                "pending_result":session.is_some()}),
+            )
         }
     }
 
@@ -256,7 +293,11 @@ mod macos {
                 run_bounded(Command::new("/bin/sleep").arg("10"), Duration::from_secs(10), Some(&worker_abort))?;
                 Ok(json!({}))
             });
-            videos.0.lock().expect("lock").insert("main".into(), Session { stop, abort, worker: Some(worker) });
+            videos
+                .sessions
+                .lock()
+                .expect("lock")
+                .insert("main".into(), Arc::new(Session { stop, abort, worker: Mutex::new(Some(worker)) }));
             started.recv().expect("started");
             let start = Instant::now();
             videos.shutdown();

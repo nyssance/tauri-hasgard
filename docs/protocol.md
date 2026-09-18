@@ -146,10 +146,14 @@ Command remains held at dispatch time. Release modifiers before retrying an
 ## Origin binding
 
 Before automation, each webview completes an IPC handshake subject to the app's
-Tauri capabilities. Hasgard binds every pending evaluation to that window and
+Tauri capabilities after the native page-load event. Each window accepts only
+its latest one-use handshake token. Navigation start and window destruction
+revoke authorization and fail pending evaluations. Hasgard binds every pending evaluation to an unpredictable token, that window and
 origin, rechecks the origin inside queued JavaScript before executing it, and
 rejects callbacks after an origin change. A callback from another window cannot
-consume the request. Opaque origins are rejected. The `navigate` method permits
+consume the request, nor can an iframe guess a request token. Initial readiness
+returns RPC `-32002` until the handshake completes; the fixture retries only this
+explicit readiness error within its deadline. Opaque origins are rejected. The `navigate` method permits
 same-origin destinations only; external pages must not inherit automation access.
 
 ## Native video (macOS)
@@ -172,7 +176,10 @@ best effort; encoding uses measured frame durations. Resizing retains the first
 frame's output dimensions with letterboxing. Audio is not recorded. Capture and
 encoding failures reject; temporary frames are removed, children have deadlines
 and are reaped, and the final MP4 is published atomically without overwriting an
-existing destination. Unsupported platforms return an explicit error.
+existing destination. Publishing requires a filesystem supporting hard links;
+an unsupported filesystem returns an error without a non-atomic fallback.
+Application exit cancels and joins recording workers, including a concurrent stop.
+Unsupported platforms return an explicit error.
 
 ## TOML scenarios through MCP
 
@@ -186,3 +193,6 @@ the target.
 The `storage-get` step requires `key`; optional `session = true` selects session
 storage and optional `expected` asserts exact equality. Missing keys fail.
 An existing empty string is a valid value, including `expected = ""`.
+
+The `focus` action also activates the native application window and its webview
+before focusing the DOM element, so focus events work on an inactive window.

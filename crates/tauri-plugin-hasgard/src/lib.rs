@@ -55,10 +55,15 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         tauri::plugin::Builder::new("hasgard")
             .js_init_script(BRIDGE_JS.to_owned())
             .on_page_load(|webview, payload| {
-                if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                    let engine = webview.state::<EvalEngine>();
-                    let nonce = serde_json::Value::String(engine.handshake_nonce.as_str().to_owned());
-                    let script = format!("if(window.top===window)window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:0,result:location.href,nonce:{nonce}}}).catch(e=>console.error('Hasgard handshake failed',e));");
+                let engine = webview.state::<EvalEngine>();
+                if payload.event() == tauri::webview::PageLoadEvent::Started {
+                    engine.forget_window(webview.label());
+                } else {
+                    let Ok(nonce) = engine.begin_handshake(webview.label(), payload.url()) else { return };
+                    let nonce = serde_json::Value::String(nonce);
+                    let Ok(expected) = crate::eval::origin(payload.url()) else { return };
+                    let expected = serde_json::Value::String(expected);
+                    let script = format!("(()=>{{if(window.top!==window)return;const u=new URL(location.href);if(u.protocol+'//'+u.host!=={expected})return;window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:0,result:location.href,nonce:{nonce}}}).catch(e=>console.error('Hasgard handshake failed',e));}})();");
                     if let Err(error) = webview.eval(script) { tracing::error!(%error, "Failed to request automation handshake"); }
                 }
             })

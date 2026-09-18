@@ -693,15 +693,12 @@ pub(crate) fn callback<R: tauri::Runtime>(
 ) -> Result<(), String> {
     let url = webview.url().map_err(|e| e.to_string())?;
     if id == 0 {
-        if nonce.as_deref() != Some(eval_engine.handshake_nonce.as_str()) {
-            return Err("Invalid handshake nonce".into());
-        }
         let reported = result.ok_or_else(|| "Handshake requires page URL".to_owned())?;
         let reported = tauri::Url::parse(&reported).map_err(|e| e.to_string())?;
         if error.is_some() || crate::eval::origin(&reported)? != crate::eval::origin(&url)? {
             return Err("Handshake origin changed".to_owned());
         }
-        return eval_engine.authorize(webview.label(), &url);
+        return eval_engine.complete_handshake(webview.label(), &url, nonce.as_deref());
     }
     eval_engine.resolve_from(id, webview.label(), &url, nonce.as_deref(), callback_outcome(result, error));
     Ok(())

@@ -51,7 +51,7 @@ pub(crate) struct EvalEngine {
     pub(crate) videos: Arc<crate::video::Videos>,
     next_id: Arc<AtomicU64>,
     allowed: Arc<Mutex<HashMap<String, String>>>,
-    pub(crate) handshake_nonce: Arc<String>,
+    handshakes: Arc<Mutex<HashMap<String, (String, String)>>>,
     last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
@@ -63,7 +63,7 @@ impl EvalEngine {
             videos: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
             allowed: Arc::new(Mutex::new(HashMap::new())),
-            handshake_nonce: Arc::new(uuid::Uuid::new_v4().to_string()),
+            handshakes: Arc::default(),
             last_snapshot: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -113,6 +113,24 @@ impl EvalEngine {
         Ok(())
     }
 
+    pub fn begin_handshake(&self, window: &str, url: &tauri::Url) -> Result<String, String> {
+        let source = origin(url)?;
+        let nonce = uuid::Uuid::new_v4().to_string();
+        self.handshakes.lock().expect("handshake lock poisoned").insert(window.into(), (nonce.clone(), source));
+        Ok(nonce)
+    }
+
+    pub fn complete_handshake(&self, window: &str, url: &tauri::Url, nonce: Option<&str>) -> Result<(), String> {
+        let source = origin(url)?;
+        let mut handshakes = self.handshakes.lock().expect("handshake lock poisoned");
+        if !handshakes.get(window).is_some_and(|(token, expected)| nonce == Some(token.as_str()) && &source == expected)
+        {
+            return Err("Invalid or stale handshake".into());
+        }
+        handshakes.remove(window);
+        self.authorize(window, url)
+    }
+
     pub fn check_origin(&self, window: &str, url: &tauri::Url) -> Result<String, String> {
         let source = origin(url)?;
         if self.allowed.lock().expect("allowed lock poisoned").get(window).is_none_or(|allowed| allowed != &source) {
@@ -157,6 +175,7 @@ impl EvalEngine {
     }
 
     pub fn forget_window(&self, window: &str) {
+        self.handshakes.lock().expect("handshake lock poisoned").remove(window);
         self.allowed.lock().expect("allowed lock poisoned").remove(window);
         self.last_snapshot.lock().expect("snapshot lock poisoned").remove(window);
         let mut pending = self.pending.lock().expect("pending lock poisoned");
@@ -252,6 +271,24 @@ mod tests {
         engine.forget_window("main");
         assert!(engine.check_origin("main", &url).is_err());
         assert_eq!(rx.await.expect("test operation succeeds"), Err("Window was destroyed".into()));
+    }
+
+    #[test]
+    fn handshake_is_single_use_and_latest_navigation_only() {
+        let engine = EvalEngine::new();
+        let a = tauri::Url::parse("https://example.com/a").expect("url");
+        let b = tauri::Url::parse("https://other.example/b").expect("url");
+        let old = engine.begin_handshake("main", &a).expect("begin");
+        let latest = engine.begin_handshake("main", &b).expect("begin");
+        assert!(engine.complete_handshake("main", &a, Some(&old)).is_err());
+        assert!(engine.complete_handshake("settings", &b, Some(&latest)).is_err());
+        assert!(engine.complete_handshake("main", &a, Some(&latest)).is_err());
+        engine.complete_handshake("main", &b, Some(&latest)).expect("complete");
+        assert!(engine.complete_handshake("main", &b, Some(&latest)).is_err());
+        assert!(engine.check_origin("main", &b).is_ok());
+        assert!(engine.check_origin("main", &a).is_err());
+        engine.forget_window("main");
+        assert!(engine.check_origin("main", &b).is_err());
     }
 
     #[test]
