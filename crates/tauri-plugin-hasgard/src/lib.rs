@@ -170,10 +170,14 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
             engine.bind_source(id, target.label(), &source)?;
         }
         let expected = serde_json::to_string(&source).map_err(|e| e.to_string())?;
-        let mismatch = id.map_or_else(String::new, |id| {
-            let nonce=serde_json::to_string(&engine.nonce(id)).expect("string serializes");
-            format!("window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:{id},nonce:{nonce},error:'Origin changed before execution'}});")
-        });
+        let mismatch = if let Some(id) = id {
+            let nonce = serde_json::Value::String(engine.pending_nonce(id)?);
+            format!(
+                "window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:{id},nonce:{nonce},error:'Origin changed before execution'}});"
+            )
+        } else {
+            String::new()
+        };
         // Native URL checks alone race queued WebView eval. Pin again inside JS,
         // before any requested expression or side effect executes.
         let pinned = format!(

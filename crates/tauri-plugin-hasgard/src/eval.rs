@@ -170,6 +170,15 @@ impl EvalEngine {
         }
     }
 
+    pub fn pending_nonce(&self, id: u64) -> Result<String, String> {
+        self.pending
+            .lock()
+            .expect("pending lock poisoned")
+            .get(&id)
+            .map(|p| p.nonce.clone())
+            .ok_or_else(|| "Eval request was cancelled before execution".to_owned())
+    }
+
     pub fn nonce(&self, id: u64) -> String {
         self.pending.lock().expect("pending lock poisoned").get(&id).expect("registered request").nonce.clone()
     }

@@ -137,8 +137,8 @@ pub(crate) fn load_scenario(path: &Path) -> Result<Scenario> {
 pub(crate) fn parse_scenario(content: &str) -> Result<Scenario> {
     let scenario: Scenario = toml::from_str(content)?;
     anyhow::ensure!(!scenario.step.is_empty(), "scenario requires at least one step");
-    for step in &scenario.step {
-        validate_step(step)?;
+    for (index, step) in scenario.step.iter().enumerate() {
+        validate_step(step).with_context(|| format!("invalid step {} ({})", index + 1, step.display_name(index)))?;
     }
     Ok(scenario)
 }
