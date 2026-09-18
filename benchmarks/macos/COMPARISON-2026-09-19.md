@@ -26,15 +26,16 @@
 
 ## 验证与边界
 
-本地 Rust 360 项、TypeScript 131 项、桥接 JavaScript 126 项通过；
+本地 Rust 361 项、TypeScript 131 项、桥接 JavaScript 126 项通过；
 Clippy warnings-as-errors、类型、格式和共享协议检查通过。
 真实 ffmpeg 对生成 PNG 的编码测试通过；该测试不捕获桌面。
+最终候选远程 macOS 的[真实窗口视频附件](review-2026-09-19/native-video-evidence.json)确认 captured=true、2 帧、1072 毫秒、24406 字节，自动停止并生成 MP4。
 
 远程运行 [35380717261](https://github.com/nyssance/tauri-hasgard/actions/runs/35380717261)：
 macOS Apple Silicon 原生 73 项通过；Windows x64 原生 56 项通过、17 项平台限定跳过；
-Linux x64 原生 63 项通过、10 项平台限定跳过。
+Linux x64/ARM64 原生各 63 项通过、各 10 项平台限定跳过。
 该运行的 Windows 单元测试也已通过。耗时主要在编译及 Linux 原生生命周期用例，
-不是新的键盘压力循环。最新提交正在 CI 复核。
+不是新的键盘压力循环。完整矩阵在 [09aee4a / 35381422348](https://github.com/nyssance/tauri-hasgard/actions/runs/35381422348) 已全部通过。最终候选 [ee5edf7 / 35382063439](https://github.com/nyssance/tauri-hasgard/actions/runs/35382063439) 的完整矩阵也已全部通过。
 
 macOS 仅支持 Apple Silicon。Windows ARM64 只有编译检查，不等于原生运行验证。
 视频只支持 macOS，需要 ffmpeg、屏幕录制权限及支持硬链接的输出文件系统；
@@ -44,16 +45,17 @@ macOS 仅支持 Apple Silicon。Windows ARM64 只有编译检查，不等于原�
 ## 双模型讨论
 
 Claude Session：`37cbf695-d473-47af-bbde-069c3c9a0fb0`。
-已完成六轮实质交流：[第一轮](review-2026-09-19/round-1.md)、
+已完成七轮实质交流：[第一轮](review-2026-09-19/round-1.md)、
 [第二轮](review-2026-09-19/round-2.md)、[第三轮](review-2026-09-19/round-3.md)、
 [第四轮](review-2026-09-19/round-4.md)、[第五轮](review-2026-09-19/round-5.md)、
-[第六轮](review-2026-09-19/round-6.md)。
+[第六轮](review-2026-09-19/round-6.md)、[第七轮](review-2026-09-19/round-7.md)。
 
 落实了 iframe 回调伪造、旧握手竞态、退出清理、取消读取 nonce 的 panic 风险；
 明确拒绝会覆盖目标的 copy/rename 回退，并保留 storage.get 查询与场景断言的不同语义。
-目前实现没有剩余异议；最终共识等待完整平台矩阵。100% 的分母遵循 HTML 原标准，
+七轮已达成设计与实现共识；最终候选完整平台矩阵及多帧视频证据均已通过，满足本轮共识条件。100% 的分母遵循 HTML 原标准，
 表示讨论共识和注明范围内的最佳，不表示全部平台能力覆盖或全球性能排名。
 
 ## 发布
 
-0.5.0 发布准备中；当前公开版本仍为 0.4.1。本文件不把准备中的版本记为已发布。
+0.5.0 已通过发布前验证，随后由 [Release 工作流](https://github.com/nyssance/tauri-hasgard/actions/workflows/release.yml)发布 GitHub 二进制、npm、crates.io、Homebrew 和 Scoop。
+各渠道实际发布状态以 [v0.5.0 Release](https://github.com/nyssance/tauri-hasgard/releases/tag/v0.5.0)及工作流结果为准。
