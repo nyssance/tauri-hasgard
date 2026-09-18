@@ -7,7 +7,7 @@ bump may carry breaking changes.
 The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, and
 `@nyssance/tauri-hasgard` — share one version.
 
-## [Unreleased]
+## [0.5.0] — 2026-09-19
 
 - Bind queued automation and callbacks to an ACL-authorized window origin;
   reject cross-origin navigation before it changes the page.
@@ -17,7 +17,6 @@ The three published artifacts — `tauri-plugin-hasgard`, `tauri-hasgard-cli`, a
   reject missing values and malformed assertion results.
 - Focus the native WebView before DOM focus; fix the Windows fixture URL
   expectation and require Windows native E2E to pass.
-
 - Keep repeated radio selection checked, reject non-checkable targets and radio
   uncheck, and emit input/change events only when checked state changes.
 - Clean up Unix socket paths using filesystem identity; preserve replacement
