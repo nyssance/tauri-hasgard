@@ -216,6 +216,17 @@ mod macos {
             }
         }
 
+        pub fn cancel_window(&self, window: &str) {
+            let session = self.sessions.lock().expect("video sessions lock poisoned").remove(window);
+            if let Some(session) = session {
+                session.abort.store(true, Ordering::Release);
+                let _ = session.stop.send(());
+                if let Some(worker) = session.worker.lock().expect("worker lock poisoned").take() {
+                    let _ = worker.join();
+                }
+            }
+        }
+
         pub fn stop(&self, window: &str) -> Result<Value, String> {
             let session = self
                 .sessions
@@ -303,6 +314,32 @@ mod macos {
             videos.shutdown();
             assert!(start.elapsed() < Duration::from_secs(2));
             assert_eq!(videos.status("main").expect("status")["pending_result"], false);
+        }
+
+        #[test]
+        fn window_cancellation_stops_only_its_session() {
+            let videos = Videos::default();
+            let mut flags = Vec::new();
+            for label in ["main", "settings"] {
+                let abort = Arc::new(AtomicBool::new(false));
+                flags.push(abort.clone());
+                let (stop, receiver) = mpsc::channel();
+                let worker = thread::spawn(move || {
+                    let _ = receiver.recv();
+                    Ok(json!({}))
+                });
+                videos
+                    .sessions
+                    .lock()
+                    .expect("lock")
+                    .insert(label.into(), Arc::new(Session { abort, stop, worker: Mutex::new(Some(worker)) }));
+            }
+            videos.cancel_window("settings");
+            assert!(!flags[0].load(Ordering::Acquire));
+            assert!(flags[1].load(Ordering::Acquire));
+            assert_eq!(videos.status("settings").expect("status")["pending_result"], false);
+            assert_eq!(videos.status("main").expect("status")["pending_result"], true);
+            videos.shutdown();
         }
 
         #[test]

@@ -179,6 +179,7 @@ and are reaped, and the final MP4 is published atomically without overwriting an
 existing destination. Publishing requires a filesystem supporting hard links;
 an unsupported filesystem returns an error without a non-atomic fallback.
 Application exit cancels and joins recording workers, including a concurrent stop.
+Destroying a window cancels its recording before its native window ID can be reused.
 Unsupported platforms return an explicit error.
 
 ## TOML scenarios through MCP

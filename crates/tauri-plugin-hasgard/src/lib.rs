@@ -122,7 +122,11 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             })
             .on_event(|app, event| {
                 if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = event
-                    && let Some(engine) = app.try_state::<EvalEngine>() { engine.forget_window(label); }
+                    && let Some(engine) = app.try_state::<EvalEngine>() {
+                    engine.forget_window(label);
+                    #[cfg(target_os = "macos")]
+                    engine.videos.cancel_window(label);
+                }
                 #[cfg(target_os = "macos")]
                 if matches!(event, tauri::RunEvent::Exit)
                     && let Some(engine) = app.try_state::<EvalEngine>() { engine.videos.shutdown(); }
