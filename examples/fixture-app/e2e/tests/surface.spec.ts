@@ -617,13 +617,19 @@ test("native video targets a window and reports permission failures explicitly",
     await expect(window.videoStatus()).resolves.toEqual({ active: false, pendingResult: false })
     return
   }
+  // Let the bounded session finish so this verifies a sequence of compositor
+  // frames and automatic completion, not just encoding the first screenshot.
+  await expect(async () => {
+    expect((await window.videoStatus()).active).toBe(false)
+  }).toPass({ timeout: 10_000 })
   const result = await window.stopVideo()
   await testInfo.attach("native-video-result", {
     body: JSON.stringify({ captured: true, ...result }),
     contentType: "application/json"
   })
   expect(result.outputPath).toBe(outputPath)
-  expect(result.frames).toBeGreaterThan(0)
+  expect(result.frames).toBeGreaterThan(1)
+  expect(result.durationMs).toBeGreaterThanOrEqual(1000)
   expect(result.byteSize).toBeGreaterThan(0)
   await expect(window.videoStatus()).resolves.toEqual({ active: false, pendingResult: false })
   await expect(window.stopVideo()).rejects.toThrow(/no video session/)
