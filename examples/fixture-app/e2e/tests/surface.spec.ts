@@ -610,10 +610,18 @@ test("native video targets a window and reports permission failures explicitly",
     // Hosted runners may not have TCC screen-recording permission. This is an
     // explicit capability failure, never a successful empty video.
     expect(String(error)).toMatch(/Screen Recording permission|native recording process timed out/)
+    await testInfo.attach("native-video-capability", {
+      body: JSON.stringify({ captured: false, error: String(error) }),
+      contentType: "application/json"
+    })
     await expect(window.videoStatus()).resolves.toEqual({ active: false, pendingResult: false })
     return
   }
   const result = await window.stopVideo()
+  await testInfo.attach("native-video-result", {
+    body: JSON.stringify({ captured: true, ...result }),
+    contentType: "application/json"
+  })
   expect(result.outputPath).toBe(outputPath)
   expect(result.frames).toBeGreaterThan(0)
   expect(result.byteSize).toBeGreaterThan(0)

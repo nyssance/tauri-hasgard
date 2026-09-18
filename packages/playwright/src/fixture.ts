@@ -29,6 +29,15 @@ export function createHasgardTest(config: HasgardTestConfig) {
           if (ping.status !== "ok") throw new Error(`Unexpected Hasgard ping status: ${ping.status}`)
           await hasgard.waitForWindowReady(config.windowLabel, config.readySelector, readinessTimeoutMs)
           await use(hasgard)
+        } catch (error) {
+          if (config.launch) {
+            try {
+              console.error(`Hasgard fixture failed: ${JSON.stringify(await process.diagnostics(250))}`)
+            } catch (diagnosticError) {
+              console.error("Hasgard diagnostics failed:", diagnosticError)
+            }
+          }
+          throw error
         } finally {
           rpc.disconnect()
           await process.stop()
