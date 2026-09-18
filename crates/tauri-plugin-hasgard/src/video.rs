@@ -13,12 +13,19 @@ mod macos {
         time::{Duration, Instant},
     };
 
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
     struct Session {
+        abort: Arc<AtomicBool>,
         stop: mpsc::Sender<()>,
         worker: Option<JoinHandle<Result<Value, String>>>,
     }
     impl Drop for Session {
         fn drop(&mut self) {
+            self.abort.store(true, Ordering::Release);
             let _ = self.stop.send(());
             if let Some(worker) = self.worker.take() {
                 // Every child has a deadline and is reaped. Drop cannot orphan an encoder.
@@ -38,7 +45,7 @@ mod macos {
         }
     }
 
-    fn run_bounded(command: &mut Command, timeout: Duration) -> Result<(), String> {
+    fn run_bounded(command: &mut Command, timeout: Duration, abort: Option<&AtomicBool>) -> Result<(), String> {
         let mut child = ChildGuard(
             command
                 .stdin(Stdio::null())
@@ -49,6 +56,9 @@ mod macos {
         );
         let deadline = Instant::now() + timeout;
         loop {
+            if abort.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                return Err("video recording cancelled".to_owned());
+            }
             if let Some(status) = child.0.try_wait().map_err(|e| e.to_string())? {
                 return if status.success() {
                     Ok(())
@@ -65,10 +75,11 @@ mod macos {
         }
     }
 
-    fn capture(window: u32, path: &Path) -> Result<(), String> {
+    fn capture(window: u32, path: &Path, abort: Option<&AtomicBool>) -> Result<(), String> {
         run_bounded(
             Command::new("/usr/sbin/screencapture").args(["-x", "-o", "-l"]).arg(window.to_string()).arg(path),
             Duration::from_secs(5),
+            abort,
         )?;
         let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
         if size == 0 {
@@ -77,7 +88,9 @@ mod macos {
         Ok(())
     }
 
-    fn encode(dir: &Path, output: &Path, width: u32, height: u32, fps: u64) -> Result<(), String> {
+    fn encode(
+        dir: &Path, output: &Path, width: u32, height: u32, fps: u64, abort: Option<&AtomicBool>,
+    ) -> Result<(), String> {
         let filter = format!(
             "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
         );
@@ -89,6 +102,7 @@ mod macos {
                 .args(["-r", &fps.to_string(), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart"])
                 .arg(output),
             Duration::from_secs(30),
+            abort,
         )
     }
 
@@ -110,16 +124,18 @@ mod macos {
                 return Err(format!("window '{window}' already has a video session"));
             }
             // Verify dependency and first real frame before returning success.
-            run_bounded(Command::new("ffmpeg").arg("-version"), Duration::from_secs(3))?;
+            run_bounded(Command::new("ffmpeg").arg("-version"), Duration::from_secs(3), None)?;
             let dir =
                 tempfile::Builder::new().prefix(".hasgard-video-").tempdir_in(parent).map_err(|e| e.to_string())?;
-            capture(id, &dir.path().join("frame-000000.png"))?;
+            capture(id, &dir.path().join("frame-000000.png"), None)?;
             let (width, height) =
                 image::image_dimensions(dir.path().join("frame-000000.png")).map_err(|e| e.to_string())?;
             if width == 0 || height == 0 {
                 return Err("native capture has zero dimensions".to_owned());
             }
             let (stop, receiver) = mpsc::channel();
+            let abort = Arc::new(AtomicBool::new(false));
+            let worker_abort = abort.clone();
             let output_clone = output.clone();
             let worker = thread::Builder::new().name("hasgard-video".into()).spawn(move || {
                 let start = Instant::now();
@@ -135,9 +151,10 @@ mod macos {
                     }
                     if start.elapsed() >= limit { break; }
                     let path = dir.path().join(format!("frame-{:06}.png", timestamps.len()));
-                    capture(id, &path)?;
+                    capture(id, &path, Some(&worker_abort))?;
                     timestamps.push(start.elapsed());
                 }
+                if worker_abort.load(Ordering::Acquire) { return Err("video recording cancelled".to_owned()); }
                 let elapsed = start.elapsed();
                 let mut manifest = std::fs::File::create(dir.path().join("frames.txt")).map_err(|e| e.to_string())?;
                 for (index, timestamp) in timestamps.iter().enumerate() {
@@ -147,15 +164,26 @@ mod macos {
                 writeln!(manifest,"file 'frame-{:06}.png'", timestamps.len()-1).map_err(|e| e.to_string())?;
                 drop(manifest);
                 let encoded = dir.path().join("recording.mp4");
-                encode(dir.path(), &encoded, width.div_ceil(2)*2, height.div_ceil(2)*2, fps)?;
+                encode(dir.path(), &encoded, width.div_ceil(2)*2, height.div_ceil(2)*2, fps, Some(&worker_abort))?;
                 let bytes = std::fs::metadata(&encoded).map_err(|e| e.to_string())?.len();
                 if bytes == 0 { return Err("encoder produced empty video".to_owned()); }
                 // Same-filesystem hard link is atomic and refuses to overwrite a raced destination.
+                if worker_abort.load(Ordering::Acquire) { return Err("video recording cancelled".to_owned()); }
                 std::fs::hard_link(&encoded, &output_clone).map_err(|e| format!("publish video: {e}"))?;
                 Ok(json!({"output_path":output_clone,"frames":timestamps.len(),"duration_ms":elapsed.as_millis(),"byte_size":bytes,"window_id":id,"backend":"screencapture+ffmpeg"}))
             }).map_err(|e| e.to_string())?;
-            sessions.insert(window.to_owned(), Session { stop, worker: Some(worker) });
+            sessions.insert(window.to_owned(), Session { stop, abort, worker: Some(worker) });
             Ok(json!({"status":"recording","output_path":output,"window_id":id,"fps":fps,"max_duration_ms":max_ms}))
+        }
+
+        pub fn shutdown(&self) {
+            let sessions = std::mem::take(&mut *self.0.lock().expect("video sessions lock poisoned"));
+            // Signal every worker before joining any worker.
+            for session in sessions.values() {
+                session.abort.store(true, Ordering::Release);
+                let _ = session.stop.send(());
+            }
+            drop(sessions);
         }
 
         pub fn stop(&self, window: &str) -> Result<Value, String> {
@@ -213,9 +241,29 @@ mod macos {
         #[test]
         fn bounded_child_is_killed_and_reaped() {
             let start = Instant::now();
-            assert!(run_bounded(Command::new("/bin/sleep").arg("10"), Duration::from_millis(30)).is_err());
+            assert!(run_bounded(Command::new("/bin/sleep").arg("10"), Duration::from_millis(30), None).is_err());
             assert!(start.elapsed() < Duration::from_secs(2));
         }
+        #[test]
+        fn shutdown_interrupts_and_reaps_running_child() {
+            let videos = Videos::default();
+            let abort = Arc::new(AtomicBool::new(false));
+            let worker_abort = abort.clone();
+            let (stop, _receiver) = mpsc::channel();
+            let (ready, started) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                ready.send(()).expect("ready");
+                run_bounded(Command::new("/bin/sleep").arg("10"), Duration::from_secs(10), Some(&worker_abort))?;
+                Ok(json!({}))
+            });
+            videos.0.lock().expect("lock").insert("main".into(), Session { stop, abort, worker: Some(worker) });
+            started.recv().expect("started");
+            let start = Instant::now();
+            videos.shutdown();
+            assert!(start.elapsed() < Duration::from_secs(2));
+            assert_eq!(videos.status("main").expect("status")["pending_result"], false);
+        }
+
         #[test]
         #[ignore = "requires ffmpeg; encodes generated PNGs, does not capture desktop"]
         fn real_encoder_produces_nonempty_mp4() {
@@ -234,7 +282,7 @@ mod macos {
             )
             .expect("manifest");
             let output = dir.path().join("test.mp4");
-            encode(dir.path(), &output, 16, 16, 5).expect("encode");
+            encode(dir.path(), &output, 16, 16, 5, None).expect("encode");
             assert!(std::fs::metadata(output).expect("video").len() > 0);
         }
     }

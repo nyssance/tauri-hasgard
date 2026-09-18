@@ -2009,6 +2009,17 @@ fn enum_prop(description: &str, values: &[&str]) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn scenario_rejects_invalid_input_before_connecting() {
+        let server = super::HasgardMcpServer::new(Some(std::path::PathBuf::from("/no-such-application")), None);
+        for toml in
+            ["", "[[step]]\naction='fill'\ntarget='#x'", "[connect]\nsocket='/another-app'\n[[step]]\naction='wait'"]
+        {
+            let args = serde_json::json!({"toml":toml}).as_object().expect("object").clone();
+            assert!(server.call_tool_by_name("run_scenario", args).await.is_err());
+        }
+    }
+
     use super::*;
     #[cfg(unix)]
     use crate::protocol::{Request, Response};

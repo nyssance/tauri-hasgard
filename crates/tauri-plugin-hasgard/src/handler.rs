@@ -325,11 +325,15 @@ async fn handle_diff(
         data: None,
     })?;
     let (id, rx) = engine.register();
-    let wrapped = EvalEngine::wrap_script(id, &script);
+    let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
 
     if let Err(e) = eval_fn(window, Some(id), wrapped) {
         engine.resolve(id, Err(format!("Eval failed: {e}")));
-        return Err(RpcError { code: -32603, message: format!("Eval failed: {e}"), data: None });
+        return Err(RpcError {
+            code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
+            message: format!("Eval failed: {e}"),
+            data: None,
+        });
     }
 
     let result = engine.wait(id, rx, DEFAULT_TIMEOUT).await.map_err(|e| RpcError {
@@ -606,12 +610,16 @@ async fn handle_eval_method(
     let script =
         build_bridge_call(method, params).map_err(|msg| RpcError { code: -32602, message: msg, data: None })?;
     let (id, rx) = engine.register();
-    let wrapped = EvalEngine::wrap_script(id, &script);
+    let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
 
     if let Err(e) = eval_fn(window, Some(id), wrapped) {
         // Clean up pending entry on eval_fn failure
         engine.resolve(id, Err(format!("Eval failed: {e}")));
-        return Err(RpcError { code: -32603, message: format!("Eval failed: {e}"), data: None });
+        return Err(RpcError {
+            code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
+            message: format!("Eval failed: {e}"),
+            data: None,
+        });
     }
 
     engine.wait(id, rx, timeout).await.map_err(|e| RpcError {
@@ -681,10 +689,13 @@ fn callback_outcome(result: Option<String>, error: Option<String>) -> Result<ser
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn callback<R: tauri::Runtime>(
     eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
-    error: Option<String>,
+    error: Option<String>, nonce: Option<String>,
 ) -> Result<(), String> {
     let url = webview.url().map_err(|e| e.to_string())?;
     if id == 0 {
+        if nonce.as_deref() != Some(eval_engine.handshake_nonce.as_str()) {
+            return Err("Invalid handshake nonce".into());
+        }
         let reported = result.ok_or_else(|| "Handshake requires page URL".to_owned())?;
         let reported = tauri::Url::parse(&reported).map_err(|e| e.to_string())?;
         if error.is_some() || crate::eval::origin(&reported)? != crate::eval::origin(&url)? {
@@ -692,7 +703,7 @@ pub(crate) fn callback<R: tauri::Runtime>(
         }
         return eval_engine.authorize(webview.label(), &url);
     }
-    eval_engine.resolve_from(id, webview.label(), &url, callback_outcome(result, error));
+    eval_engine.resolve_from(id, webview.label(), &url, nonce.as_deref(), callback_outcome(result, error));
     Ok(())
 }
 
@@ -700,9 +711,9 @@ pub(crate) fn callback<R: tauri::Runtime>(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn __callback<R: tauri::Runtime>(
     eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
-    error: Option<String>,
+    error: Option<String>, nonce: Option<String>,
 ) -> Result<(), String> {
-    callback(eval_engine, webview, id, result, error)
+    callback(eval_engine, webview, id, result, error, nonce)
 }
 
 #[cfg(test)]

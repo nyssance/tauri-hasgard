@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest"
-import { HasgardRpcClient } from "./rpc-client.js"
+import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 import { HasgardApplication, HasgardWindow } from "./window.js"
 
 test("waitForWindow does not return an about:blank or loading webview", async () => {
@@ -80,6 +80,37 @@ test("waitForWindowReady polls the current document instead of installing one lo
   expect(window.label).toBe("settings")
   expect(countCall).toBe(2)
   expect(call).not.toHaveBeenCalledWith("wait", expect.anything())
+})
+
+test("window readiness retries only the explicit handshake-pending error", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const pending = new HasgardRpcError(-32002, "handshake pending", undefined)
+  const denied = new HasgardRpcError(-32603, "access denied", undefined)
+  let attempts = 0
+  let failure: Error = pending
+  vi.spyOn(rpc, "call").mockImplementation(async method => {
+    if (method === "windows.list") return { windows: [{ label: "main", url: "tauri://localhost/", title: "App" }] }
+    if (method === "state") {
+      attempts++
+      if (attempts === 1) throw failure
+      return {
+        url: "tauri://localhost/",
+        title: "App",
+        readyState: "complete",
+        viewport: { width: 1, height: 1 },
+        scroll: { x: 0, y: 0 },
+        plugin_version: "test"
+      }
+    }
+    throw new Error(`Unexpected method: ${method}`)
+  })
+  const app = new HasgardApplication(rpc)
+  expect((await app.waitForWindow("main", 500)).label).toBe("main")
+  expect(attempts).toBe(2)
+  attempts = 0
+  failure = denied
+  await expect(app.waitForWindow("main", 500)).rejects.toBe(denied)
+  expect(attempts).toBe(1)
 })
 
 test("role locator refreshes the snapshot and sends the resolved ref to the requested window", async () => {

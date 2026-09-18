@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { basename } from "node:path"
-import { HasgardRpcClient } from "./rpc-client.js"
+import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 import type {
   BoundingBox,
   ClickOptions,
@@ -350,9 +350,11 @@ export class HasgardApplication {
     while (Date.now() <= deadline) {
       if ((await this.windows()).some(window => window.label === label)) {
         const window = this.window(label)
-        const state = await window.state()
-        if (state.url !== "about:blank" && state.readyState !== "loading") {
-          return window
+        try {
+          const state = await window.state()
+          if (state.url !== "about:blank" && state.readyState !== "loading") return window
+        } catch (error) {
+          if (!(error instanceof HasgardRpcError) || error.code !== -32002) throw error
         }
       }
       await new Promise(resolve => setTimeout(resolve, 50))

@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_missing_result_is_success() {
+    async fn test_client_missing_result_is_rejected() {
         let pipe = unique_pipe_path();
         let server = ServerOptions::new().create(&pipe).expect("create named pipe server");
         let handle = tokio::spawn(async move {
@@ -147,8 +147,8 @@ mod tests {
         });
 
         let mut client = connect_with_retry(Path::new(&pipe)).await;
-        let result = client.call("eval", None).await.expect("eval call");
-        assert_eq!(result, serde_json::Value::Null);
+        let error = client.call("eval", None).await.expect_err("missing result must fail");
+        assert!(error.to_string().contains("exactly one of result or error"));
 
         handle.abort();
     }

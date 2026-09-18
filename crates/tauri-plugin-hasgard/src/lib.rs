@@ -51,10 +51,18 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
     #[cfg(all(any(unix, windows), debug_assertions))]
     {
+        let engine = EvalEngine::new();
         tauri::plugin::Builder::new("hasgard")
-            .js_init_script(format!("{BRIDGE_JS}\nwindow.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback', {{id:0,result:location.href}}).catch(e => console.error('Hasgard handshake failed', e));"))
-            .setup(|app, _api| {
-                let engine = EvalEngine::new();
+            .js_init_script(BRIDGE_JS.to_owned())
+            .on_page_load(|webview, payload| {
+                if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                    let engine = webview.state::<EvalEngine>();
+                    let nonce = serde_json::Value::String(engine.handshake_nonce.as_str().to_owned());
+                    let script = format!("if(window.top===window)window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:0,result:location.href,nonce:{nonce}}}).catch(e=>console.error('Hasgard handshake failed',e));");
+                    if let Err(error) = webview.eval(script) { tracing::error!(%error, "Failed to request automation handshake"); }
+                }
+            })
+            .setup(move |app, _api| {
                 app.manage(engine.clone());
 
                 let identifier = sanitize_identifier(&app.config().identifier);
@@ -107,6 +115,15 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
                 Ok(())
             })
+            .on_event(|app, event| {
+                if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = event
+                    && let Some(engine) = app.try_state::<EvalEngine>() { engine.forget_window(label); }
+                #[cfg(target_os = "macos")]
+                if matches!(event, tauri::RunEvent::Exit)
+                    && let Some(engine) = app.try_state::<EvalEngine>() { engine.videos.shutdown(); }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (app, event);
+            })
             .invoke_handler(tauri::generate_handler![handler::callback, handler::__callback])
             .build()
     }
@@ -139,18 +156,23 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
         // Results come back via the `__callback` IPC command (see
         // EvalEngine::wrap_script). This eval is fire-and-forget; the IPC handler
         // resolves the pending request, not this closure.
-        let source = engine.check_origin(target.label(), &target.url().map_err(|e| e.to_string())?)?;
+        let url = target.url().map_err(|e| e.to_string())?;
+        if url.as_str() == "about:blank" {
+            return Err("AUTOMATION_NOT_READY: initial document is loading".into());
+        }
+        let source = engine.check_origin(target.label(), &url)?;
         if let Some(id) = id {
             engine.bind_source(id, target.label(), &source)?;
         }
         let expected = serde_json::to_string(&source).map_err(|e| e.to_string())?;
-        let mismatch = id.map_or_else(String::new, |id| format!(
-            "window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:{id},error:'Origin changed before execution'}});"
-        ));
+        let mismatch = id.map_or_else(String::new, |id| {
+            let nonce=serde_json::to_string(&engine.nonce(id)).expect("string serializes");
+            format!("window.__TAURI_INTERNALS__.invoke('plugin:hasgard|__callback',{{id:{id},nonce:{nonce},error:'Origin changed before execution'}});")
+        });
         // Native URL checks alone race queued WebView eval. Pin again inside JS,
         // before any requested expression or side effect executes.
         let pinned = format!(
-            "(()=>{{const u=new URL(location.href);if(u.protocol+'//'+u.host!=={expected}){{{mismatch}return;}}{script}}})();"
+            "(()=>{{if(window.top!==window)return;const u=new URL(location.href);if(u.protocol+'//'+u.host!=={expected}){{{mismatch}return;}}{script}}})();"
         );
         target.eval(&pinned).map_err(|e| e.to_string())
     })

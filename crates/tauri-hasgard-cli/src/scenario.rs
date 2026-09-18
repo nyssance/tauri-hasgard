@@ -13,6 +13,7 @@ use crate::{Scope, build_wait_params, target_params, with_scope};
 
 #[allow(clippy::module_name_repetitions, clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Scenario {
     pub(crate) connect: Option<Connect>,
     #[serde(default)]
@@ -22,6 +23,7 @@ pub(crate) struct Scenario {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Connect {
     pub(crate) socket: Option<PathBuf>,
     pub(crate) timeout_ms: Option<u64>,
@@ -29,6 +31,7 @@ pub(crate) struct Connect {
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ScenarioMeta {
     pub(crate) name: Option<String>,
     #[serde(default = "default_true")]
@@ -48,6 +51,7 @@ fn default_true() -> bool {
 
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Step {
     pub(crate) name: Option<String>,
     pub(crate) action: String,
@@ -133,7 +137,29 @@ pub(crate) fn load_scenario(path: &Path) -> Result<Scenario> {
 pub(crate) fn parse_scenario(content: &str) -> Result<Scenario> {
     let scenario: Scenario = toml::from_str(content)?;
     anyhow::ensure!(!scenario.step.is_empty(), "scenario requires at least one step");
+    for step in &scenario.step {
+        validate_step(step)?;
+    }
     Ok(scenario)
+}
+
+fn validate_step(step: &Step) -> Result<()> {
+    let required: &[(&str, Option<&str>)] = match step.action.as_str() {
+        "click" | "assert-exists" | "assert-visible" | "assert-hidden" => &[("target", step.target.as_deref())],
+        "fill" | "select" => &[("target", step.target.as_deref()), ("value", step.value.as_deref())],
+        "type" => &[("target", step.target.as_deref()), ("text", step.text.as_deref())],
+        "press" | "storage-get" => &[("key", step.key.as_deref())],
+        "navigate" => &[("url", step.url.as_deref())],
+        "eval" => &[("script", step.script.as_deref())],
+        "assert-text" | "assert-value" => &[("target", step.target.as_deref()), ("expected", step.expected.as_deref())],
+        "assert-url" => &[("expected", step.expected.as_deref())],
+        "scroll" | "wait" | "watch" | "screenshot" => &[],
+        action => anyhow::bail!("unknown step action: {action:?}"),
+    };
+    for (name, value) in required {
+        anyhow::ensure!(value.is_some(), "{} requires '{name}'", step.action);
+    }
+    Ok(())
 }
 
 pub(crate) async fn run_scenario(
@@ -575,6 +601,11 @@ mod tests {
         assert!(super::validate_storage_result(&serde_json::json!({"found":true,"value":""}), Some("")).is_ok());
         assert!(super::validate_storage_result(&serde_json::json!({"found":true,"value":"a"}), Some("b")).is_err());
         assert!(super::parse_scenario("").is_err());
+        for action in ["fill", "type", "select"] {
+            assert!(super::parse_scenario(&format!("[[step]]\naction='{action}'\ntarget='#x'")).is_err());
+        }
+        assert!(super::parse_scenario("[[step]]\naction='fill'\ntarget='#x'\nvalue=''").is_ok());
+        assert!(super::parse_scenario("[[step]]\naction='wait'\ntimout_ms=1").is_err());
     }
 
     use super::*;
