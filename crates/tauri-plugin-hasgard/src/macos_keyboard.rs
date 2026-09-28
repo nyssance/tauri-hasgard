@@ -4,6 +4,8 @@ use objc2_core_graphics::{CGEvent, CGEventField};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
+use tauri::{Manager, Runtime};
+use tauri_runtime_wry::WebviewWryExt;
 
 /// Read actual `AppKit` focus on the main thread; a queued `set_focus` request alone
 /// does not prove that the application owns the keyboard.
@@ -38,14 +40,17 @@ fn macos_window_is_focused<R: tauri::Runtime>(
 }
 
 #[cfg(all(target_os = "macos", debug_assertions))]
-pub(crate) fn focus<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String> {
+pub(crate) fn focus<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String>
+where
+    R::Handle: tauri_runtime_wry::AsWryHandle,
+{
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut activate = true;
     loop {
         let target = window.clone();
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         window
-            .with_webview(move |webview| {
+            .with_wry_webview(move |webview| {
                 let result = if std::time::Instant::now() >= deadline {
                     Err("focus request expired before reaching the main thread".to_owned())
                 } else {
@@ -59,7 +64,7 @@ pub(crate) fn focus<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Resu
                         if native.is_null() || webview.inner().is_null() {
                             return Err("native window or webview pointer is null".to_owned());
                         }
-                        // SAFETY: with_webview runs on the main thread and
+                        // SAFETY: with_wry_webview runs on the main thread and
                         // retains the WKWebView for this callback.
                         let (native, view) = unsafe {
                             (

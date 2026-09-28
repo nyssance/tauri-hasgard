@@ -1,3 +1,10 @@
+# 0.6.0-alpha.1 (unreleased)
+
+- Migrate the plugin and native fixture to Tauri 3 with explicit Wry runtime initialization.
+- Use Wry extension APIs for native WKWebView and WebView2 keyboard focus.
+- Preserve the existing JSON-RPC contract across the CLI, MCP server and Playwright fixture.
+- Target ESNext and Bun 1.4.2.
+
 # Changelog
 
 All notable changes to this project are documented here. Versions follow

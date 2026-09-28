@@ -22,7 +22,7 @@
     "test:e2e": "bun run --cwd examples/fixture-app test:e2e",
     "test:e2e:stress": "bun run --cwd examples/fixture-app test:e2e:stress"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.2",
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
     "prettier": "^3.9.6"

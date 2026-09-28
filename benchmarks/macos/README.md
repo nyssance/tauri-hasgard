@@ -1,3 +1,6 @@
+> Historical Tauri 2 comparison: run these scripts from tag `v0.5.0`.
+> The current Tauri 3 Wry migration has not been benchmarked against those Tauri 2 plugins.
+
 # macOS comparison
 
 [Measured results](results/summary.md) · [Raw observations](results/local.json) · [Review and validation](REVIEW.md)

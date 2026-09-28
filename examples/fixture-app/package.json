@@ -13,12 +13,12 @@
     "test:e2e:stress": "bun run build:e2e && HASGARD_NATIVE_STRESS=1 playwright test --config e2e/playwright.config.ts native-focus.spec.ts"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1"
+    "@tauri-apps/api": "^3.0.0-alpha.2"
   },
   "devDependencies": {
     "@nyssance/tauri-hasgard": "workspace:*",
     "@playwright/test": "^1.61.1",
-    "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/cli": "^3.0.0-alpha.3",
     "@types/node": "^26.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.0"

@@ -45,7 +45,9 @@ pub fn run() {
     if let Some(path) = std::env::var_os("HASGARD_LIFECYCLE_PID_FILE") {
         std::fs::write(path, std::process::id().to_string()).expect("write lifecycle PID file");
     }
-    let builder = tauri::Builder::default().invoke_handler(tauri::generate_handler![open_settings, fixture_process_id]);
+    let builder = tauri::Builder::default()
+        .runtime(tauri_runtime_wry::Wry::default())
+        .invoke_handler(tauri::generate_handler![open_settings, fixture_process_id]);
 
     #[cfg(all(target_os = "macos", feature = "hasgard-testing"))]
     let builder = builder

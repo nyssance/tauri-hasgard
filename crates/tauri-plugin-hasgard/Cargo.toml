@@ -3,11 +3,10 @@ name = "tauri-plugin-hasgard"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Native automation and testing bridge for Tauri 2 applications"
+description = "Native automation and testing bridge for Tauri 3 Wry applications"
 keywords = ["tauri", "plugin", "testing", "automation", "accessibility"]
 categories = ["development-tools::testing", "gui"]
 readme = "README.md"
@@ -31,14 +30,15 @@ tokio = { workspace = true, features = ["net", "rt", "sync", "time", "io-util"] 
 tracing.workspace = true
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
-tauri = { version = "2", features = ["unstable"] }
+tauri = { version = "3.0.0-alpha.3", features = ["unstable"] }
+tauri-runtime-wry = "3.0.0-alpha.3"
 enigo = { version = "0.6.1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.184"
 
 [target.'cfg(windows)'.dependencies]
-webview2-com = "0.38"
+webview2-com = "0.39.1"
 windows = { version = "0.62", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
@@ -66,4 +66,4 @@ serial_test = "4"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [build-dependencies]
-tauri-plugin = { version = "2.6.1", features = ["build"] }
+tauri-plugin = { version = "3.0.0-alpha.2", features = ["build"] }

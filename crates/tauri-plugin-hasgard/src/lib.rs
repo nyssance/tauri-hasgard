@@ -43,17 +43,20 @@ pub(crate) const BRIDGE_JS: &str =
 /// In debug builds on Windows, starts a Named Pipe server at
 /// `\\.\pipe\tauri-hasgard-{identifier}` and registers the instance under `%LOCALAPPDATA%\tauri-hasgard\instances\`.
 #[must_use]
-pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R>
+where
+    R::Handle: tauri_runtime_wry::AsWryHandle,
+{
     #[cfg(not(all(any(unix, windows), debug_assertions)))]
     {
-        return tauri::plugin::Builder::new("hasgard").build();
+        return tauri::plugin::Builder::<R>::new("hasgard").build();
     }
 
     #[cfg(all(any(unix, windows), debug_assertions))]
     {
         let engine = EvalEngine::new();
-        tauri::plugin::Builder::new("hasgard")
-            .js_init_script(BRIDGE_JS.to_owned())
+        tauri::plugin::Builder::<R>::new("hasgard")
+            .initialization_script(BRIDGE_JS)
             .on_page_load(|webview, payload| {
                 let engine = webview.state::<EvalEngine>();
                 if payload.event() == tauri::webview::PageLoadEvent::Started {
@@ -68,6 +71,10 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                 }
             })
             .setup(move |app, _api| {
+                use tauri_runtime_wry::AsWryHandle;
+                if app.runtime_handle().as_wry_handle().is_none() {
+                    return Err(std::io::Error::other("Hasgard requires the Tauri 3 Wry runtime").into());
+                }
                 app.manage(engine.clone());
 
                 let identifier = sanitize_identifier(&app.config().identifier);
@@ -196,7 +203,10 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
 ///
 /// Resolution mirrors `make_eval_fn`: explicit label first, otherwise `main`.
 #[cfg(all(any(unix, windows), debug_assertions))]
-fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef {
+fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef
+where
+    R::Handle: tauri_runtime_wry::AsWryHandle,
+{
     let focus_handle = app.clone();
     // Only the macOS runner hops threads; elsewhere this handle would be an
     // unused-variable warning.
@@ -217,11 +227,12 @@ fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksR
             #[cfg(windows)]
             {
                 use std::sync::mpsc;
+                use tauri_runtime_wry::WebviewWryExt;
                 use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
 
                 let (sender, receiver) = mpsc::sync_channel(1);
                 target
-                    .with_webview(move |webview| {
+                    .with_wry_webview(move |webview| {
                         let result =
                             unsafe { webview.controller().MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) }
                                 .map_err(|error| error.to_string());

@@ -22,7 +22,7 @@ const winArm = `${asset("aarch64-pc-windows-msvc")}.zip`
 const winIntel = `${asset("x86_64-pc-windows-msvc")}.zip`
 
 const formula = `class TauriHasgard < Formula
-  desc "Native automation and testing bridge for Tauri 2 applications"
+  desc "Native automation and testing bridge for Tauri 3 Wry applications"
   homepage "${repository}"
   version "${version}"
   license "Apache-2.0"
@@ -44,7 +44,7 @@ end
 
 const scoop = {
   version,
-  description: "Native automation and testing bridge for Tauri 2 applications",
+  description: "Native automation and testing bridge for Tauri 3 Wry applications",
   homepage: repository,
   license: "Apache-2.0",
   architecture: {

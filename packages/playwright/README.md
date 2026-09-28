@@ -1,6 +1,6 @@
 # @nyssance/tauri-hasgard
 
-Playwright Test fixtures for real Tauri 2 webviews. The package uses Playwright for test scheduling, assertions, retries, reporters, and artifacts; native application control goes through Hasgard's JSON-RPC bridge.
+Playwright Test fixtures for real Tauri 3 Wry webviews. The package uses Playwright for test scheduling, assertions, retries, reporters, and artifacts; native application control goes through Hasgard's JSON-RPC bridge.
 
 It deliberately does not expose a fake Playwright `Page`. WKWebView and WebKitGTK do not implement Chromium's CDP contract.
 

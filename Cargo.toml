@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
   "crates/tauri-plugin-hasgard",
   "crates/tauri-hasgard-cli",
@@ -7,10 +7,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0-alpha.1"
 edition = "2024"
 license = "Apache-2.0"
-rust-version = "1.88.0"
 authors = ["Nyssance"]
 repository = "https://github.com/nyssance/tauri-hasgard"
 homepage = "https://github.com/nyssance/tauri-hasgard"
