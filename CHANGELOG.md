@@ -1,4 +1,4 @@
-# 0.6.0-alpha.1 (unreleased)
+# 0.6.0-alpha.1 (2026-09-28)
 
 - Migrate the plugin and native fixture to Tauri 3 with explicit Wry runtime initialization.
 - Use Wry extension APIs for native WKWebView and WebView2 keyboard focus.

@@ -112,6 +112,7 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: docs/release-${{ github.ref_name }}.md
           files: |
             dist/tauri-hasgard-*
@@ -164,7 +165,7 @@ jobs:
           bun-version-file: package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: bun install --frozen-lockfile
@@ -178,10 +179,11 @@ jobs:
           npm view "@nyssance/tauri-hasgard@$version" version >/dev/null 2>&1 && published=true || published=false
           echo "published=$published" >> "$GITHUB_OUTPUT"
       - if: steps.published.outputs.published != 'true'
-        run: npm publish --access public
+        run: npm publish --access public --tag ${{ contains(github.ref_name, '-') && 'next' || 'latest' }}
         working-directory: packages/playwright
 
   package-managers:
+    if: ${{ !contains(github.ref_name, '-') }}
     needs: github-release
     runs-on: ubuntu-latest
     steps:

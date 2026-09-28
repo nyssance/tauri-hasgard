@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 
 const [tag] = process.argv.slice(2)
 if (!tag) throw new Error("release tag is required")
-if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`invalid release tag: ${tag}`)
+if (!/^v\d+\.\d+\.\d+(?:-alpha\.[1-9]\d*)?$/.test(tag)) throw new Error(`invalid release tag: ${tag}`)
 
 const version = tag.slice(1)
 const cargo = readFileSync(new URL("../Cargo.toml", import.meta.url), "utf8")
