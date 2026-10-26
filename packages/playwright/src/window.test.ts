@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await -- RPC mocks must return promises, and the stubbed replies are synchronous */
 import { expect, test, vi } from "vitest"
 
 import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
@@ -117,7 +118,7 @@ test("window readiness retries only the explicit handshake-pending error", async
 test("role locator refreshes the snapshot and sends the resolved ref to the requested window", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async (method, params) => {
+  call.mockImplementation(async (method) => {
     if (method === "snapshot") {
       return {
         elements: [

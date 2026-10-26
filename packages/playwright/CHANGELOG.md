@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0-alpha.5 — 2026-10-26
+
+- Require Node 24 or later.
+- Stop shipping `*.test.d.ts` declaration files.
+- Attach the cleanup failure as `cause` when a launch fails and process cleanup also fails.
+
 ## 0.6.0-alpha.4 — 2026-10-26
 
 - Supersede the unpublished alpha.3 release attempt.

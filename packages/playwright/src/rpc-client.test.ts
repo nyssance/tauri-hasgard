@@ -104,9 +104,10 @@ describe("HasgardRpcClient", () => {
   })
 
   test("rejects malformed envelopes over the transport without throwing from the line handler", async () => {
-    const cases: { valid: boolean; response: unknown }[] = JSON.parse(
-      await readFile(new URL("../../../protocol/responses.json", import.meta.url), "utf8")
-    )
+    const cases = JSON.parse(await readFile(new URL("../../../protocol/responses.json", import.meta.url), "utf8")) as {
+      valid: boolean
+      response: unknown
+    }[]
     const invalid = cases.filter((item) => !item.valid)
     let index = 0
     await listen(() => invalid[index++]?.response)

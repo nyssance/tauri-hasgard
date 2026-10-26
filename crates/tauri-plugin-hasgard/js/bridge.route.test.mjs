@@ -33,7 +33,7 @@ function loadBridge() {
 
   const reachedNetwork = []
   globalThis.window = {
-    fetch(input, init) {
+    fetch(input) {
       reachedNetwork.push(typeof input === "string" ? input : input.url)
       return Promise.resolve(new Response("live", { status: 200 }))
     }

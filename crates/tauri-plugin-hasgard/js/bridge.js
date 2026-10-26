@@ -345,7 +345,9 @@
       // application code routinely reads it; make it the URL that was asked for.
       try {
         Object.defineProperty(response, "url", { value: url })
-      } catch {}
+      } catch {
+        // A frozen or exotic Response keeps its empty url; the body still delivers.
+      }
       return response
     }
     throw new Error("This webview has no Response constructor, so routes cannot be fulfilled")
@@ -457,7 +459,9 @@
             return value
           }
         })
-      } catch {}
+      } catch {
+        // A non-configurable property keeps the webview default.
+      }
     }
     define("readyState", 4)
     define("status", aborted ? 0 : route.status)
@@ -486,7 +490,9 @@
         xhr.dispatchEvent(new Event("readystatechange"))
         xhr.dispatchEvent(new Event(aborted ? "error" : "load"))
         xhr.dispatchEvent(new Event("loadend"))
-      } catch {}
+      } catch {
+        // Listener errors must not break delivery of the stubbed response.
+      }
     }
     if (typeof setTimeout === "function") setTimeout(deliver, 0)
     else deliver()
@@ -1020,7 +1026,9 @@
       Object.defineProperty(event, "pointerId", { value: init.pointerId })
       Object.defineProperty(event, "pointerType", { value: init.pointerType })
       Object.defineProperty(event, "isPrimary", { value: init.isPrimary })
-    } catch {}
+    } catch {
+      // Webviews without a writable pointer shape dispatch the plain event.
+    }
     return el.dispatchEvent(event)
   }
 
@@ -1629,7 +1637,8 @@
           throw new SyntaxError(
             "top-level await detected but the script could not be auto-wrapped. " +
               "Wrap explicitly: (async () => { /* ...; */ return value; })() — " +
-              "see docs/reference/cli.md"
+              "see docs/reference/cli.md",
+            { cause: e3 }
           )
         }
       }

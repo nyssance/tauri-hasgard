@@ -7,8 +7,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.0-alpha.4"
+version = "0.6.0-alpha.5"
 edition = "2024"
+rust-version = "1.95"
 license = "Apache-2.0"
 authors = ["Nyssance"]
 repository = "https://github.com/nyssance/tauri-hasgard"
@@ -23,3 +24,9 @@ tracing = "0.1"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 pedantic = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

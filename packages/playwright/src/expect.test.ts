@@ -7,8 +7,8 @@ import type { HasgardLocator } from "./window.js"
 const hasgardExpect = createHasgardExpect(playwrightExpect)
 
 test("supports positive and negative visibility assertions without negative timeout delay", async () => {
-  const visible = { isVisible: async () => true } as unknown as HasgardLocator
-  const hidden = { isVisible: async () => false } as unknown as HasgardLocator
+  const visible = { isVisible: () => Promise.resolve(true) } as unknown as HasgardLocator
+  const hidden = { isVisible: () => Promise.resolve(false) } as unknown as HasgardLocator
 
   await hasgardExpect(visible).toBeVisible({ timeout: 25 })
   await hasgardExpect(hidden).not.toBeVisible({ timeout: 25 })
@@ -16,7 +16,7 @@ test("supports positive and negative visibility assertions without negative time
 
 test("uses exact strings and regular expressions for text assertions", async () => {
   const locator = {
-    textContent: async () => "Saved Nyssance"
+    textContent: () => Promise.resolve("Saved Nyssance")
   } as unknown as HasgardLocator
 
   await hasgardExpect(locator).toHaveText("Saved Nyssance", { timeout: 25 })
@@ -28,12 +28,8 @@ for (const negative of [false, true]) {
   test(`RPC failure cannot satisfy ${negative ? "negative" : "positive"} assertions`, async () => {
     const error = new Error("application crashed: socket closed")
     const locator = {
-      isVisible: async () => {
-        throw error
-      },
-      textContent: async () => {
-        throw error
-      }
+      isVisible: () => Promise.reject(error),
+      textContent: () => Promise.reject(error)
     } as unknown as HasgardLocator
     const assertion = negative ? hasgardExpect(locator).not : hasgardExpect(locator)
     await expect(assertion.toBeVisible({ timeout: 0 })).rejects.toThrow(error.message)
@@ -44,9 +40,9 @@ for (const negative of [false, true]) {
 test("zero timeout performs one read and invalid timeouts reject", async () => {
   let reads = 0
   const locator = {
-    isVisible: async () => {
+    isVisible: () => {
       reads++
-      return true
+      return Promise.resolve(true)
     }
   } as unknown as HasgardLocator
   await hasgardExpect(locator).toBeVisible({ timeout: 0 })

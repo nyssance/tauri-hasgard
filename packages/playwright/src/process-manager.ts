@@ -69,7 +69,9 @@ export class HasgardProcess {
       try {
         await this.stopChild()
       } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], "Hasgard launch failed and process cleanup failed")
+        throw new AggregateError([error, cleanupError], "Hasgard launch failed and process cleanup failed", {
+          cause: cleanupError
+        })
       }
       throw error
     }
@@ -129,7 +131,9 @@ export class HasgardProcess {
       try {
         await this.stopChild()
       } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], "Hasgard launch failed and process cleanup failed")
+        throw new AggregateError([error, cleanupError], "Hasgard launch failed and process cleanup failed", {
+          cause: cleanupError
+        })
       }
       throw error
     }

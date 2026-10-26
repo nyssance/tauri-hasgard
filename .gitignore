@@ -32,6 +32,7 @@ demo.tape
 capture.png
 playwright-report/
 test-results/
+tauri-hasgard-failures/
 
 # ECC
 .insaits_audit*

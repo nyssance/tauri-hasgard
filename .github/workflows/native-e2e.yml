@@ -12,13 +12,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-26
             target: aarch64-apple-darwin
             allow_failure: false
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             target: x86_64-unknown-linux-gnu
             allow_failure: false
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             target: aarch64-unknown-linux-gnu
             allow_failure: false
           - runner: windows-2025
@@ -70,4 +70,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: windows-arm64-check
-      - run: cargo check --workspace --all-features
+      - run: cargo check --workspace --all-features --locked

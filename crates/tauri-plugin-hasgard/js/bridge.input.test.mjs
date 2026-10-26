@@ -323,7 +323,7 @@ test("accept with promptText overrides the page's default answer", () => {
 })
 
 test("a dismissed prompt returns null, as a cancelled prompt does", () => {
-  const hasgard = loadBridge(el("body", {}, []))
+  loadBridge(el("body", {}, []))
   assert.equal(globalThis.window.prompt("name?", "untitled"), null)
 })
 

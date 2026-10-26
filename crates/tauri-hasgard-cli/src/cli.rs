@@ -161,7 +161,7 @@ pub(crate) enum Command {
         #[arg(long, requires = "wait_for")]
         timeout: Option<u32>,
     },
-    /// Select an option in a <select>.
+    /// Select an option in a `<select>` element.
     Select { target: String, value: String },
     /// Toggle a checkbox, or drive it to a state with --state.
     Check {

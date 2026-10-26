@@ -2,6 +2,7 @@
 name = "tauri-plugin-hasgard"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -11,6 +12,8 @@ keywords = ["tauri", "plugin", "testing", "automation", "accessibility"]
 categories = ["development-tools::testing", "gui"]
 readme = "README.md"
 links = "tauri-plugin-hasgard"
+# Bridge unit tests run from the repository; crate users only need the bridge itself.
+exclude = ["js/*.test.mjs"]
 
 [lints]
 workspace = true

@@ -4,9 +4,11 @@ import { expect, test } from "vitest"
 
 import { parseRpcResponse } from "./protocol.js"
 
-const cases: { name: string; valid: boolean; response: unknown }[] = JSON.parse(
-  readFileSync(new URL("../../../protocol/responses.json", import.meta.url), "utf8")
-)
+const cases = JSON.parse(readFileSync(new URL("../../../protocol/responses.json", import.meta.url), "utf8")) as {
+  name: string
+  valid: boolean
+  response: unknown
+}[]
 
 test.each(cases)("shared response contract: $name", ({ valid, response }) => {
   const line = JSON.stringify(response)
