@@ -23,6 +23,17 @@ jobs:
       - run: bun run test
       - run: bun test crates/tauri-plugin-hasgard/js/*.test.mjs
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+      - run: bun install --frozen-lockfile
+      - run: bun lint
+      - run: bun run ts7-lint
+
   rust:
     timeout-minutes: 20
     strategy:

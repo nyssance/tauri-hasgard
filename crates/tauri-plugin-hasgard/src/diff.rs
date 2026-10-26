@@ -155,8 +155,8 @@ mod tests {
     fn test_diff_identical_snapshots() {
         let snapshot = vec![el("e1", "button", 1), el("e2", "input", 2)];
         let result = compute_diff(&snapshot, &snapshot);
-        assert!(result.added.is_empty());
-        assert!(result.removed.is_empty());
+        assert_eq!(result.added, [] as [SnapshotElement; 0]);
+        assert_eq!(result.removed, [] as [SnapshotElement; 0]);
         assert!(result.changed.is_empty());
     }
 
@@ -167,7 +167,7 @@ mod tests {
         let result = compute_diff(&old, &new);
         assert_eq!(result.added.len(), 1);
         assert_eq!(result.added[0].role, "input");
-        assert!(result.removed.is_empty());
+        assert_eq!(result.removed, [] as [SnapshotElement; 0]);
         assert!(result.changed.is_empty());
     }
 
@@ -176,7 +176,7 @@ mod tests {
         let old = vec![el("e1", "button", 1), el("e2", "input", 2)];
         let new = vec![el("e1", "button", 1)];
         let result = compute_diff(&old, &new);
-        assert!(result.added.is_empty());
+        assert_eq!(result.added, [] as [SnapshotElement; 0]);
         assert_eq!(result.removed.len(), 1);
         assert_eq!(result.removed[0].role, "input");
         assert!(result.changed.is_empty());
@@ -203,8 +203,8 @@ mod tests {
             disabled: None,
         }];
         let result = compute_diff(&old, &new);
-        assert!(result.added.is_empty());
-        assert!(result.removed.is_empty());
+        assert_eq!(result.added, [] as [SnapshotElement; 0]);
+        assert_eq!(result.removed, [] as [SnapshotElement; 0]);
         assert_eq!(result.changed.len(), 1);
         assert_eq!(result.changed[0].changes, vec!["value"]);
     }
@@ -230,8 +230,8 @@ mod tests {
             disabled: Some(true),
         }];
         let result = compute_diff(&old, &new);
-        assert!(result.added.is_empty());
-        assert!(result.removed.is_empty());
+        assert_eq!(result.added, [] as [SnapshotElement; 0]);
+        assert_eq!(result.removed, [] as [SnapshotElement; 0]);
         assert_eq!(result.changed.len(), 1);
         assert!(result.changed[0].changes.contains(&"value".to_owned()));
         assert!(result.changed[0].changes.contains(&"checked".to_owned()));
@@ -281,7 +281,7 @@ mod tests {
         let new = vec![el("e1", "button", 1), el("e2", "input", 2)];
         let result = compute_diff(&old, &new);
         assert_eq!(result.added.len(), 2);
-        assert!(result.removed.is_empty());
+        assert_eq!(result.removed, [] as [SnapshotElement; 0]);
         assert!(result.changed.is_empty());
     }
 
@@ -329,8 +329,8 @@ mod tests {
             },
         ];
         let result = compute_diff(&old, &new);
-        assert!(result.added.is_empty());
-        assert!(result.removed.is_empty());
+        assert_eq!(result.added, [] as [SnapshotElement; 0]);
+        assert_eq!(result.removed, [] as [SnapshotElement; 0]);
         assert!(result.changed.is_empty());
     }
 }

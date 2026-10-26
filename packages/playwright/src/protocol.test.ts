@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs"
+
 import { expect, test } from "vitest"
+
 import { parseRpcResponse } from "./protocol.js"
 
 const cases: { name: string; valid: boolean; response: unknown }[] = JSON.parse(

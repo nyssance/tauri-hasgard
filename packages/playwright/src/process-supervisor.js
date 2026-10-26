@@ -5,6 +5,7 @@ import { spawn } from "node:child_process"
 import { lstatSync, unlinkSync } from "node:fs"
 import { createConnection } from "node:net"
 import { setTimeout as delay } from "node:timers/promises"
+
 import { stopProcessGroup } from "./process-group.js"
 
 let application
@@ -48,7 +49,7 @@ async function removeOwnedEndpoint() {
       socket.destroy()
       resolve(true)
     })
-    socket.once("error", error => {
+    socket.once("error", (error) => {
       if (error.code === "ECONNREFUSED" || error.code === "ENOENT") resolve(false)
       else reject(error)
     })
@@ -68,13 +69,13 @@ async function removeOwnedEndpoint() {
 
 // The worker may also have owned stderr's reader. Losing diagnostics must not
 // terminate the process responsible for orphan cleanup.
-process.stderr.on("error", error => {
+process.stderr.on("error", (error) => {
   if (error.code !== "EPIPE") shutdown(1)
 })
 
 function send(message, stream) {
   if (!process.connected) return
-  const writable = process.send(message, error => {
+  const writable = process.send(message, (error) => {
     if (error) {
       if (error.code !== "ERR_IPC_CHANNEL_CLOSED" && error.code !== "EPIPE")
         process.stderr.write(`Hasgard supervisor IPC: ${error.message}\n`)
@@ -84,7 +85,7 @@ function send(message, stream) {
   if (!writable) stream?.pause()
 }
 
-process.once("message", config => {
+process.once("message", (config) => {
   if (!process.connected || stopping) return
   starting = true
   try {
@@ -92,7 +93,7 @@ process.once("message", config => {
     if (typeof endpoint !== "string" || !endpoint) throw new Error("Supervisor requires TAURI_HASGARD_SOCKET")
     initialEndpoint = identity(endpoint)
     endpointWatch = setInterval(captureEndpoint, 25)
-    process.on("message", message => {
+    process.on("message", (message) => {
       if (message.type !== "endpoint") return
       const current = identity(endpoint)
       if (!current?.socket || !sameIdentity(current, message.identity)) {
@@ -109,10 +110,10 @@ process.once("message", config => {
       detached: true,
       stdio: ["ignore", "pipe", "pipe"]
     })
-    application.stdout.on("data", chunk => send({ type: "stdout", data: chunk.toString() }, application.stdout))
-    application.stderr.on("data", chunk => send({ type: "stderr", data: chunk.toString() }, application.stderr))
+    application.stdout.on("data", (chunk) => send({ type: "stdout", data: chunk.toString() }, application.stdout))
+    application.stderr.on("data", (chunk) => send({ type: "stderr", data: chunk.toString() }, application.stderr))
     application.once("spawn", () => send({ type: "started", pid: application.pid }))
-    application.once("error", error => send({ type: "error", message: error.message, code: error.code }))
+    application.once("error", (error) => send({ type: "error", message: error.message, code: error.code }))
     application.once("close", (code, signal) => send({ type: "exit", code, signal }))
   } catch (error) {
     send({ type: "error", message: error.message, code: error.code })
@@ -121,11 +122,11 @@ process.once("message", config => {
 
 process.once("disconnect", () => shutdown(0))
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => shutdown(0))
-process.on("uncaughtException", error => {
+process.on("uncaughtException", (error) => {
   process.stderr.write(`Hasgard supervisor error: ${error.stack}\n`)
   shutdown(1)
 })
-process.on("unhandledRejection", error => {
+process.on("unhandledRejection", (error) => {
   process.stderr.write(`Hasgard supervisor rejection: ${String(error)}\n`)
   shutdown(1)
 })

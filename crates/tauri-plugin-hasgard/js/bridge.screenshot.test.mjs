@@ -9,14 +9,13 @@
 //
 // Run: node --test crates/tauri-plugin-hasgard/js/bridge.screenshot.test.mjs
 
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { test } from "node:test"
 
-const here = dirname(fileURLToPath(import.meta.url));
-const BRIDGE_SRC = readFileSync(join(here, "bridge.js"), "utf8");
+const here = import.meta.dirname
+const BRIDGE_SRC = readFileSync(join(here, "bridge.js"), "utf8")
 
 // Real console methods, captured once so each bridge load re-wraps the
 // originals instead of stacking wrappers across tests.
@@ -24,43 +23,43 @@ const REAL_CONSOLE = {
   log: console.log.bind(console),
   warn: console.warn.bind(console),
   error: console.error.bind(console),
-  info: console.info.bind(console),
-};
+  info: console.info.bind(console)
+}
 
 // Fresh globals + a fresh bridge instance for each test (the IIFE early-returns
 // if `window.__HASGARD__` already exists, so `window` must be new every time).
 // Returns the hasgard API plus the toPng calls captured by the mock.
 function loadBridge({ queryResult, documentElement, body } = {}) {
-  Object.assign(console, REAL_CONSOLE);
+  Object.assign(console, REAL_CONSOLE)
 
-  const calls = [];
+  const calls = []
   globalThis.htmlToImage = {
     async toPng(node, options) {
-      calls.push({ node, options });
-      return "data:image/png;base64,AAAA";
-    },
-  };
+      calls.push({ node, options })
+      return "data:image/png;base64,AAAA"
+    }
+  }
 
-  globalThis.window = { fetch() {} };
+  globalThis.window = { fetch() {} }
   globalThis.document = {
     documentElement: documentElement || {},
     body: body || {},
     querySelector(selector) {
       if (queryResult === undefined) {
-        throw new Error("unexpected querySelector(" + selector + ")");
+        throw new Error(`unexpected querySelector(${selector})`)
       }
-      return queryResult;
-    },
-  };
+      return queryResult
+    }
+  }
   function XMLHttpRequestStub() {}
-  XMLHttpRequestStub.prototype.open = function () {};
-  XMLHttpRequestStub.prototype.send = function () {};
-  globalThis.XMLHttpRequest = XMLHttpRequestStub;
+  XMLHttpRequestStub.prototype.open = function () {}
+  XMLHttpRequestStub.prototype.send = function () {}
+  globalThis.XMLHttpRequest = XMLHttpRequestStub
 
   // Indirect eval runs in global scope; the IIFE then resolves bare `window`,
   // `document`, etc. against the globals set above.
-  (0, eval)(BRIDGE_SRC);
-  return { hasgard: globalThis.window.__HASGARD__, calls };
+  ;(0, eval)(BRIDGE_SRC)
+  return { hasgard: globalThis.window.__HASGARD__, calls }
 }
 
 test("screenshot without selector captures the full document height", async () => {
@@ -70,50 +69,47 @@ test("screenshot without selector captures the full document height", async () =
     scrollWidth: 800,
     scrollHeight: 2400,
     clientWidth: 800,
-    clientHeight: 700,
-  };
-  const body = { scrollWidth: 820, scrollHeight: 2500 };
-  const { hasgard, calls } = loadBridge({ documentElement, body });
+    clientHeight: 700
+  }
+  const body = { scrollWidth: 820, scrollHeight: 2500 }
+  const { hasgard, calls } = loadBridge({ documentElement, body })
 
-  await hasgard.screenshot({});
+  await hasgard.screenshot({})
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].node, documentElement);
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].node, documentElement)
   // max(html, body) on both axes so nothing below the fold is lost.
-  assert.equal(calls[0].options.width, 820);
-  assert.equal(calls[0].options.height, 2500);
-  assert.equal(calls[0].options.pixelRatio, 1);
-});
+  assert.equal(calls[0].options.width, 820)
+  assert.equal(calls[0].options.height, 2500)
+  assert.equal(calls[0].options.pixelRatio, 1)
+})
 
 test("screenshot without selector tolerates a missing body", async () => {
-  const documentElement = { scrollWidth: 800, scrollHeight: 2400 };
-  const { hasgard, calls } = loadBridge({ documentElement, body: null });
+  const documentElement = { scrollWidth: 800, scrollHeight: 2400 }
+  const { hasgard, calls } = loadBridge({ documentElement, body: null })
 
-  await hasgard.screenshot({});
+  await hasgard.screenshot({})
 
-  assert.equal(calls[0].options.width, 800);
-  assert.equal(calls[0].options.height, 2400);
-});
+  assert.equal(calls[0].options.width, 800)
+  assert.equal(calls[0].options.height, 2400)
+})
 
 test("screenshot with selector does not override element dimensions", async () => {
-  const el = { scrollWidth: 300, scrollHeight: 40 };
-  const { hasgard, calls } = loadBridge({ queryResult: el });
+  const el = { scrollWidth: 300, scrollHeight: 40 }
+  const { hasgard, calls } = loadBridge({ queryResult: el })
 
-  await hasgard.screenshot({ selector: "#panel" });
+  await hasgard.screenshot({ selector: "#panel" })
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].node, el);
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].node, el)
   // html-to-image must size the capture from the element's own layout.
-  assert.equal("width" in calls[0].options, false);
-  assert.equal("height" in calls[0].options, false);
-  assert.equal(calls[0].options.pixelRatio, 1);
-});
+  assert.equal("width" in calls[0].options, false)
+  assert.equal("height" in calls[0].options, false)
+  assert.equal(calls[0].options.pixelRatio, 1)
+})
 
 test("screenshot with unmatched selector throws element not found", async () => {
-  const { hasgard } = loadBridge({ queryResult: null });
+  const { hasgard } = loadBridge({ queryResult: null })
 
-  await assert.rejects(
-    () => hasgard.screenshot({ selector: "#missing" }),
-    /Element not found: #missing/,
-  );
-});
+  await assert.rejects(() => hasgard.screenshot({ selector: "#missing" }), /Element not found: #missing/)
+})

@@ -459,7 +459,7 @@ mod tests {
         let js = super::BRIDGE_JS;
         assert!(js.contains("function evalScript("), "BRIDGE_JS must define evalScript");
         assert!(
-            js.contains("(async () => (\\n\" + script + \"\\n))()"),
+            js.contains(r"return (async () => (\n${script}\n))()"),
             "evalScript must include the async-expression compile stage (#79)"
         );
         assert!(
@@ -467,7 +467,7 @@ mod tests {
             "evalScript must guard the async fallbacks with hasTopLevelAwait (#79)"
         );
         assert!(
-            js.contains("(async () => {\\n\" + script + \"\\n})()"),
+            js.contains(r"return (async () => {\n${script}\n})()"),
             "evalScript must include the async-statement IIFE fallback (#79)"
         );
         assert!(js.contains("function hasTopLevelAwait("), "BRIDGE_JS must define the hasTopLevelAwait helper (#79)");
@@ -478,20 +478,16 @@ mod tests {
 
         // Stage ordering: expression compile must precede the async fallbacks,
         // and the async-expression stage must precede the indirect-eval path.
-        // Needles are formatting-stable substrings of the JS source, so a
-        // future `prettier`/`rustfmt` reflow of `bridge.js` does not silently
-        // break the ordering check.
+        // Match generated function bodies without depending on source whitespace
+        // or on how the surrounding JavaScript string is quoted.
         let evalscript_idx = js.find("function evalScript(").expect("evalScript missing");
-        // SAFETY: the needle is ASCII, so `find()` returns a UTF-8 char boundary.
         let body = &js[evalscript_idx..];
-        let expr_idx = body.find("\"return (\\n\" + script + \"\\n)\"").expect("stage 1 expression compile missing");
-        let async_expr_idx = body
-            .find("\"return (async () => (\\n\" + script + \"\\n))()\"")
-            .expect("stage 2 async-expression compile missing");
-        let async_stmt_idx = body
-            .find("\"return (async () => {\\n\" + script + \"\\n})()\"")
-            .expect("stage 3 async-statement IIFE missing");
-        let indirect_idx = body.find("var indirectEval = eval;").expect("indirect eval fallback missing");
+        let expr_idx = body.find(r"return (\n${script}\n)").expect("stage 1 expression compile missing");
+        let async_expr_idx =
+            body.find(r"return (async () => (\n${script}\n))()").expect("stage 2 async-expression compile missing");
+        let async_stmt_idx =
+            body.find(r"return (async () => {\n${script}\n})()").expect("stage 3 async-statement IIFE missing");
+        let indirect_idx = body.find("indirectEval = eval").expect("indirect eval fallback missing");
         assert!(expr_idx < async_expr_idx, "expression compile must precede async-expression fallback");
         assert!(async_expr_idx < async_stmt_idx, "async-expression must precede async-statement fallback");
         assert!(
@@ -593,7 +589,7 @@ mod tests {
         // still excludes <p>. Verify INTERACTIVE_ROLES does not list it.
         let set_start = js.find("INTERACTIVE_ROLES = new Set([").expect("INTERACTIVE_ROLES set missing");
         let set_body = &js[set_start..];
-        let set_end = set_body.find("]);").expect("INTERACTIVE_ROLES set unterminated");
+        let set_end = set_body.find("])").expect("INTERACTIVE_ROLES set unterminated");
         assert!(
             !set_body[..set_end].contains("\"paragraph\""),
             "paragraph must stay out of INTERACTIVE_ROLES so interactive snapshots still exclude <p> (#109)"

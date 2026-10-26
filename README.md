@@ -7,7 +7,7 @@ Tauri Hasgard is one automation surface for Tauri 3 Wry applications. It combine
 The project is named after Hasgard, the Taurus Gold Saint from _Saint Seiya: The Lost Canvas_: strong at the boundary, predictable under pressure.
 
 The current development line targets Tauri 3 with the Wry runtime. Tauri 2 users
-can continue using the previously published 0.5.x line. The 0.6.0-alpha.2 prerelease
+can continue using the previously published 0.5.x line. The 0.6.0-alpha.3 prerelease
 is available through the explicit version and the npm `next` tag.
 CEF is not supported by this Wry-specific native keyboard integration.
 
@@ -52,14 +52,14 @@ Hasgard covers the other half — one running application, real native webviews,
 ## 1. Register the required Tauri plugin
 
 ```sh
-cargo add tauri-plugin-hasgard@0.6.0-alpha.2
+cargo add tauri-plugin-hasgard@0.6.0-alpha.3
 ```
 
 ```toml
 [dependencies]
-tauri = "3.0.0-alpha.3"
-tauri-runtime-wry = "3.0.0-alpha.3"
-tauri-plugin-hasgard = "0.6.0-alpha.2"
+tauri = "3.0.0-alpha.5"
+tauri-runtime-wry = "3.0.0-alpha.5"
+tauri-plugin-hasgard = "0.6.0-alpha.3"
 ```
 
 ```rust
@@ -150,7 +150,7 @@ import { expect as playwrightExpect, test as playwrightTest } from "@playwright/
 const { test, expect } = createHasgardTest({
   test: playwrightTest,
   expect: playwrightExpect,
-  socketPath: workerIndex => `/tmp/my-app-e2e-${workerIndex}.sock`,
+  socketPath: (workerIndex) => `/tmp/my-app-e2e-${workerIndex}.sock`,
   windowLabel: "main",
   readySelector: '[data-app-ready="true"]',
   launch: {
@@ -186,6 +186,25 @@ The test client exposes `window.startVideo({ outputPath })`,
 `window.stopVideo()`, and `window.videoStatus()`. See the
 [protocol](docs/protocol.md) for permission requirements, limits, origin binding,
 and error behavior.
+
+## Development checks
+
+Run `fab u` (alias for `fab upgrade`) to upgrade all Bun workspaces and Rust dependencies, including major versions, and refresh both lockfiles. This requires Fabric (`uv tool install fabric`) and cargo-edit (`cargo install cargo-edit`).
+
+Use Bun Canary for development: `bun lint` is currently Canary-only. The package manager tracks `bun@latest`, and CI runs lint in a separate Canary job.
+
+```sh
+bun install --frozen-lockfile
+bun run format:check
+bun run typecheck
+bun lint
+bun run ts7-lint
+bun run test
+bun run build
+bun run test:e2e
+```
+
+Formatting and import sorting use `bun fmt`; type checking uses `bun check`. TypeScript 7 still emits the package's declaration files. `@nyssance/ts7-lint` supplies the modern syntax and import-cycle rules separately from Bun's default lint rules. Repository settings live in `bunfig.toml`.
 
 ## Status
 

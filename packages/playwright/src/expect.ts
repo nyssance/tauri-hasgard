@@ -13,21 +13,21 @@ async function poll<T>(read: () => Promise<T>, matches: (value: T) => boolean, t
     } catch (error) {
       if (Date.now() >= deadline) throw error
     }
-    await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))))
+    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))))
   }
 }
 
 export function createHasgardExpect(playwrightExpect: typeof import("@playwright/test").expect) {
   return playwrightExpect.extend({
     async toBeVisible(locator: HasgardLocator, options: { timeout?: number } = {}) {
-      const timeout = options.timeout === undefined ? 5_000 : options.timeout
+      const { timeout = 5_000 } = options
       const result = await poll(
         () => locator.isVisible(),
-        visible => (this.isNot ? !visible : visible),
+        (visible) => (this.isNot ? !visible : visible),
         timeout
       )
       return {
-        pass: result === true,
+        pass: result,
         message: () =>
           this.isNot
             ? "expected Hasgard locator not to be visible"
@@ -36,7 +36,7 @@ export function createHasgardExpect(playwrightExpect: typeof import("@playwright
     },
 
     async toHaveText(locator: HasgardLocator, expected: string | RegExp, options: { timeout?: number } = {}) {
-      const timeout = options.timeout === undefined ? 5_000 : options.timeout
+      const { timeout = 5_000 } = options
       const matches = (text: string): boolean => {
         if (typeof expected === "string") return text === expected
         expected.lastIndex = 0
@@ -44,7 +44,7 @@ export function createHasgardExpect(playwrightExpect: typeof import("@playwright
       }
       const result = await poll(
         () => locator.textContent(),
-        text => (this.isNot ? !matches(text) : matches(text)),
+        (text) => (this.isNot ? !matches(text) : matches(text)),
         timeout
       )
       return {

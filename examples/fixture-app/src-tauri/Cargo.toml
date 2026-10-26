@@ -9,13 +9,13 @@ name = "tauri_hasgard_fixture_app"
 crate-type = ["rlib"]
 
 [build-dependencies]
-tauri-build = { version = "3.0.0-alpha.2", features = [] }
+tauri-build = { version = "3.0.0-alpha.4", features = [] }
 
 [features]
 hasgard-testing = ["dep:tauri-plugin-global-shortcut"]
 
 [dependencies]
-tauri = { version = "3.0.0-alpha.3", features = [] }
-tauri-runtime-wry = "3.0.0-alpha.3"
-tauri-plugin-global-shortcut = { version = "3.0.0-alpha.1", optional = true }
+tauri = { version = "3.0.0-alpha.5", features = [] }
+tauri-runtime-wry = "3.0.0-alpha.5"
+tauri-plugin-global-shortcut = { version = "3.0.0-alpha.3", optional = true }
 tauri-plugin-hasgard = { path = "../../../crates/tauri-plugin-hasgard" }

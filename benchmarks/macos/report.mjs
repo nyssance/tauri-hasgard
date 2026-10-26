@@ -28,21 +28,21 @@ const lines = [
 ]
 for (const scenario of scenarios) {
   for (const tool of names) {
-    const samples = result.samples.filter(sample => sample.scenario === scenario && sample.tool === tool)
+    const samples = result.samples.filter((sample) => sample.scenario === scenario && sample.tool === tool)
     assert.equal(samples.length, result.method.rounds * result.method.samplesPerRound, `incomplete ${tool}/${scenario}`)
-    const successful = samples.filter(sample => sample.ok)
-    const values = successful.map(sample => sample.ms).sort((a, b) => a - b)
+    const successful = samples.filter((sample) => sample.ok)
+    const values = successful.map((sample) => sample.ms).toSorted((a, b) => a - b)
     const medians = Array.from({ length: result.method.rounds }, (_, round) => {
-      const roundSamples = samples.filter(sample => sample.round === round)
+      const roundSamples = samples.filter((sample) => sample.round === round)
       assert.equal(roundSamples.length, result.method.samplesPerRound, `incomplete round ${round}: ${tool}/${scenario}`)
       const timings = roundSamples
-        .filter(sample => sample.ok)
-        .map(sample => sample.ms)
-        .sort((a, b) => a - b)
+        .filter((sample) => sample.ok)
+        .map((sample) => sample.ms)
+        .toSorted((a, b) => a - b)
       return timings.length ? percentile(timings, 0.5).toFixed(3) : "—"
     })
     const stats = values.length
-      ? [percentile(values, 0.5), percentile(values, 0.95), values[0], values.at(-1)].map(value => value.toFixed(3))
+      ? [percentile(values, 0.5), percentile(values, 0.95), values[0], values.at(-1)].map((value) => value.toFixed(3))
       : ["—", "—", "—", "—"]
     lines.push(
       `| ${scenario} | ${tool} | ${successful.length}/${samples.length} | ${stats.join(" | ")} | ${medians.join(" / ")} |`
@@ -73,7 +73,7 @@ for (const probe of result.capabilities) {
         : "still running before harness cleanup"
   else observation = JSON.stringify(probe)
   lines.push(
-    `| ${probe.round + 1} | ${probe.tool} | ${probe.probe} | ${observation.replaceAll("|", "\\|").replaceAll("\n", " ")} |`
+    `| ${probe.round + 1} | ${probe.tool} | ${probe.probe} | ${observation.replaceAll("|", String.raw`\|`).replaceAll("\n", " ")} |`
   )
 }
 lines.push(
@@ -93,7 +93,7 @@ lines.push(
   "",
   "## Cleanup scope",
   "",
-  `${result.cleanup.filter(item => item.applicationExited).length}/${result.cleanup.length} application hosts were confirmed exited. This cleanup belongs to the neutral benchmark harness; it is not evidence for competitors' fixture cleanup. Hasgard's worker-death and signal-resistant descendant cleanup are tested separately in its real process tests and nested native Playwright runs.`,
+  `${result.cleanup.filter((item) => item.applicationExited).length}/${result.cleanup.length} application hosts were confirmed exited. This cleanup belongs to the neutral benchmark harness; it is not evidence for competitors' fixture cleanup. Hasgard's worker-death and signal-resistant descendant cleanup are tested separately in its real process tests and nested native Playwright runs.`,
   ""
 )
 await writeFile(output, lines.join("\n"))

@@ -1,4 +1,5 @@
 import { HasgardRpcClient } from "@nyssance/tauri-hasgard"
+
 import { expect, fixtureEndpoint, test } from "../fixtures.js"
 
 const stress = process.env.HASGARD_NATIVE_STRESS
@@ -38,10 +39,10 @@ for (const keys of [
           first.call("press", { window: "main", key: keys.main }),
           second.call("press", { window: "settings", key: keys.settings })
         ])
-        const failure = outcomes.find(outcome => outcome.status === "rejected")
+        const failure = outcomes.find((outcome) => outcome.status === "rejected")
         if (failure?.status === "rejected") {
           const states = await Promise.allSettled(
-            [window, settings].map(target =>
+            [window, settings].map((target) =>
               target.evaluate(
                 '({ focused: document.hasFocus(), activeElement: document.activeElement.id, inputs: Array.from(document.querySelectorAll("input"), input => ({id: input.id, value: input.value})), keys: window.__nativeKeys })'
               )
@@ -66,7 +67,7 @@ for (const keys of [
       )
     } catch (error) {
       const states = await Promise.allSettled(
-        [window, settings].map(target =>
+        [window, settings].map((target) =>
           target.evaluate(
             '({focused: document.hasFocus(), activeElement: document.activeElement.id, value: document.querySelector("input[type=password]").value, keys: window.__nativeKeys})'
           )

@@ -3,7 +3,9 @@ import { createServer, type Server } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
+
 import { afterEach, describe, expect, test } from "vitest"
+
 import { MAX_REQUEST_BYTES } from "./protocol-limits.js"
 import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 
@@ -17,20 +19,23 @@ let server: Server | undefined
 afterEach(async () => {
   await new Promise<void>((resolve, reject) => {
     if (!server) return resolve()
-    server.close(error => (error ? reject(error) : resolve()))
+    server.close((error) => (error ? reject(error) : resolve()))
   })
   server = undefined
   if (process.platform !== "win32") await rm(socketPath, { force: true })
 })
 
-async function listen(respond: (request: { id: number; method: string }) => unknown | Promise<unknown>): Promise<void> {
+async function listen(respond: (request: { id: number; method: string }) => unknown): Promise<void> {
   if (process.platform !== "win32") await rm(socketPath, { force: true })
-  server = createServer(socket => {
+  server = createServer((socket) => {
     const lines = createInterface({ input: socket })
-    lines.on("line", async line => {
-      const request = JSON.parse(line) as { id: number; method: string }
-      const response = await respond(request)
-      socket.write(`${JSON.stringify(response)}\n`)
+    lines.on("line", (line) => {
+      void Promise.resolve()
+        .then(() => respond(JSON.parse(line) as { id: number; method: string }))
+        .then((response) => {
+          socket.write(`${JSON.stringify(response)}\n`)
+        })
+        .catch((error) => socket.destroy(error instanceof Error ? error : new Error(String(error))))
     })
   })
   await new Promise<void>((resolve, reject) => {
@@ -43,7 +48,7 @@ describe("HasgardRpcClient", () => {
   test("can reconnect after a failed connection attempt", async () => {
     const client = new HasgardRpcClient(socketPath)
     await expect(client.connect(500)).rejects.toThrow()
-    await listen(request => ({ jsonrpc: "2.0", id: request.id, result: true }))
+    await listen((request) => ({ jsonrpc: "2.0", id: request.id, result: true }))
     try {
       await client.connect(1_000)
       await expect(client.call("ping")).resolves.toBe(true)
@@ -53,7 +58,7 @@ describe("HasgardRpcClient", () => {
   })
 
   test("an old socket closing cannot reject calls on a new connection", async () => {
-    await listen(request => ({ jsonrpc: "2.0", id: request.id, result: true }))
+    await listen((request) => ({ jsonrpc: "2.0", id: request.id, result: true }))
     const client = new HasgardRpcClient(socketPath)
     try {
       await client.connect(1_000)
@@ -66,7 +71,7 @@ describe("HasgardRpcClient", () => {
   })
 
   test("accepts a request exactly at the byte limit including its newline", async () => {
-    await listen(request => ({ jsonrpc: "2.0", id: request.id, result: true }))
+    await listen((request) => ({ jsonrpc: "2.0", id: request.id, result: true }))
     const client = new HasgardRpcClient(socketPath)
     await client.connect(1_000)
     try {
@@ -81,7 +86,7 @@ describe("HasgardRpcClient", () => {
 
   test("rejects oversized UTF-8 requests before sending and keeps the connection usable", async () => {
     const received: string[] = []
-    await listen(request => {
+    await listen((request) => {
       received.push(request.method)
       return { jsonrpc: "2.0", id: request.id, result: true }
     })
@@ -102,7 +107,7 @@ describe("HasgardRpcClient", () => {
     const cases: { valid: boolean; response: unknown }[] = JSON.parse(
       await readFile(new URL("../../../protocol/responses.json", import.meta.url), "utf8")
     )
-    const invalid = cases.filter(item => !item.valid)
+    const invalid = cases.filter((item) => !item.valid)
     let index = 0
     await listen(() => invalid[index++]?.response)
     const client = new HasgardRpcClient(socketPath)
@@ -117,7 +122,7 @@ describe("HasgardRpcClient", () => {
   })
 
   test("keeps an explicit null result and rejects uncorrelated server errors", async () => {
-    await listen(request =>
+    await listen((request) =>
       request.method === "eval"
         ? { jsonrpc: "2.0", id: request.id, result: null }
         : { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }
@@ -133,8 +138,8 @@ describe("HasgardRpcClient", () => {
   })
 
   test("matches concurrent out-of-order JSON-RPC responses by id", async () => {
-    await listen(async request => {
-      if (request.method === "slow") await new Promise(resolve => setTimeout(resolve, 20))
+    await listen(async (request) => {
+      if (request.method === "slow") await new Promise((resolve) => setTimeout(resolve, 20))
       return { jsonrpc: "2.0", id: request.id, result: request.method }
     })
     const client = new HasgardRpcClient(socketPath)
@@ -148,7 +153,7 @@ describe("HasgardRpcClient", () => {
   })
 
   test("surfaces protocol errors with code and data", async () => {
-    await listen(request => ({
+    await listen((request) => ({
       jsonrpc: "2.0",
       id: request.id,
       error: { code: -32602, message: "bad target", data: { field: "ref" } }

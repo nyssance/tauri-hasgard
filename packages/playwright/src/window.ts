@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises"
 import { basename } from "node:path"
-import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
+
+import type { HasgardRpcClient } from "./rpc-client.js"
+import { HasgardRpcError } from "./rpc-client.js"
 import type {
   BoundingBox,
   ClickOptions,
@@ -90,7 +92,7 @@ function withWindow(window: string, params?: Record<string, JsonValue>): Record<
 async function readFileInputs(files: FileInput | FileInput[]): Promise<DropFile[]> {
   const list = Array.isArray(files) ? files : [files]
   return Promise.all(
-    list.map(async entry => {
+    list.map(async (entry) => {
       if (typeof entry !== "string") return entry
       const contents = await readFile(entry)
       return { name: basename(entry), data: contents.toString("base64") }
@@ -348,7 +350,7 @@ export class HasgardApplication {
   async waitForWindow(label: string, timeoutMs: number): Promise<HasgardWindow> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() <= deadline) {
-      if ((await this.windows()).some(window => window.label === label)) {
+      if ((await this.windows()).some((window) => window.label === label)) {
         const window = this.window(label)
         try {
           const state = await window.state()
@@ -357,7 +359,7 @@ export class HasgardApplication {
           if (!(error instanceof HasgardRpcError) || error.code !== -32002) throw error
         }
       }
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise((resolve) => setTimeout(resolve, 50))
     }
     throw new Error(`Window '${label}' did not finish loading within ${timeoutMs}ms`)
   }
@@ -367,7 +369,7 @@ export class HasgardApplication {
     const deadline = Date.now() + timeoutMs
     while (Date.now() <= deadline) {
       if ((await window.locator(readySelector).count()) === 1) return window
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise((resolve) => setTimeout(resolve, 50))
     }
     throw new Error(`Window '${label}' did not match ready selector '${readySelector}' within ${timeoutMs}ms`)
   }
@@ -400,7 +402,7 @@ export class HasgardApplication {
       }
     },
     add: async (entry: RecorderEntry): Promise<void> => {
-      await this.rpc.call("record.add", entry as unknown as Record<string, JsonValue>)
+      await this.rpc.call("record.add", entry)
     }
   }
 }
@@ -811,7 +813,7 @@ export class HasgardWindow {
   /** This window's operating-system window id, where the platform exposes one. */
   async nativeId(): Promise<number> {
     const listing = await new HasgardApplication(this.rpc).windows()
-    const self = listing.find(entry => entry.label === this.label)
+    const self = listing.find((entry) => entry.label === this.label)
     if (!self) throw new Error(`Window '${this.label}' is no longer open`)
     if (self.nativeId === undefined) {
       throw new Error(`Window '${this.label}' has no native window id on this platform`)
@@ -827,7 +829,7 @@ export class HasgardWindow {
     const lock = lockFor(this.rpc, this.label)
     const previous = lock.tail
     let release!: () => void
-    const gate = new Promise<void>(resolve => {
+    const gate = new Promise<void>((resolve) => {
       release = resolve
     })
     lock.tail = previous.then(() => gate)
@@ -927,15 +929,15 @@ export class HasgardLocator {
    * the wrong event fails here rather than in front of a user.
    */
   async click(options: ClickOptions = {}): Promise<void> {
-    await this.withTarget(target => this.window.call("click", { ...this.scoped(target), ...clickParams(options) }))
+    await this.withTarget((target) => this.window.call("click", { ...this.scoped(target), ...clickParams(options) }))
   }
 
   async fill(value: string): Promise<void> {
-    await this.withTarget(target => this.window.call("fill", { ...this.scoped(target), value }))
+    await this.withTarget((target) => this.window.call("fill", { ...this.scoped(target), value }))
   }
 
   async type(text: string): Promise<void> {
-    await this.withTarget(target => this.window.call("type", { ...this.scoped(target), text }))
+    await this.withTarget((target) => this.window.call("type", { ...this.scoped(target), text }))
   }
 
   /** Empty the control, firing `input` and `change` as `fill` does. */
@@ -952,7 +954,7 @@ export class HasgardLocator {
    */
   async setInputFiles(files: FileInput | FileInput[]): Promise<void> {
     const payloads = await readFileInputs(files)
-    await this.withTarget(target =>
+    await this.withTarget((target) =>
       this.window.call("setInputFiles", {
         ...this.scoped(target),
         files: payloads as unknown as JsonValue
@@ -968,7 +970,7 @@ export class HasgardLocator {
    * Resolves to whether the page cancelled.
    */
   async wheel(deltaX: number, deltaY: number): Promise<boolean> {
-    return this.withTarget(async target => {
+    return this.withTarget(async (target) => {
       const value = expectRecord(
         await this.window.call("wheel", { ...this.scoped(target), deltaX, deltaY }),
         "wheel result"
@@ -978,26 +980,26 @@ export class HasgardLocator {
   }
 
   async selectOption(value: string): Promise<void> {
-    await this.withTarget(target => this.window.call("select", { ...this.scoped(target), value }))
+    await this.withTarget((target) => this.window.call("select", { ...this.scoped(target), value }))
   }
 
   /** Drive the checkbox to checked. A no-op when it is already checked. */
   async check(): Promise<void> {
-    await this.withTarget(target => this.window.call("check", { ...this.scoped(target), checked: true }))
+    await this.withTarget((target) => this.window.call("check", { ...this.scoped(target), checked: true }))
   }
 
   /** Drive the checkbox to unchecked. A no-op when it is already unchecked. */
   async uncheck(): Promise<void> {
-    await this.withTarget(target => this.window.call("check", { ...this.scoped(target), checked: false }))
+    await this.withTarget((target) => this.window.call("check", { ...this.scoped(target), checked: false }))
   }
 
   /** Flip the checkbox, whatever its current state. */
   async toggle(): Promise<void> {
-    await this.withTarget(target => this.window.call("check", this.scoped(target)))
+    await this.withTarget((target) => this.window.call("check", this.scoped(target)))
   }
 
   async hover(): Promise<void> {
-    await this.withTarget(target => this.window.call("hover", this.scoped(target)))
+    await this.withTarget((target) => this.window.call("hover", this.scoped(target)))
   }
 
   /** Shorthand for `click({ clickCount: 2 })`; other options still apply. */
@@ -1006,22 +1008,22 @@ export class HasgardLocator {
   }
 
   async focus(): Promise<void> {
-    await this.withTarget(target => this.window.call("focus", this.scoped(target)))
+    await this.withTarget((target) => this.window.call("focus", this.scoped(target)))
   }
 
   async blur(): Promise<void> {
-    await this.withTarget(target => this.window.call("blur", this.scoped(target)))
+    await this.withTarget((target) => this.window.call("blur", this.scoped(target)))
   }
 
   /** Scroll this element's own scrollport. */
   async scrollBy(options: ScrollOptions): Promise<void> {
-    await this.withTarget(target =>
+    await this.withTarget((target) =>
       this.window.call("scroll", { ...this.scoped(target), ...(options as unknown as Record<string, JsonValue>) })
     )
   }
 
   async boundingBox(): Promise<BoundingBox> {
-    return this.withTarget(async target => {
+    return this.withTarget(async (target) => {
       const value = expectRecord(await this.window.call("boundingBox", this.scoped(target)), "boundingBox result")
       return {
         x: expectNumber(value.x, "boundingBox.x"),
@@ -1033,7 +1035,7 @@ export class HasgardLocator {
   }
 
   async isDisabled(): Promise<boolean> {
-    return this.withTarget(async target => {
+    return this.withTarget(async (target) => {
       const value = expectRecord(await this.window.call("disabled", this.scoped(target)), "disabled result")
       return expectBoolean(value.disabled, "disabled.disabled")
     })
@@ -1044,26 +1046,26 @@ export class HasgardLocator {
   }
 
   async textContent(): Promise<string> {
-    return this.withTarget(async target =>
+    return this.withTarget(async (target) =>
       expectString(await this.window.call("text", this.scoped(target)), "text result")
     )
   }
 
   async inputValue(): Promise<string> {
-    return this.withTarget(async target =>
+    return this.withTarget(async (target) =>
       expectString(await this.window.call("value", this.scoped(target)), "value result")
     )
   }
 
   async innerHTML(): Promise<string> {
-    return this.withTarget(async target =>
+    return this.withTarget(async (target) =>
       expectString(await this.window.call("html", this.scoped(target)), "html result")
     )
   }
 
   async getAttribute(name: string): Promise<string | null> {
     const attributes = await this.attributes()
-    return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name]! : null
+    return Object.hasOwn(attributes, name) ? attributes[name]! : null
   }
 
   /** Drag this element onto another one in the same window. */
@@ -1083,14 +1085,14 @@ export class HasgardLocator {
 
   /** Drag this element by a pixel offset from its centre. */
   async dragBy(offset: DragOffset): Promise<void> {
-    await this.withTarget(target =>
+    await this.withTarget((target) =>
       this.window.call("drag", { source: this.scoped(target), offset: { x: offset.x, y: offset.y } })
     )
   }
 
   /** Dispatch a file drop onto this element. `data` is base64-encoded. */
   async dropFiles(files: DropFile[]): Promise<void> {
-    await this.withTarget(target =>
+    await this.withTarget((target) =>
       this.window.call("drop", {
         ...this.scoped(target),
         files: files as unknown as JsonValue
@@ -1099,7 +1101,7 @@ export class HasgardLocator {
   }
 
   async attributes(): Promise<Record<string, string>> {
-    return this.withTarget(async target => {
+    return this.withTarget(async (target) => {
       const value = expectRecord(await this.window.call("attrs", this.scoped(target)), "attrs result")
       return Object.fromEntries(
         Object.entries(value).map(([name, attr]) => [name, expectString(attr, `attribute ${name}`)])
@@ -1117,7 +1119,7 @@ export class HasgardLocator {
   }
 
   async isChecked(): Promise<boolean> {
-    return this.withTarget(async target => {
+    return this.withTarget(async (target) => {
       const value = expectRecord(await this.window.call("checked", this.scoped(target)), "checked result")
       return expectBoolean(value.checked, "checked.checked")
     })
@@ -1160,7 +1162,7 @@ export class HasgardLocator {
     while (Date.now() <= deadline) {
       const found = (await this.count()) > 0
       if (found === (options.state === "attached")) return
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise((resolve) => setTimeout(resolve, 50))
     }
     throw new Error(`Locator did not become ${options.state} within ${options.timeoutMs}ms`)
   }
@@ -1263,7 +1265,7 @@ export class HasgardLocator {
     }
     const query = this.query
     const snapshot = await this.window.snapshot(query.frame ? { frame: [...query.frame] } : {})
-    return snapshot.elements.filter(element => {
+    return snapshot.elements.filter((element) => {
       if (element.role !== query.role) return false
       const expected = query.query.name
       if (expected === undefined) return true
@@ -1286,7 +1288,7 @@ export class HasgardLocator {
     for (const filter of filters) {
       // An empty set cannot survive further narrowing; skip the round trip.
       if (current.length === 0) return current
-      const params: Record<string, JsonValue> = { refs: current.map(element => element.ref) }
+      const params: Record<string, JsonValue> = { refs: current.map((element) => element.ref) }
       if (filter.hasText !== undefined) params.hasText = filter.hasText
       if (filter.hasNotText !== undefined) params.hasNotText = filter.hasNotText
       if (filter.exact !== undefined) params.exact = filter.exact

@@ -2,6 +2,7 @@ import { type ChildProcess, fork, spawn } from "node:child_process"
 import { lstat } from "node:fs/promises"
 import { createConnection } from "node:net"
 import { setTimeout as delay } from "node:timers/promises"
+
 import { stopProcessGroup } from "./process-group.js"
 import type { HasgardLaunchConfig } from "./types.js"
 
@@ -81,7 +82,7 @@ export class HasgardProcess {
       stdio: ["ignore", "ignore", "pipe", "ipc"]
     })
     this.child = child
-    child.stderr?.on("data", data => {
+    child.stderr?.on("data", (data) => {
       this.stderr = appendOutput(this.stderr, String(data))
     })
     try {
@@ -118,7 +119,7 @@ export class HasgardProcess {
             }
           }
         )
-        child.send({ ...config, env: { ...process.env, ...config.env, TAURI_HASGARD_SOCKET: socketPath } }, error => {
+        child.send({ ...config, env: { ...process.env, ...config.env, TAURI_HASGARD_SOCKET: socketPath } }, (error) => {
           if (error) failed(error)
         })
       })
@@ -177,7 +178,7 @@ export class HasgardProcess {
       )
       child.on("message", message)
       child.once("exit", exited)
-      child.send({ type: "endpoint", identity: { dev: stat.dev, ino: stat.ino } }, error => {
+      child.send({ type: "endpoint", identity: { dev: stat.dev, ino: stat.ino } }, (error) => {
         if (error) done(error)
       })
     })
@@ -208,7 +209,7 @@ export class HasgardProcess {
       const exited =
         child.exitCode !== null || child.signalCode !== null
           ? Promise.resolve()
-          : new Promise<void>(resolve => child.once("exit", () => resolve()))
+          : new Promise<void>((resolve) => child.once("exit", () => resolve()))
       if (child.connected) child.disconnect()
       const abort = new AbortController()
       try {
@@ -229,7 +230,7 @@ export class HasgardProcess {
       this.child = undefined
       return
     }
-    const exited = new Promise<void>(resolve => child.once("exit", () => resolve()))
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()))
     if (process.platform === "win32" && child.pid !== undefined) {
       await terminateWindowsProcessTree(child.pid)
     } else if (child.pid !== undefined) {
@@ -270,7 +271,7 @@ async function endpointAcceptsConnections(path: string): Promise<boolean> {
       socket.destroy()
       resolve(true)
     })
-    socket.once("error", error => {
+    socket.once("error", (error) => {
       const code = (error as NodeJS.ErrnoException).code
       if (code === "ENOENT" || code === "ECONNREFUSED" || code === "EBUSY") {
         resolve(false)

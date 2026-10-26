@@ -30,12 +30,12 @@ tokio = { workspace = true, features = ["net", "rt", "sync", "time", "io-util"] 
 tracing.workspace = true
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
-tauri = { version = "3.0.0-alpha.3", features = ["unstable"] }
-tauri-runtime-wry = "3.0.0-alpha.3"
+tauri = { version = "3.0.0-alpha.5", features = ["unstable"] }
+tauri-runtime-wry = "3.0.0-alpha.5"
 enigo = { version = "0.6.1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2.184"
+libc = "0.2.191"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39.1"
@@ -66,4 +66,4 @@ serial_test = "4"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [build-dependencies]
-tauri-plugin = { version = "3.0.0-alpha.2", features = ["build"] }
+tauri-plugin = { version = "3.0.0-alpha.4", features = ["build"] }

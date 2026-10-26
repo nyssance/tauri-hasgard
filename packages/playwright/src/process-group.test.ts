@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest"
+
 import { stopProcessGroup } from "./process-group.js"
 
 function failure(code: string) {

@@ -1,3 +1,12 @@
+# 0.6.0-alpha.3 (2026-10-26)
+
+- Update Tauri/Wry to 3.0.0-alpha.5 and refresh Rust and JavaScript dependencies.
+- Modernize the handwritten WebView bridge and include it in lint and formatting checks.
+- Cover asynchronous evaluation, trailing comments, statement completion, and one-time execution of runtime errors.
+- Build the Playwright package with Bun instead of tsup/Rollup.
+- Replace Biome/Prettier with Bun tooling and add ts7-lint checks.
+- Add `fab u` to update dependencies across the workspace.
+
 # 0.6.0-alpha.2 (2026-09-28)
 
 - Migrate the plugin and native fixture to Tauri 3 with explicit Wry runtime initialization.

@@ -5,6 +5,7 @@
 // and storage all differ from a hand-built stub in ways a unit test cannot see.
 
 import type { HasgardWindow } from "@nyssance/tauri-hasgard"
+
 import { expect, test } from "../fixtures.js"
 
 test("missing elements are not visible while query and transport errors still fail", async ({ hasgard, window }) => {
@@ -131,7 +132,7 @@ test("reads element HTML and attributes from the live tree", async ({ window }) 
 
 test("reads console output from the running app", async ({ window }) => {
   const logs = await window.consoleLogs({ level: "warn" })
-  expect(logs.some(entry => entry.args.includes("fixture warning marker"))).toBe(true)
+  expect(logs.some((entry) => entry.args.includes("fixture warning marker"))).toBe(true)
 })
 
 // Drives the whole storage lifecycle from inside the test rather than reading a
@@ -147,7 +148,7 @@ test("round-trips web storage from a known-empty state", async ({ window }) => {
   await expect(window.storage.get("written-by-test")).resolves.toBe("1")
 
   const listing = await window.storage.list()
-  expect(listing.entries.some(entry => entry.key === "written-by-test")).toBe(true)
+  expect(listing.entries.some((entry) => entry.key === "written-by-test")).toBe(true)
 
   await window.storage.set("session-scoped", "s", { session: true })
   await expect(window.storage.get("session-scoped", { session: true })).resolves.toBe("s")
@@ -163,8 +164,8 @@ test("diffs the accessibility tree across a real interaction", async ({ window }
   await window.getByRole("button", { name: "Save", exact: true }).click()
 
   const diff = await window.diff()
-  const touched = [...diff.added, ...diff.changed.map(change => change.new)]
-  expect(touched.some(element => (element.name ?? "").includes("Aiolia"))).toBe(true)
+  const touched = [...diff.added, ...diff.changed.map((change) => change.new)]
+  expect(touched.some((element) => (element.name ?? "").includes("Aiolia"))).toBe(true)
 })
 
 test("snapshot baselines stay isolated between real windows", async ({ hasgard, window }) => {
@@ -191,7 +192,7 @@ test("reports the page title and URL without a full state read", async ({ window
 // until CI ran it.
 test("resolves its own operating-system window id", async ({ hasgard, window }) => {
   const listing = await hasgard.windows()
-  const main = listing.find(entry => entry.label === "main")
+  const main = listing.find((entry) => entry.label === "main")
 
   if (process.platform !== "darwin") {
     expect(main?.nativeId).toBeUndefined()

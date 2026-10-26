@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto"
 import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises"
-import { resolve, join, relative } from "node:path"
+import { join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const [vendorArgument, workArgument] = process.argv.slice(2)
@@ -24,11 +24,11 @@ const sourcePaths = (await command("git", ["ls-files", "--cached", "--others", "
   .trim()
   .split("\n")
   .filter(
-    path => /\.(rs|toml|json|mjs|js|ts|html|css|lock)$/.test(path) && !path.startsWith("benchmarks/macos/results/")
+    (path) => /\.(rs|toml|json|mjs|js|ts|html|css|lock)$/.test(path) && !path.startsWith("benchmarks/macos/results/")
   )
-  .sort()
+  .toSorted()
 versions.hasgardSourceFiles = await Promise.all(
-  sourcePaths.map(async path => ({
+  sourcePaths.map(async (path) => ({
     path,
     sha256: createHash("sha256")
       .update(await readFile(join(root, path)))
@@ -44,8 +44,8 @@ for (const name of ["tauri-pilot", "tauri-playwright"]) {
   versions[name] = revision.trim()
   await cp(source, join(work, "vendor", name), {
     recursive: true,
-    filter: path =>
-      ![".git", "node_modules", "target", "dist"].some(part => relative(source, path).split("/").includes(part))
+    filter: (path) =>
+      ![".git", "node_modules", "target", "dist"].some((part) => relative(source, path).split("/").includes(part))
   })
 }
 await command("bun", ["run", "build"], join(root, "examples/fixture-app"), true)
@@ -183,10 +183,10 @@ async function command(program, args, cwd = root, visible = false) {
   const child = spawn(program, args, { cwd, stdio: visible ? "inherit" : ["ignore", "pipe", "pipe"] })
   let output = ""
   let error = ""
-  child.stdout?.on("data", chunk => {
+  child.stdout?.on("data", (chunk) => {
     output += chunk
   })
-  child.stderr?.on("data", chunk => {
+  child.stderr?.on("data", (chunk) => {
     error += chunk
   })
   const code = await new Promise((resolve, reject) => {

@@ -10,7 +10,7 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation, JsonObject,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool, ToolAnnotations,
+        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
     },
     service::{MaybeSendFuture, RequestContext, RoleServer},
     transport::stdio,
@@ -697,8 +697,8 @@ impl HasgardMcpServer {
 }
 
 impl ServerHandler for HasgardMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
                 Implementation::new("tauri-hasgard", env!("CARGO_PKG_VERSION"))
                     .with_title("tauri-hasgard")

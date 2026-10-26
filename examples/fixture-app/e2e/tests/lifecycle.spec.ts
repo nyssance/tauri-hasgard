@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { lstat, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
 import { HasgardProcess, HasgardRpcClient } from "@nyssance/tauri-hasgard"
 import { expect, test } from "@playwright/test"
 
@@ -91,15 +92,15 @@ async function runWorker(env: Record<string, string>): Promise<{ code: number | 
     { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], timeout: 75_000, killSignal: "SIGKILL" }
   )
   let output = ""
-  child.stdout.on("data", chunk => {
+  child.stdout.on("data", (chunk) => {
     output += String(chunk)
   })
-  child.stderr.on("data", chunk => {
+  child.stderr.on("data", (chunk) => {
     output += String(chunk)
   })
   return new Promise((resolve, reject) => {
     child.once("error", reject)
-    child.once("exit", code => resolve({ code, output }))
+    child.once("exit", (code) => resolve({ code, output }))
   })
 }
 

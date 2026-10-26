@@ -1,6 +1,6 @@
 {
   "name": "@nyssance/tauri-hasgard",
-  "version": "0.6.0-alpha.2",
+  "version": "0.6.0-alpha.3",
   "description": "Playwright Test fixtures for native Tauri Hasgard automation",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,24 +18,23 @@
     "NOTICE.md"
   ],
   "scripts": {
-    "build": "bun node_modules/tsup/dist/cli-default.js src/index.ts src/process-supervisor.js --format esm --outDir dist --clean && bun node_modules/typescript/bin/tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true",
+    "build": "bun run clean && bun build src/index.ts src/process-supervisor.js --target node --format esm --outdir dist --packages external && bun node_modules/typescript/bin/tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true",
     "dev": "bun run --parallel dev:js dev:types",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check --no-script",
     "clean": "rm -rf dist",
-    "dev:js": "tsup src/index.ts src/process-supervisor.js --format esm --outDir dist --watch",
+    "dev:js": "bun build src/index.ts src/process-supervisor.js --target node --format esm --outdir dist --packages external --watch",
     "dev:types": "tsc -p tsconfig.json --noEmit false --emitDeclarationOnly --declaration true --watch"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.61.1 <2"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1",
-    "@types/node": "^26.1.0",
-    "tsup": "^8.5.1",
+    "@playwright/test": "1.64.1",
+    "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.5"
   },
   "keywords": [
     "tauri",

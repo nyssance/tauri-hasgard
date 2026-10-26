@@ -1,7 +1,8 @@
 import { createConnection, type Socket } from "node:net"
 import { createInterface, type Interface } from "node:readline"
-import { parseRpcResponse, type RpcResponse } from "./protocol.js"
+
 import { MAX_REQUEST_BYTES } from "./protocol-limits.js"
+import { parseRpcResponse, type RpcResponse } from "./protocol.js"
 import type { JsonValue } from "./types.js"
 
 export class HasgardRpcError extends Error {
@@ -70,13 +71,13 @@ export class HasgardRpcClient {
     }
 
     this.lines = createInterface({ input: socket })
-    this.lines.on("line", line => this.handleLine(line))
+    this.lines.on("line", (line) => this.handleLine(line))
     socket.on("close", () => {
       if (this.socket !== socket) return
       this.rejectPending(new Error("Hasgard socket closed"))
       this.disconnect()
     })
-    socket.on("error", error => {
+    socket.on("error", (error) => {
       if (this.socket === socket) this.rejectPending(error)
     })
   }
@@ -96,12 +97,12 @@ export class HasgardRpcClient {
 
     const result = new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
-        resolve: value => resolve(value as T),
+        resolve: (value) => resolve(value as T),
         reject
       })
     })
 
-    socket.write(line, error => {
+    socket.write(line, (error) => {
       if (!error) return
       const pending = this.pending.get(id)
       if (!pending) return

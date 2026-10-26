@@ -1,7 +1,9 @@
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
+
 import { createHasgardTest } from "@nyssance/tauri-hasgard"
 import { expect as baseExpect, test as baseTest } from "@playwright/test"
+
 import { executablePath } from "../fixtures.js"
 
 const endpoint = process.env.HASGARD_LIFECYCLE_ENDPOINT
@@ -20,7 +22,7 @@ const { test, expect } = createHasgardTest({
 test("managed teardown", async ({ hasgard, window }) => {
   const pid = await window.invoke<number>("fixture_process_id", {})
   await writeFile(pidFile, String(pid))
-  expect((await hasgard.windows()).map(item => item.label)).toEqual(expect.arrayContaining(["main", "settings"]))
+  expect((await hasgard.windows()).map((item) => item.label)).toEqual(expect.arrayContaining(["main", "settings"]))
   await expect(window.getByRole("button", { name: "Open dialog", exact: true })).toBeVisible()
   if (process.env.HASGARD_LIFECYCLE_FAILURE === "kill") process.kill(process.pid, "SIGKILL")
   if (process.env.HASGARD_LIFECYCLE_FAILURE === "crash") {

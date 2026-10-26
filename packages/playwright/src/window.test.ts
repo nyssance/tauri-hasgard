@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest"
+
 import { HasgardRpcClient, HasgardRpcError } from "./rpc-client.js"
 import { HasgardApplication, HasgardWindow } from "./window.js"
 
@@ -6,7 +7,7 @@ test("waitForWindow does not return an about:blank or loading webview", async ()
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   let stateCall = 0
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "windows.list") {
       return {
         windows: [
@@ -42,7 +43,7 @@ test("waitForWindowReady polls the current document instead of installing one lo
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   let countCall = 0
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "windows.list") {
       return {
         windows: [
@@ -88,7 +89,7 @@ test("window readiness retries only the explicit handshake-pending error", async
   const denied = new HasgardRpcError(-32603, "access denied", undefined)
   let attempts = 0
   let failure: Error = pending
-  vi.spyOn(rpc, "call").mockImplementation(async method => {
+  vi.spyOn(rpc, "call").mockImplementation(async (method) => {
     if (method === "windows.list") return { windows: [{ label: "main", url: "tauri://localhost/", title: "App" }] }
     if (method === "state") {
       attempts++
@@ -204,7 +205,7 @@ test("dragTo resolves source and destination inside one window lock", async () =
   const rpc = new HasgardRpcClient("/unused")
   const methods: string[] = []
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     methods.push(method)
     if (method === "snapshot") {
       return {
@@ -298,7 +299,7 @@ test("watch maps millisecond options onto the bridge parameter names", async () 
 test("screenshotNative resolves the OS window id from the window's own label", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "windows.list") {
       return {
         windows: [
@@ -374,7 +375,7 @@ test("recorder.stop returns the recorded actions with their extra params", async
 test("getByText resolves through the query op, not through a snapshot name", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "query") {
       return { elements: [{ ref: "e9", role: "button", depth: 2, name: "Save" }] }
     }
@@ -426,7 +427,7 @@ test("exact is forwarded only when set, and getByTestId never sends it", async (
 test("an ambiguous text locator refuses to pick one, and nth narrows it", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "query") {
       return {
         elements: [
@@ -502,7 +503,7 @@ test("nth sends the ordinal with the selector so resolution and action share a r
 test("nth on a role locator picks from the snapshot instead of erroring on ambiguity", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "snapshot") {
       return {
         elements: [
@@ -542,7 +543,7 @@ test("waitFor on an indexed locator polls instead of waiting on the bare selecto
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   let counted = 0
-  call.mockImplementation(async method => {
+  call.mockImplementation(async (method) => {
     if (method === "count") {
       counted += 1
       return { count: counted < 2 ? 1 : 4 }
@@ -578,7 +579,7 @@ test("keeps snapshot and action atomic for concurrent semantic locators in one w
   const rpc = new HasgardRpcClient("/unused")
   const methods: string[] = []
   let snapshot = 0
-  vi.spyOn(rpc, "call").mockImplementation(async method => {
+  vi.spyOn(rpc, "call").mockImplementation(async (method) => {
     methods.push(method)
     if (method === "snapshot") {
       snapshot += 1
@@ -616,7 +617,7 @@ function filterableRpc(matches: string[], surviving: string[]) {
     if (method === "filter") {
       const refs = (params as { refs: string[] }).refs
       return {
-        elements: refs.filter(ref => surviving.includes(ref)).map((ref, depth) => ({ ref, role: "listitem", depth }))
+        elements: refs.filter((ref) => surviving.includes(ref)).map((ref, depth) => ({ ref, role: "listitem", depth }))
       }
     }
     if (method === "count") return { count: matches.length }
@@ -662,7 +663,7 @@ test("filters accumulate so a chain applies every predicate", async () => {
 
   await window.locator("li").filter({ hasText: "a" }).filter({ hasNotText: "b" }).count()
 
-  expect(seen.filter(method => method === "filter")).toHaveLength(2)
+  expect(seen.filter((method) => method === "filter")).toHaveLength(2)
 })
 
 test("filter stops calling once nothing survives", async () => {
@@ -671,7 +672,7 @@ test("filter stops calling once nothing survives", async () => {
 
   expect(await window.locator("li").filter({ hasText: "a" }).filter({ hasText: "b" }).count()).toBe(0)
   // The second filter has nothing to narrow; issuing it would be a wasted trip.
-  expect(seen.filter(method => method === "filter")).toHaveLength(1)
+  expect(seen.filter((method) => method === "filter")).toHaveLength(1)
 })
 
 test("filter applies before nth so first() is the first surviving element", async () => {
@@ -1008,7 +1009,7 @@ function routeRecorder(reply: unknown = { id: 1, pattern: "**", action: "fulfill
   const sent: [string, unknown][] = []
   vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
     sent.push([method, params])
-    return reply as never
+    return reply
   })
   return { rpc, sent }
 }

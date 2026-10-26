@@ -1,5 +1,6 @@
 import { expect as playwrightExpect } from "@playwright/test"
 import { expect, test } from "vitest"
+
 import { createHasgardExpect } from "./expect.js"
 import type { HasgardLocator } from "./window.js"
 
@@ -50,7 +51,7 @@ test("zero timeout performs one read and invalid timeouts reject", async () => {
   } as unknown as HasgardLocator
   await hasgardExpect(locator).toBeVisible({ timeout: 0 })
   expect(reads).toBe(1)
-  for (const timeout of [-1, NaN, Infinity]) {
+  for (const timeout of [-1, Number.NaN, Infinity]) {
     await expect(hasgardExpect(locator).not.toBeVisible({ timeout })).rejects.toThrow("finite non-negative")
   }
 })

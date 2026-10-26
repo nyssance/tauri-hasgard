@@ -37,7 +37,7 @@ const result = {
   cargoLockSha256: setup.cargoLockSha256,
   harnessSha256: Object.fromEntries(
     await Promise.all(
-      ["setup.mjs", "run.mjs", "report.mjs"].map(async file => [
+      ["setup.mjs", "run.mjs", "report.mjs"].map(async (file) => [
         file,
         createHash("sha256")
           .update(await readFile(new URL(file, import.meta.url)))
@@ -47,7 +47,7 @@ const result = {
   ),
   binaries: Object.fromEntries(
     await Promise.all(
-      tools.map(async name => [
+      tools.map(async (name) => [
         name,
         createHash("sha256")
           .update(await readFile(setup.binaries[name]))
@@ -97,10 +97,10 @@ for (let round = 0; round < rounds; round++) {
     })
     const applicationPid = child.pid
     if (!Number.isSafeInteger(applicationPid) || applicationPid <= 1) throw new Error("Application failed to spawn")
-    child.stdout.on("data", chunk => {
+    child.stdout.on("data", (chunk) => {
       logs = (logs + chunk).slice(-16_384)
     })
-    child.stderr.on("data", chunk => {
+    child.stderr.on("data", (chunk) => {
       logs = (logs + chunk).slice(-16_384)
     })
     let client
@@ -206,7 +206,7 @@ for (let round = 0; round < rounds; round++) {
         try {
           const id =
             tool === "hasgard"
-              ? (await client.call({ method: "windows.list" }, tool)).windows.find(window => window.label === "main")
+              ? (await client.call({ method: "windows.list" }, tool)).windows.find((window) => window.label === "main")
                   .native_id
               : await adapter.eval('window.__TAURI_INTERNALS__.invoke("benchmark_window_id")')
           assert.ok(Number.isSafeInteger(id) && id > 0, "native window ID must be available")
@@ -281,7 +281,7 @@ for (let round = 0; round < rounds; round++) {
           // A closed transport may be a native crash. Capture its actual exit
           // signal before the harness sends its own termination signal.
           if (client?.broken)
-            await until(() => child.exitCode !== null || child.signalCode !== null, 5_000).catch(error => {
+            await until(() => child.exitCode !== null || child.signalCode !== null, 5_000).catch((error) => {
               result.capabilities.push({ round, tool, probe: "exit_after_transport_loss", error: error.message })
             })
           result.capabilities.push({
@@ -325,7 +325,7 @@ function makeAdapter(tool, client) {
           : { method: "fill", params: { selector, value: text, window: "main" } },
         tool
       ),
-    click: selector =>
+    click: (selector) =>
       client.call(
         tool === "playwright"
           ? { type: "click", selector, window: "main", timeout_ms: 1000 }
@@ -342,7 +342,7 @@ async function connectReady(path, child) {
     socket = createConnection({ path })
     return new Promise((resolve, reject) => {
       socket.once("connect", () => resolve(true))
-      socket.once("error", error => {
+      socket.once("error", (error) => {
         socket.destroy()
         if (["ENOENT", "ECONNREFUSED"].includes(error.code)) resolve(false)
         else reject(error)
@@ -351,7 +351,7 @@ async function connectReady(path, child) {
   }, 15_000)
   let pending
   let broken
-  const fail = error => {
+  const fail = (error) => {
     broken = error
     if (pending) {
       clearTimeout(pending.timer)
@@ -364,7 +364,7 @@ async function connectReady(path, child) {
   socket.on("close", () => fail(new Error("RPC connection closed")))
   let id = 0
   const lines = createInterface({ input: socket })
-  lines.on("line", line => {
+  lines.on("line", (line) => {
     if (!pending) return
     const { resolve, reject, timer, tool, requestId } = pending
     clearTimeout(timer)
@@ -396,7 +396,7 @@ async function connectReady(path, child) {
         const timer = setTimeout(() => fail(new Error(`RPC response exceeded ${timeoutMs} ms`)), timeoutMs)
         pending = { resolve, reject, timer, tool, requestId }
         socket.write(
-          JSON.stringify(tool === "playwright" ? request : { jsonrpc: "2.0", id: requestId, ...request }) + "\n"
+          `${JSON.stringify(tool === "playwright" ? request : { jsonrpc: "2.0", id: requestId, ...request })}\n`
         )
       })
     },

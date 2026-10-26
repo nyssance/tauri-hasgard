@@ -5,7 +5,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+
 import { HasgardProcess } from "./process-manager.js"
 
 // These are real OS processes and sockets, testing lifecycle management only.
@@ -181,7 +183,7 @@ describe.skipIf(process.platform === "win32")("Unix process lifecycle", () => {
     await rm(endpoint)
     await launch(serving)
     await rm(endpoint)
-    const replacement = createServer(socket => socket.end())
+    const replacement = createServer((socket) => socket.end())
     await new Promise<void>((resolve, reject) => {
       replacement.once("error", reject)
       replacement.listen(endpoint, resolve)
@@ -197,7 +199,7 @@ describe.skipIf(process.platform === "win32")("Unix process lifecycle", () => {
         })
       })
     } finally {
-      await new Promise<void>((resolve, reject) => replacement.close(error => (error ? reject(error) : resolve())))
+      await new Promise<void>((resolve, reject) => replacement.close((error) => (error ? reject(error) : resolve())))
     }
   })
 

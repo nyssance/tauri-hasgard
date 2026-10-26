@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
+
 import { expect, fixtureEndpoint, test } from "../fixtures.js"
 
 const cli = join(import.meta.dirname, "../../../../target/debug/tauri-hasgard")
@@ -10,10 +11,10 @@ async function command(endpoint: string, args: string[]) {
   const child = spawn(cli, ["--socket", endpoint, "--window", "main", "--json", ...args])
   let stdout = ""
   let stderr = ""
-  child.stdout.on("data", data => {
+  child.stdout.on("data", (data) => {
     stdout += data
   })
-  child.stderr.on("data", data => {
+  child.stderr.on("data", (data) => {
     stderr += data
   })
   const timer = setTimeout(() => child.kill("SIGKILL"), 15_000)
@@ -64,10 +65,10 @@ test("CLI preserves native press completion and structured failure data", async 
 test("MCP stdio drives the same native app and preserves RPC error details", async ({ window }, testInfo) => {
   test.skip(process.platform !== "darwin", "Native keyboard integration")
   const child = spawn(cli, ["--socket", fixtureEndpoint(testInfo.workerIndex), "--window", "main", "mcp"])
-  const closed = new Promise<void>(resolve => child.once("close", () => resolve()))
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
   const lines = createInterface({ input: child.stdout })
   let stderr = ""
-  child.stderr.on("data", data => {
+  child.stderr.on("data", (data) => {
     stderr += data
   })
   let id = 0
@@ -78,7 +79,7 @@ test("MCP stdio drives the same native app and preserves RPC error details", asy
   }
   child.on("error", failAll)
   child.on("close", () => failAll(new Error(`MCP exited: ${stderr}`)))
-  lines.on("line", line => {
+  lines.on("line", (line) => {
     try {
       const response = JSON.parse(line)
       const request = pending.get(response.id)

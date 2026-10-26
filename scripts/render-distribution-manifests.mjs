@@ -11,8 +11,8 @@ if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`invalid release tag: ${tag}`
 const version = tag.slice(1)
 const repository = "https://github.com/nyssance/tauri-hasgard"
 const release = `${repository}/releases/download/${tag}`
-const asset = target => `tauri-hasgard-${version}-${target}`
-const hash = name =>
+const asset = (target) => `tauri-hasgard-${version}-${target}`
+const hash = (name) =>
   createHash("sha256")
     .update(readFileSync(join(assetDirectory, name)))
     .digest("hex")

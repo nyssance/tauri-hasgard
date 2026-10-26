@@ -15,7 +15,7 @@ import { expect as playwrightExpect, test as playwrightTest } from "@playwright/
 export const { test, expect } = createHasgardTest({
   test: playwrightTest,
   expect: playwrightExpect,
-  socketPath: workerIndex => `/tmp/my-app-e2e-${workerIndex}.sock`,
+  socketPath: (workerIndex) => `/tmp/my-app-e2e-${workerIndex}.sock`,
   windowLabel: "main",
   readySelector: '[data-app-ready="true"]',
   launch: {

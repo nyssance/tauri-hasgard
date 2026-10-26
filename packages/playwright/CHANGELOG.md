@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0-alpha.3 — 2026-10-26
+
+- Build the package and process supervisor with Bun, retaining TypeScript declaration output.
+- Update Playwright to 1.64.1, TypeScript to 7.0.2, and Vitest to 5.0.5.
+- Apply modern JavaScript conventions and Bun/ts7-lint checks throughout the client and tests.
+
 ## 0.4.1 — 2026-09-07
 
 - Keep waiting for process-group disappearance when a zero-signal probe returns

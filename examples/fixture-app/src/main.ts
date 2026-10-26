@@ -18,7 +18,9 @@ save.addEventListener("click", () => {
 })
 openDialog.addEventListener("click", () => dialog.showModal())
 closeDialog.addEventListener("click", () => dialog.close())
-openSettings.addEventListener("click", async () => invoke("open_settings"))
+openSettings.addEventListener("click", () => {
+  void invoke("open_settings").catch(reportError)
+})
 
 const probe = <T extends HTMLElement>(id: string): T => {
   const found = document.querySelector<T>(id)
@@ -63,7 +65,7 @@ scroller.style.overflow = "auto"
 
 const keyProbe = probe<HTMLInputElement>("#key-probe")
 const keyLog = probe<HTMLParagraphElement>("#key-log")
-keyProbe.addEventListener("keydown", event => {
+keyProbe.addEventListener("keydown", (event) => {
   const modifiers = [
     event.ctrlKey ? "ctrl" : "",
     event.shiftKey ? "shift" : "",
@@ -76,9 +78,9 @@ keyProbe.addEventListener("keydown", event => {
 // Read the FileList back out of the input so a test can assert the page saw
 // real File objects — names and sizes — rather than a lookalike shape.
 const describeFiles = (input: HTMLInputElement): string => {
-  const files = Array.from(input.files ?? [])
+  const files = [...(input.files ?? [])]
   if (files.length === 0) return "none"
-  return files.map(file => `${file.name}:${file.size}`).join(",")
+  return files.map((file) => `${file.name}:${file.size}`).join(",")
 }
 const upload = probe<HTMLInputElement>("#upload")
 const uploadLog = probe<HTMLParagraphElement>("#upload-log")
@@ -107,7 +109,7 @@ const sizeScroller = (id: string, innerId: string): HTMLDivElement => {
 sizeScroller("#wheel-scroller", "#wheel-inner")
 // Cancels the wheel, so the event is observed but the scroll must not happen —
 // the pair is what separates "listener ran" from "scrollport moved".
-sizeScroller("#wheel-blocked", "#wheel-blocked-inner").addEventListener("wheel", event => {
+sizeScroller("#wheel-blocked", "#wheel-blocked-inner").addEventListener("wheel", (event) => {
   event.preventDefault()
 })
 
@@ -120,7 +122,7 @@ const detailLog = probe<HTMLParagraphElement>("#detail-log")
 const mouseTarget = probe<HTMLButtonElement>("#mouse-target")
 const mouseSeen: string[] = []
 for (const type of ["click", "auxclick", "contextmenu", "dblclick"]) {
-  mouseTarget.addEventListener(type, event => {
+  mouseTarget.addEventListener(type, (event) => {
     event.preventDefault()
     mouseSeen.push(`${type}:${(event as MouseEvent).button}`)
     mouseLog.textContent = mouseSeen.join(" ")
@@ -139,11 +141,11 @@ probe<HTMLButtonElement>("#mouse-reset").addEventListener("click", () => {
 const selectLog = probe<HTMLParagraphElement>("#select-log")
 const selected = new Set<string>()
 for (const row of document.querySelectorAll<HTMLLIElement>("#rows .row")) {
-  row.addEventListener("click", event => {
+  row.addEventListener("click", (event) => {
     const id = row.dataset.row ?? "?"
     if (!event.shiftKey && !event.metaKey) selected.clear()
     selected.add(id)
-    selectLog.textContent = [...selected].sort().join(",")
+    selectLog.textContent = [...selected].toSorted().join(",")
   })
 }
 
@@ -154,7 +156,7 @@ const hitPad = probe<HTMLDivElement>("#hit-pad")
 hitPad.style.width = "200px"
 hitPad.style.height = "100px"
 hitPad.style.border = "1px solid currentColor"
-hitPad.addEventListener("click", event => {
+hitPad.addEventListener("click", (event) => {
   const rect = hitPad.getBoundingClientRect()
   hitLog.textContent = `${Math.round(event.clientX - rect.left)},${Math.round(event.clientY - rect.top)}`
 })
@@ -167,7 +169,11 @@ probe<HTMLButtonElement>("#pay").addEventListener("click", () => {
 // Report the status and body the page received, so a route test asserts on what
 // the application saw rather than on the rule it registered.
 const netLog = probe<HTMLParagraphElement>("#net-log")
-probe<HTMLButtonElement>("#do-fetch").addEventListener("click", async () => {
+probe<HTMLButtonElement>("#do-fetch").addEventListener("click", () => {
+  void fetchProbe()
+})
+
+async function fetchProbe() {
   try {
     const response = await fetch("/api/user")
     // Truncated: an unrouted request gets the SPA fallback, and logging a whole
@@ -176,7 +182,7 @@ probe<HTMLButtonElement>("#do-fetch").addEventListener("click", async () => {
   } catch (error) {
     netLog.textContent = `fetch:error:${error instanceof Error ? error.name : "unknown"}`
   }
-})
+}
 probe<HTMLButtonElement>("#do-xhr").addEventListener("click", () => {
   const xhr = new XMLHttpRequest()
   xhr.open("GET", "/api/user")
