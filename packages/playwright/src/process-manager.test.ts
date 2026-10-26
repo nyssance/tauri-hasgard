@@ -204,13 +204,15 @@ describe.skipIf(process.platform === "win32")("Unix process lifecycle", () => {
   })
 
   test("retains the actual crash signal and stderr after readiness", async () => {
+    // SIGKILL cannot be intercepted by the child runtime's crash reporter.
+    // The native Tauri E2E suite separately covers SIGTRAP application crashes.
     await launch(
-      `${serving}\nprocess.on("SIGUSR1", () => { process.stderr.write("application crash marker\\n", () => process.kill(process.pid, "SIGTRAP")); });`
+      `process.on("SIGUSR1", () => { require("node:fs").writeSync(2, "application crash marker\\n"); process.kill(process.pid, "SIGKILL"); });\n${serving}`
     )
     const pid = await pidFrom()
     process.kill(pid, "SIGUSR1")
     const diagnostics = await manager.diagnostics(2_000)
-    expect(diagnostics.exit).toEqual({ code: null, signal: "SIGTRAP" })
+    expect(diagnostics.exit).toEqual({ code: null, signal: "SIGKILL" })
     expect(diagnostics.stderr).toContain("application crash marker")
   })
 
