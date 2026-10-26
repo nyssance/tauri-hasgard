@@ -1,3 +1,8 @@
+# 0.6.0-alpha.4 (2026-10-26)
+
+- Supersede the unpublished alpha.3 release attempt with its dependency and tooling updates.
+- Use an uncatchable signal in the JavaScript process diagnostics test so runtime crash handlers do not delay exit reporting. Native Tauri SIGTRAP coverage remains unchanged.
+
 # 0.6.0-alpha.3 (2026-10-26)
 
 - Update Tauri/Wry to 3.0.0-alpha.5 and refresh Rust and JavaScript dependencies.

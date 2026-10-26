@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0-alpha.4 — 2026-10-26
+
+- Supersede the unpublished alpha.3 release attempt.
+- Keep process exit diagnostics coverage independent of runtime crash handlers.
+
 ## 0.6.0-alpha.3 — 2026-10-26
 
 - Build the package and process supervisor with Bun, retaining TypeScript declaration output.
