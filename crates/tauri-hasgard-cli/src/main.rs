@@ -387,7 +387,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
                 with_scope(Some(payload), Scope { window: scope.window, ..Scope::default() })
             };
             // Without an id the plugin renders the scoped webview itself
-            // (WKWebView `takeSnapshot:`). A plugin older than 0.6.0-alpha.6
+            // (WKWebView `takeSnapshot:`). A plugin older than 0.6.1
             // still insists on `window_id`; resolve it from the window list
             // and retry so mixed CLI/plugin versions keep working.
             match client.call("screenshot_native", request(window_id)).await {

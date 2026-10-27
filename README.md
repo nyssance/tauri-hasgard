@@ -7,8 +7,8 @@ Tauri Hasgard is one automation surface for Tauri 3 Wry applications. It combine
 The project is named after Hasgard, the Taurus Gold Saint from _Saint Seiya: The Lost Canvas_: strong at the boundary, predictable under pressure.
 
 The current development line targets Tauri 3 with the Wry runtime. Tauri 2 users
-can continue using the previously published 0.5.x line. The 0.6.0-alpha.6 prerelease
-is available through the explicit version and the npm `next` tag.
+can continue using the previously published 0.5.x line. 0.6.1 is the current release
+on crates.io, npm, Homebrew and Scoop.
 CEF is not supported by this Wry-specific native keyboard integration.
 
 ## Packages
@@ -52,14 +52,14 @@ Hasgard covers the other half — one running application, real native webviews,
 ## 1. Register the required Tauri plugin
 
 ```sh
-cargo add tauri-plugin-hasgard@0.6.0-alpha.6
+cargo add tauri-plugin-hasgard@0.6.1
 ```
 
 ```toml
 [dependencies]
 tauri = "3.0.0-alpha.5"
 tauri-runtime-wry = "3.0.0-alpha.5"
-tauri-plugin-hasgard = "0.6.0-alpha.6"
+tauri-plugin-hasgard = "0.6.1"
 ```
 
 ```rust
