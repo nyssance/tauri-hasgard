@@ -696,10 +696,13 @@ export class HasgardWindow {
    * callers do not have to discover it themselves.
    */
   async screenshotNative(options: NativeScreenshotOptions): Promise<NativeScreenshot> {
-    const windowId = options.windowId ?? (await this.nativeId())
+    // Without a window id the plugin renders this webview through WKWebView
+    // `takeSnapshot:` (backend "wkwebview"): exact pixels, scrolled content
+    // included, no screen-recording permission. An explicit id captures that
+    // on-screen window at the window-server level instead.
     const value = expectRecord(
       await this.rpc.call("screenshot_native", {
-        window_id: windowId,
+        ...(options.windowId === undefined ? {} : { window_id: options.windowId }),
         output_path: options.outputPath
       }),
       "screenshot_native result"

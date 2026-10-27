@@ -90,32 +90,6 @@ impl HasgardMcpServer {
 
     /// Look up the operating-system window id backing a Tauri webview label.
     ///
-    /// `screenshot_native` captures by OS window id, which an agent cannot
-    /// discover on its own — before `windows.list` reported it, the only way to
-    /// learn one was to fire a deliberately failing capture and read the ids
-    /// back out of the error payload.
-    async fn resolve_native_window_id(&self, window: Option<&str>) -> Result<u32, McpError> {
-        let label = window.unwrap_or("main");
-        let listing = self
-            .call_app("windows.list", None, None)
-            .await
-            .map_err(|error| invalid_params(format!("could not list windows: {error}")))?;
-        listing
-            .get("windows")
-            .and_then(Value::as_array)
-            .and_then(|windows| {
-                windows.iter().find(|entry| entry.get("label").and_then(Value::as_str) == Some(label))
-            })
-            .and_then(|entry| entry.get("native_id"))
-            .and_then(Value::as_u64)
-            .and_then(|id| u32::try_from(id).ok())
-            .ok_or_else(|| {
-                invalid_params(format!(
-                    "window '{label}' has no native window id — it may be closed, or this platform may not support native capture"
-                ))
-            })
-    }
-
     async fn call_app_tool(
         &self, method: &'static str, params: Option<Value>, window: Option<String>,
     ) -> Result<CallToolResult, McpError> {
@@ -295,17 +269,13 @@ impl HasgardMcpServer {
                     .await
             }
             "screenshot_native" => {
-                // Capture is addressed by OS window id, which an agent has no
-                // way to discover. Resolve it from the routed webview label so
-                // the common case needs nothing but an output path.
-                let window_id = match optional_u32(&args, "window_id")? {
-                    Some(id) => id,
-                    None => self.resolve_native_window_id(window.as_deref()).await?,
-                };
-                let mut payload = json!({
-                    "window_id": window_id,
-                    "output_path": required_string(&args, "output_path")?,
-                });
+                // Without an id the plugin renders the routed webview through
+                // WebKit itself, so the common case needs nothing but an output
+                // path. An explicit id captures that whole on-screen window.
+                let mut payload = json!({ "output_path": required_string(&args, "output_path")? });
+                if let Some(window_id) = optional_u32(&args, "window_id")? {
+                    payload["window_id"] = json!(window_id);
+                }
                 if let Some(format) = optional_string(&args, "format")? {
                     payload["format"] = json!(format);
                 }
@@ -1075,7 +1045,7 @@ fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "screenshot_native",
-            description: "Capture a native window by `window_id` and write a PNG to `output_path`. Returns path + metadata; never inlines bytes.",
+            description: "Write a PNG of rendered pixels to `output_path`: the routed webview via WebKit when `window_id` is omitted, or the on-screen window with that id. Returns path + metadata; never inlines bytes.",
             schema: hasgard_screenshot_schema,
             read_only: false,
             destructive: false,
@@ -1812,7 +1782,7 @@ fn hasgard_screenshot_schema() -> Arc<JsonObject> {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": u32::MAX,
-                    "description": "Native window id (e.g. `CGWindowID` on macOS) to capture. Must fit in u32.",
+                    "description": "Native window id (e.g. `CGWindowID` on macOS) to capture a whole window. Omit to render the routed webview through WebKit (exact pixels, scrolled content included, no screen-recording permission). Must fit in u32.",
                 }),
             ),
             (

@@ -1269,16 +1269,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dispatch_screenshot_native_rejects_missing_window_id() {
-        // The native method must validate `window_id` before any platform
-        // path is touched, so this works the same on every host.
+    async fn test_dispatch_screenshot_native_without_window_id_is_a_webview_capture() {
+        // Omitting `window_id` targets the scoped webview. Unit tests register
+        // no capture and non-macOS hosts have none, so the request passes
+        // validation and fails as a capture, never as a parameter error.
         let engine = EvalEngine::new();
         let params = json!({"output_path": "/tmp/x.png"});
         let err = dispatch("screenshot_native", Some(&params), &engine, None, None, None, &Recorder::new())
             .await
-            .expect_err("missing window_id must surface as Err");
-        assert_eq!(err.code, -32602);
-        assert!(err.message.contains("window_id"), "error message must reference window_id");
+            .expect_err("no capture is registered in tests");
+        assert_eq!(err.code, -32603);
+        assert!(!err.message.contains("window_id"), "omitting window_id must not be a parameter error");
     }
 
     #[tokio::test]

@@ -1,10 +1,13 @@
 //! JSON-RPC handler for `screenshot_native`.
 //!
-//! The contract (path-only, `window_id`-targeted, atomic write, TCC-fallback
-//! surfaced as metadata) is implemented in [`handle_screenshot`]. The handler
-//! validates the request shape on every platform, then dispatches to the
-//! macOS-only native capture pipeline; non-macOS callers always receive
-//! `PERMISSION_DENIED` so the contract surface is identical on every host.
+//! The contract (path-only, atomic write, TCC-fallback surfaced as metadata)
+//! is implemented in [`handle_screenshot`]. Without `window_id` the request
+//! targets the scoped webview and `WebKit` renders the pixels itself
+//! (`WKWebView` `takeSnapshot:`, no screen-recording permission); with
+//! `window_id` it captures that on-screen window through `screencapture` or
+//! `CGWindowList`. The handler validates the request shape on every platform,
+//! then dispatches to the macOS-only capture pipeline; non-macOS callers always
+//! receive `PERMISSION_DENIED` so the contract surface is identical on every host.
 
 #[cfg(target_os = "macos")]
 use std::path::Path;
@@ -51,8 +54,18 @@ fn rpc_error(rpc_code: i32, domain: &str, message: impl Into<String>, extras: Va
 /// validation already enforced by the validators below.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code, reason = "fields are read by the macOS-only capture pipeline"))]
 struct ScreenshotRequest {
-    window_id: u32,
+    target: ScreenshotTarget,
     output_path: std::path::PathBuf,
+}
+
+/// What a `screenshot_native` request captures.
+#[derive(Debug, PartialEq, Eq)]
+enum ScreenshotTarget {
+    /// The webview of the given window label (`None` means the default window),
+    /// rendered by `WebKit` itself.
+    Webview(Option<String>),
+    /// An on-screen window by platform id, captured at the window-server level.
+    NativeWindow(u32),
 }
 
 /// Validate the request envelope. Order of checks is fixed by the contract:
@@ -83,24 +96,29 @@ fn parse_request(params: Option<&Value>) -> Result<ScreenshotRequest, RpcError> 
         ));
     }
 
-    let window_id_value = obj.get("window_id").ok_or_else(|| {
-        rpc_error(RPC_INVALID_PARAMS, codes::INVALID_PARAMS, "screenshot requires a numeric \"window_id\"", Value::Null)
-    })?;
-    let window_id_u64 = window_id_value.as_u64().ok_or_else(|| {
-        rpc_error(
-            RPC_INVALID_PARAMS,
-            codes::INVALID_PARAMS,
-            "\"window_id\" must be a non-negative integer",
-            Value::Null,
-        )
-    })?;
-    let window_id = u32::try_from(window_id_u64).map_err(|_| {
-        rpc_error(RPC_INVALID_PARAMS, codes::INVALID_PARAMS, "\"window_id\" overflows u32", Value::Null)
-    })?;
+    let target = match obj.get("window_id") {
+        None | Some(Value::Null) => {
+            ScreenshotTarget::Webview(obj.get("window").and_then(Value::as_str).map(str::to_owned))
+        }
+        Some(value) => {
+            let window_id_u64 = value.as_u64().ok_or_else(|| {
+                rpc_error(
+                    RPC_INVALID_PARAMS,
+                    codes::INVALID_PARAMS,
+                    "\"window_id\" must be a non-negative integer",
+                    Value::Null,
+                )
+            })?;
+            let window_id = u32::try_from(window_id_u64).map_err(|_| {
+                rpc_error(RPC_INVALID_PARAMS, codes::INVALID_PARAMS, "\"window_id\" overflows u32", Value::Null)
+            })?;
+            ScreenshotTarget::NativeWindow(window_id)
+        }
+    };
 
     let output_path = parse_output_path(obj)?;
 
-    Ok(ScreenshotRequest { window_id, output_path })
+    Ok(ScreenshotRequest { target, output_path })
 }
 
 /// Pull `output_path` out of the request payload and apply the security
@@ -208,7 +226,11 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
         EnumeratedLayerZeroWindows, ScreenshotBackend, ScreenshotError, enumerate_layer_zero_windows, selected_backend,
     };
 
-    let ScreenshotRequest { window_id, output_path } = req;
+    let ScreenshotRequest { target, output_path } = req;
+    let window_id = match target {
+        ScreenshotTarget::Webview(label) => return capture_webview(label.as_deref(), &output_path),
+        ScreenshotTarget::NativeWindow(window_id) => window_id,
+    };
 
     // Single pass over the on-screen window list collects both the
     // `available_windows` payload for WINDOW_NOT_FOUND and the target's
@@ -362,6 +384,63 @@ fn cleanup_tmp(path: &Path) {
     }
 }
 
+/// Render the scoped webview through `WebKit` and write it atomically.
+#[cfg(target_os = "macos")]
+fn capture_webview(label: Option<&str>, output_path: &Path) -> Result<Value, RpcError> {
+    let capture = super::snapshot_fn().ok_or_else(|| {
+        rpc_error(
+            RPC_INTERNAL_ERROR,
+            codes::CAPTURE_FAILED,
+            "webview snapshot is not available in this process",
+            Value::Null,
+        )
+    })?;
+    let snapshot = capture(label).map_err(|message| {
+        if message.contains("not found") {
+            rpc_error(RPC_INVALID_PARAMS, codes::WINDOW_NOT_FOUND, message, Value::Null)
+        } else {
+            rpc_error(RPC_INTERNAL_ERROR, codes::CAPTURE_FAILED, message, Value::Null)
+        }
+    })?;
+
+    let tmp_path = tmp_path_for(output_path);
+    if let Err(err) = std::fs::write(&tmp_path, &snapshot.png) {
+        cleanup_tmp(&tmp_path);
+        return Err(rpc_error(
+            RPC_INTERNAL_ERROR,
+            codes::CAPTURE_FAILED,
+            format!("failed to write {}: {err}", tmp_path.display()),
+            Value::Null,
+        ));
+    }
+    let metadata = match read_png_metadata(&tmp_path) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            cleanup_tmp(&tmp_path);
+            return Err(err);
+        }
+    };
+    if let Err(err) = std::fs::rename(&tmp_path, output_path) {
+        cleanup_tmp(&tmp_path);
+        return Err(rpc_error(
+            RPC_INTERNAL_ERROR,
+            codes::CAPTURE_FAILED,
+            format!("failed to rename {} to {}: {err}", tmp_path.display(), output_path.display()),
+            Value::Null,
+        ));
+    }
+    Ok(json!({
+        "output_path": output_path.display().to_string(),
+        "window_id": snapshot.window_id,
+        "width": metadata.width,
+        "height": metadata.height,
+        "scale_factor": snapshot.scale_factor,
+        "byte_size": metadata.byte_size,
+        "backend": "wkwebview",
+        "tcc_denied": false,
+    }))
+}
+
 #[cfg(target_os = "macos")]
 fn capture_with_fallback(
     primary: super::ScreenshotBackend, window_id: u32, tmp_path: &Path,
@@ -485,11 +564,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_missing_window_id() {
-        let params = json!({"output_path": "/tmp/x.png"});
-        let err = handle_screenshot(Some(&params)).await.expect_err("must reject missing window_id");
+    async fn omitted_window_id_targets_the_webview() {
+        // Without `window_id` the request is a webview snapshot. No capture is
+        // registered in unit tests (and non-macOS hosts have no capture at
+        // all), so it fails past validation rather than as a parameter error.
+        let params = json!({"output_path": "/tmp/x.png", "window": "settings"});
+        let err = handle_screenshot(Some(&params)).await.expect_err("no capture is registered in tests");
+        assert_eq!(err.code, RPC_INTERNAL_ERROR);
+        assert!(
+            !err.message.contains("window_id"),
+            "omitting window_id must not be a parameter error, got: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_non_integer_window_id() {
+        let params = json!({"window_id": "2485", "output_path": "/tmp/x.png"});
+        let err = handle_screenshot(Some(&params)).await.expect_err("must reject a string window_id");
         assert_eq!(err.code, RPC_INVALID_PARAMS);
         assert!(err.message.contains("window_id"), "message must mention window_id, got: {}", err.message);
+    }
+
+    #[test]
+    fn parses_webview_target_with_window_label() {
+        let request =
+            parse_request(Some(&json!({"output_path": "/tmp/x.png", "window": "settings"}))).expect("valid request");
+        assert_eq!(request.target, ScreenshotTarget::Webview(Some("settings".to_owned())));
+        let request = parse_request(Some(&json!({"output_path": "/tmp/x.png"}))).expect("valid request");
+        assert_eq!(request.target, ScreenshotTarget::Webview(None));
+        let request =
+            parse_request(Some(&json!({"output_path": "/tmp/x.png", "window_id": 7}))).expect("valid request");
+        assert_eq!(request.target, ScreenshotTarget::NativeWindow(7));
     }
 
     #[tokio::test]

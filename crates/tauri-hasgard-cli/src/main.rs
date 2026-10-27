@@ -379,23 +379,24 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
             client.call("screenshot", with_scope(Some(json!({"path": path, "selector": selector})), scope)).await
         }
         Command::ScreenshotNative { window_id, output, format } => {
-            let window_id = match window_id {
-                Some(id) => id,
-                None => resolve_native_window_id(client, scope.window).await?,
+            let request = |window_id: Option<u32>| {
+                let mut payload = json!({ "output_path": output.display().to_string(), "format": format });
+                if let Some(window_id) = window_id {
+                    payload["window_id"] = json!(window_id);
+                }
+                with_scope(Some(payload), Scope { window: scope.window, ..Scope::default() })
             };
-            client
-                .call(
-                    "screenshot_native",
-                    with_scope(
-                        Some(json!({
-                            "window_id": window_id,
-                            "output_path": output.display().to_string(),
-                            "format": format,
-                        })),
-                        Scope { window: scope.window, ..Scope::default() },
-                    ),
-                )
-                .await
+            // Without an id the plugin renders the scoped webview itself
+            // (WKWebView `takeSnapshot:`). A plugin older than 0.6.0-alpha.6
+            // still insists on `window_id`; resolve it from the window list
+            // and retry so mixed CLI/plugin versions keep working.
+            match client.call("screenshot_native", request(window_id)).await {
+                Err(error) if window_id.is_none() && wants_window_id(&error) => {
+                    let resolved = resolve_native_window_id(client, scope.window).await?;
+                    client.call("screenshot_native", request(Some(resolved))).await
+                }
+                result => result,
+            }
         }
         Command::Navigate { url } => client.call("navigate", with_scope(Some(json!({"url": url})), scope)).await,
         Command::Url => client.call("url", with_scope(None, scope)).await,
@@ -947,6 +948,13 @@ pub(crate) async fn run_set_input_files_command(
 /// `screenshot_native` captures by OS window id, which no caller can discover
 /// on its own; before `windows.list` reported it, the only way to learn one was
 /// to fire a deliberately failing capture and read the ids out of the error.
+/// Whether an RPC failure is an older plugin rejecting a request that omitted `window_id`.
+fn wants_window_id(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<client::RpcFailure>()
+        .is_some_and(|failure| failure.0.code == -32602 && failure.0.message.contains("window_id"))
+}
+
 async fn resolve_native_window_id(client: &mut Client, window: Option<&str>) -> Result<u32> {
     let label = window.unwrap_or("main");
     let listing = client.call("windows.list", None).await?;

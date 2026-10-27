@@ -214,17 +214,24 @@ pub(crate) enum Command {
         #[arg(long)]
         args: Option<String>,
     },
-    /// Capture the full webview document as a PNG.
+    /// Render the full webview document to a PNG from the DOM.
+    ///
+    /// Rasterises the document in the page itself, so content inside scrolled
+    /// containers or virtualized lists is drawn at scroll offset zero. Use
+    /// `screenshot_native` for the pixels `WebKit` actually shows.
     Screenshot {
         path: Option<PathBuf>,
         #[arg(long)]
         selector: Option<String>,
     },
-    /// Capture a native window screenshot (PNG) by platform window id.
+    /// Capture rendered pixels as a PNG: the target webview via `WebKit`, or any
+    /// on-screen window by platform window id.
     #[command(name = "screenshot_native", visible_alias = "screenshot-native")]
     ScreenshotNative {
-        /// Operating-system window id. Resolved from the target window's label
-        /// when omitted; pass it only to capture a window Hasgard does not own.
+        /// Operating-system window id. Omitted, the target webview is rendered
+        /// by `WebKit` itself (exact pixels, scrolled content included, no
+        /// screen-recording permission); pass it to capture a whole window,
+        /// including one Hasgard does not own.
         #[arg(long)]
         window_id: Option<u32>,
         #[arg(long)]

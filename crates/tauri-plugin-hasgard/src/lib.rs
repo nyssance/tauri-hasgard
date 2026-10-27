@@ -86,6 +86,8 @@ where
                 let eval_fn = make_eval_fn(app, engine.clone());
                 let list_fn = make_list_fn(app);
                 let press_hooks = make_press_hooks(app);
+                #[cfg(target_os = "macos")]
+                screenshot::register_snapshot_fn(make_snapshot_fn(app));
 
                 let recorder = Recorder::new();
 
@@ -202,6 +204,21 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
 /// that executes a closure on the application's main thread.
 ///
 /// Resolution mirrors `make_eval_fn`: explicit label first, otherwise `main`.
+/// Webview capture for `screenshot_native` without a `window_id`: resolves the
+/// label like `EvalFn` and renders through `WKWebView` `takeSnapshot:`.
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn make_snapshot_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> screenshot::SnapshotFn
+where
+    R::Handle: tauri_runtime_wry::AsWryHandle,
+{
+    let handle = app.clone();
+    Arc::new(move |window: Option<&str>| {
+        let label = window.unwrap_or("main");
+        let target = handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?;
+        screenshot::capture_wkwebview_png(&target).map_err(|err| err.to_string())
+    })
+}
+
 #[cfg(all(any(unix, windows), debug_assertions))]
 fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef
 where

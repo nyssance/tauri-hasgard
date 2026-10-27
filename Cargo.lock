@@ -2349,6 +2349,7 @@ checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.2",
  "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
 ]
@@ -3642,7 +3643,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-hasgard-cli"
-version = "0.6.0-alpha.5"
+version = "0.6.0-alpha.6"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3722,7 +3723,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-hasgard"
-version = "0.6.0-alpha.5"
+version = "0.6.0-alpha.6"
 dependencies = [
  "block2",
  "core-foundation",
@@ -3733,6 +3734,8 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-core-graphics",
+ "objc2-foundation",
+ "objc2-web-kit",
  "serde",
  "serde_json",
  "serial_test",

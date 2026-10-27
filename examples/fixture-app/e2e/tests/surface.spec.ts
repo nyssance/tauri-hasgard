@@ -204,36 +204,28 @@ test("resolves its own operating-system window id", async ({ hasgard, window }) 
   await expect(window.nativeId()).resolves.toBe(main?.nativeId)
 })
 
-test("captures the native window without being told its id", async ({ window }, testInfo) => {
+test("captures the webview through WebKit without being told a window id", async ({ window }, testInfo) => {
   test.skip(process.platform !== "darwin", "native capture is macOS-only")
 
   const outputPath = testInfo.outputPath("native.png")
   await window.press("Shift")
-  let shot = await window.screenshotNative({ outputPath })
-  if (!shot.tcc_denied && shot.backend === "screencapture") {
-    const scale = await window.evaluate<number>("window.devicePixelRatio")
-    // Stage Manager animates a real window between thumbnail and full size.
-    // Require full-size pixels once that animation finishes, rather than
-    // treating its intermediate capture scale as the display's backing scale.
-    await expect(async () => {
-      shot = await window.screenshotNative({ outputPath })
-      expect(shot.scale_factor).toBeCloseTo(scale, 2)
-    }).toPass({ timeout: 5_000 })
-  }
-
-  // Screen recording permission is a machine-level grant this suite cannot
-  // make. Without it the capture still reports its metadata, so assert the
-  // resolution path either way and the pixels only when TCC allowed them.
+  const shot = await window.screenshotNative({ outputPath })
+  // WebKit renders the pixels itself, so no screen-recording grant is involved
+  // and the capture is never degraded to a TCC fallback.
+  expect(shot.backend).toBe("wkwebview")
+  expect(shot.tcc_denied).toBe(false)
   expect(shot.window_id).toBeGreaterThan(0)
   expect(shot.output_path).toBe(outputPath)
-  if (!shot.tcc_denied) {
-    expect(shot.width).toBeGreaterThan(0)
-    expect(shot.height).toBeGreaterThan(0)
-    expect(shot.byte_size).toBeGreaterThan(1_000)
-    if (shot.backend === "screencapture") {
-      expect(shot.scale_factor).toBeCloseTo(await window.evaluate<number>("window.devicePixelRatio"), 2)
-    }
-  }
+  const scale = await window.evaluate<number>("window.devicePixelRatio")
+  expect(shot.scale_factor).toBeCloseTo(scale, 2)
+  const viewport = await window.evaluate<{ width: number; height: number }>(
+    "({ width: window.innerWidth, height: window.innerHeight })"
+  )
+  expect(shot.width).toBe(Math.round(viewport.width * shot.scale_factor))
+  // The view extends under a full-size-content title bar, so it may be a
+  // little taller than the layout viewport but never shorter.
+  expect(shot.height).toBeGreaterThanOrEqual(Math.round(viewport.height * shot.scale_factor))
+  expect(shot.byte_size).toBeGreaterThan(1_000)
 })
 
 // A plain character is the case that used to abort the entire host application:

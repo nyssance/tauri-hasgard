@@ -59,7 +59,9 @@ tempfile = "3.27"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEvent", "CGEventTypes"] }
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError", "NSString", "NSObject"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "block2"] }
 core-foundation = "0.10"
 core-graphics = "0.25"
 image = { version = "0.25", default-features = false, features = ["png"] }

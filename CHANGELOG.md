@@ -1,3 +1,8 @@
+# 0.6.0-alpha.6 (2026-10-27)
+
+- Wire the `WKWebView` `takeSnapshot:` backend and make it the default for `screenshot_native` when no `window_id` is given: WebKit renders the target webview's own pixels, so scrolled containers and virtualized lists capture as shown and no screen-recording permission is involved (`backend: "wkwebview"`, `tcc_denied: false`). An explicit `window_id` keeps the `screencapture`/`CGWindowList` window capture. The CLI retries with a resolved window id against plugins older than this release.
+- Document that the DOM `screenshot` rasterises scrolled content at offset zero and point to `screenshot_native` for rendered pixels.
+
 # 0.6.0-alpha.5 (2026-10-26)
 
 - Build CLI release binaries with fat LTO, one codegen unit, stripped symbols, and abort-on-panic; the macOS Apple Silicon binary shrinks from 7.0 MB to 3.0 MB.
