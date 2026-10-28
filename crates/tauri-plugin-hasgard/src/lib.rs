@@ -1,4 +1,6 @@
 pub mod diff;
+#[cfg(all(any(unix, windows), debug_assertions))]
+mod display;
 mod error;
 #[cfg(any(unix, windows))]
 pub(crate) mod eval;
@@ -70,6 +72,7 @@ where
                     if let Err(error) = webview.eval(script) { tracing::error!(%error, "Failed to request automation handshake"); }
                 }
             })
+            .on_window_ready(|window| display::place(&window))
             .setup(move |app, _api| {
                 use tauri_runtime_wry::AsWryHandle;
                 if app.runtime_handle().as_wry_handle().is_none() {

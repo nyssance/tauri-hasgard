@@ -44,6 +44,7 @@ data rejects the eval instead of becoming a successful null or raw string.
 ## Transport
 
 - macOS/Linux: private Unix socket. A managed test supplies `TAURI_HASGARD_SOCKET`; otherwise the plugin derives a path from the Tauri application identifier.
+- `TAURI_HASGARD_DISPLAY` (`secondary`, a display index from 0, or a display name) moves each new window onto that display, fitted and then shown, so a run does not cover the developer's main screen; unset leaves windows where the application put them.
 - Windows: named pipe. A managed test supplies the full named-pipe path through the same environment variable.
 
 ## Window routing

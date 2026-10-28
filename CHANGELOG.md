@@ -1,3 +1,7 @@
+# Unreleased
+
+- Add `TAURI_HASGARD_DISPLAY` (`secondary`, a display index, or a display name) to place every new window on one display: the plugin moves it by that display's own scale factor, shrinks it to fit, and shows it, so automated runs stay off the developer's main screen. Applications that create their windows hidden in test builds never flash on the primary display.
+
 # 0.6.1 (2026-10-27)
 
 First stable release of the Tauri 3 Wry line; the 0.6.0 alphas are superseded.
