@@ -1270,11 +1270,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_dispatch_screenshot_native_without_window_id_is_a_webview_capture() {
+        let output_path = std::env::temp_dir().join("x.png");
+        let output_path = output_path.to_str().expect("UTF-8 temp dir");
         // Omitting `window_id` targets the scoped webview. Unit tests register
         // no capture and non-macOS hosts have none, so the request passes
         // validation and fails as a capture, never as a parameter error.
         let engine = EvalEngine::new();
-        let params = json!({"output_path": "/tmp/x.png"});
+        let params = json!({"output_path": output_path});
         let err = dispatch("screenshot_native", Some(&params), &engine, None, None, None, &Recorder::new())
             .await
             .expect_err("no capture is registered in tests");

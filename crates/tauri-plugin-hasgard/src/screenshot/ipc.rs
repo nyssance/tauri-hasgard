@@ -565,10 +565,12 @@ mod tests {
 
     #[tokio::test]
     async fn omitted_window_id_targets_the_webview() {
+        let output_path = std::env::temp_dir().join("x.png");
+        let output_path = output_path.to_str().expect("UTF-8 temp dir");
         // Without `window_id` the request is a webview snapshot. No capture is
         // registered in unit tests (and non-macOS hosts have no capture at
         // all), so it fails past validation rather than as a parameter error.
-        let params = json!({"output_path": "/tmp/x.png", "window": "settings"});
+        let params = json!({"output_path": output_path, "window": "settings"});
         let err = handle_screenshot(Some(&params)).await.expect_err("no capture is registered in tests");
         assert_eq!(err.code, RPC_INTERNAL_ERROR);
         assert!(
@@ -588,13 +590,14 @@ mod tests {
 
     #[test]
     fn parses_webview_target_with_window_label() {
+        let output_path = std::env::temp_dir().join("x.png");
+        let output_path = output_path.to_str().expect("UTF-8 temp dir");
         let request =
-            parse_request(Some(&json!({"output_path": "/tmp/x.png", "window": "settings"}))).expect("valid request");
+            parse_request(Some(&json!({"output_path": output_path, "window": "settings"}))).expect("valid request");
         assert_eq!(request.target, ScreenshotTarget::Webview(Some("settings".to_owned())));
-        let request = parse_request(Some(&json!({"output_path": "/tmp/x.png"}))).expect("valid request");
+        let request = parse_request(Some(&json!({"output_path": output_path}))).expect("valid request");
         assert_eq!(request.target, ScreenshotTarget::Webview(None));
-        let request =
-            parse_request(Some(&json!({"output_path": "/tmp/x.png", "window_id": 7}))).expect("valid request");
+        let request = parse_request(Some(&json!({"output_path": output_path, "window_id": 7}))).expect("valid request");
         assert_eq!(request.target, ScreenshotTarget::NativeWindow(7));
     }
 
