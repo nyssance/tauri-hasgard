@@ -1,4 +1,4 @@
-# Unreleased
+# 0.6.2 (2026-10-28)
 
 - Add `TAURI_HASGARD_DISPLAY` (`secondary`, a display index, or a display name) to place every new window on one display: the plugin moves it by that display's own scale factor, shrinks it to fit, and shows it, so automated runs stay off the developer's main screen. Applications that create their windows hidden in test builds never flash on the primary display.
 
