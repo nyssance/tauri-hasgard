@@ -209,9 +209,9 @@ dependencies = [
 
 [[package]]
 name = "brotli"
-version = "9.1.0"
+version = "9.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6737ce8b81460bf9407909f73ff50bf13f7cb8577e1e76715f57ed0eba58ba44"
+checksum = "627b7cfb0578f0eafce087a90fcd40add1231900b69e4d4de2d456260a4f5d81"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -2917,9 +2917,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.7.0"
+version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ece64e19631fc38758181e637c15509a2c2709ee53bfde1e1d58f9dc991f919e"
+checksum = "f8be15815186873ea063bf005011d16c356804973489e40c39116ae3a2878d1f"
 dependencies = [
  "chrono",
  "futures",
@@ -2954,9 +2954,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -4266,9 +4266,9 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-width"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
 
 [[package]]
 name = "unit-prefix"
