@@ -1,101 +1,110 @@
 # @nyssance/tauri-hasgard
 
-Playwright Test fixtures for real Tauri 3 Wry webviews. The package uses Playwright for test scheduling, assertions, retries, reporters, and artifacts; native application control goes through Hasgard's JSON-RPC bridge.
+Playwright Test fixtures for real Tauri 3 Wry applications. Playwright handles scheduling, retries, assertions, and reports; Hasgard controls native webviews through the plugin.
 
-It deliberately does not expose a fake Playwright `Page`. WKWebView and WebKitGTK do not implement Chromium's CDP contract.
+## 1. Prepare your app
 
-The fixture object model is `HasgardApplication → HasgardWindow → HasgardLocator`. `hasgard` is the worker-scoped application fixture; `window` is the test-scoped configured primary window.
+[Register the Rust plugin and grant `hasgard:default`](https://github.com/nyssance/tauri-hasgard#register-the-plugin). Use Node.js 24 or newer and install:
 
-## Setup
+```sh
+bun add --dev @nyssance/tauri-hasgard @playwright/test
+```
+
+Set a readiness marker in your frontend **after initialization finishes**:
 
 ```ts
-import { createHasgardTest } from "@nyssance/tauri-hasgard"
+document.documentElement.dataset.appReady = "true"
+```
+
+Hasgard waits for this marker before tests start. No Playwright browser download is needed.
+
+## 2. Configure the fixture
+
+Create `e2e/fixtures.ts`:
+
+```ts
+import { join } from "node:path"
+
+import { createHasgardTest, hasgardEndpointPath } from "@nyssance/tauri-hasgard"
 import { expect as playwrightExpect, test as playwrightTest } from "@playwright/test"
 
 export const { test, expect } = createHasgardTest({
   test: playwrightTest,
   expect: playwrightExpect,
-  socketPath: (workerIndex) => `/tmp/my-app-e2e-${workerIndex}.sock`,
+  socketPath: (workerIndex) => hasgardEndpointPath(`my-app-${process.pid}-${workerIndex}`),
   windowLabel: "main",
-  readySelector: '[data-app-ready="true"]',
+  readySelector: 'html[data-app-ready="true"]',
   launch: {
     command: "bun",
     args: ["run", "tauri", "dev"],
-    cwd: import.meta.dirname,
+    cwd: join(import.meta.dirname, ".."),
     timeoutMs: 120_000
   }
 })
 ```
 
-The fixture passes the selected socket to the application as `TAURI_HASGARD_SOCKET`, so each Playwright worker receives an isolated connection.
+Use your app's actual window label and launch command. `hasgardEndpointPath` creates a Unix socket path or Windows named-pipe name. The fixture passes it to the app as `TAURI_HASGARD_SOCKET`.
 
-On macOS, a managed launch owns a detached process group. Teardown
-waits for that group to exit, including children left behind by a launcher,
-and escalates from SIGTERM to SIGKILL after five seconds. Startup failures also
-clean up, and concurrent `stop()` calls share the same cleanup. A live endpoint
-is rejected rather than unlinked; readiness requires a successful connection.
-If cleanup fails, ownership is retained so `stop()` can be retried; another
-launch is blocked until that cleanup succeeds.
-Diagnostics retain the last 64 Ki characters per output stream with a truncation
-marker. `await process.diagnostics()` exposes those tails and the actual exit
-code or signal. Failed tests attach them; a failed screenshot does not replace
-the original test error. Teardown removes the owned stale socket after its
-process group exits, checking its identity and preserving live or replaced paths.
-
-An independent supervisor owns the application and watches the worker's IPC
-connection. If the worker is killed with SIGKILL, the supervisor still terminates
-the application group and exits. Killing the supervisor itself or children that
-deliberately create a new session or process group are outside this guarantee.
-Attach-only fixtures do not terminate an application they did not launch.
-
-`window.press(key)` uses native OS input and, by default, waits for a trusted
-WebView keyup before the next press may switch windows. For OS shortcuts and
-keys that navigate or close the document, explicitly use
-`window.press(key, { completion: "native" })`; that mode confirms posting only.
-Bare modifiers also use native posting completion. The active input method
-remains in effect: use `fill` for exact text, and `Shift+m` for a shifted key.
-
-To keep keyboard ownership until an application state is observable:
+Create `playwright.config.ts` in the app root:
 
 ```ts
+import { defineConfig } from "@playwright/test"
+
+export default defineConfig({
+  testDir: "./e2e",
+  workers: 1,
+  timeout: 30_000,
+  expect: { timeout: 5_000 }
+})
+```
+
+Start with one worker: development servers share ports, and native keyboard input shares desktop focus. For parallel non-keyboard tests, build a debug executable once and launch that binary per worker instead of starting several dev servers. Give each instance separate application data if your app persists state.
+
+## 3. Write and run a test
+
+Create `e2e/settings.spec.ts`. Adapt the button, window label, and heading to your UI:
+
+```ts
+import { expect, test } from "./fixtures"
+
+test("opens settings", async ({ hasgard, window }) => {
+  await window.getByRole("button", { name: "Settings", exact: true }).click()
+  const settings = await hasgard.waitForWindow("settings", 5_000)
+  await expect(settings.getByRole("heading", { name: "Settings", exact: true })).toBeVisible()
+})
+```
+
+```sh
+bunx playwright test
+```
+
+`hasgard` is a worker-scoped `HasgardApplication`; `window` selects the configured primary `HasgardWindow`. Tests in the same worker share application state. Reset data and close secondary windows in your test setup or teardown as needed.
+
+For a complete runnable example, see the repository's [fixture app](https://github.com/nyssance/tauri-hasgard/tree/main/examples/fixture-app) and [development instructions](https://github.com/nyssance/tauri-hasgard/blob/main/CONTRIBUTING.md).
+
+## Common operations
+
+```ts
+await window.getByRole("textbox", { name: "Display name", exact: true }).fill("Nyssance")
+await window.locator('[data-testid="save"]').click()
+await expect(window.getByRole("status")).toHaveText("Saved")
 await window.press("Tab", {
   waitFor: "document.activeElement.id === 'save'",
   timeoutMs: 1_000
 })
 ```
 
-The postcondition timeout is capped at ten seconds. Failures retain their
-`HasgardRpcError.data.phase` and `injected` status; never blindly retry an
-already-injected or uncertain press. See [the wire contract](../../docs/protocol.md#native-keyboard-completion).
+- Use `fill` for exact text. `press` sends native input through the active input method.
+- For shortcuts that close or navigate a document, use `press(key, { completion: "native" })`; it confirms posting only. Do not blindly retry a key that may already have been injected.
+- CSS locators use the live selector. Role locators take a fresh accessibility snapshot and require exactly one match for an action.
+- To attach to an existing app, omit `launch` and set `socketPath` to its endpoint. Teardown leaves that app running.
 
-Requests are limited to 1,048,576 UTF-8 bytes including the trailing newline,
-matching the plugin. Oversized requests fail before transmission. An explicit
-null result is supported; malformed responses are rejected instead of returning
-an invented value.
+## Lifecycle and limits
 
-## Test
+Managed launches are cleaned up at worker teardown and on startup failure. On macOS/Linux, a supervisor also cleans up the app's process group if the worker is killed. Children that create a separate process group, or killing the supervisor itself, are outside this guarantee.
 
-```ts
-test("saves settings in a secondary window", async ({ hasgard }) => {
-  const settings = hasgard.window("settings")
-  await settings.getByRole("textbox", { name: "Display name" }).fill("Nyssance")
-  await settings.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(settings.getByRole("status")).toHaveText("Saved")
-})
-```
+Failed tests using the `window` fixture attach process diagnostics and a screenshot when available. Logs retain a bounded tail. Live endpoints are rejected rather than overwritten.
 
-Use `window` for the configured primary window:
+There is no `page` fixture or mocked browser mode. Use `HasgardApplication → HasgardWindow → HasgardLocator`; full Playwright `Page` APIs are not supported.
 
-```ts
-test("opens preferences", async ({ window }) => {
-  await window.getByRole("button", { name: "Settings", exact: true }).click()
-})
-```
-
-## Targets
-
-- `window.locator(css)` sends a CSS selector directly.
-- `window.getByRole(role, query)` takes a fresh accessibility snapshot, demands exactly one match for actions, then sends its snapshot ref.
-- `byPoint(x, y)` and `byRef(ref)` are available for low-level calls.
-
-Ambiguous semantic locators throw. Missing required configuration throws. There is no browser-mode fallback and no silent switch to a different window.
+[Protocol and keyboard semantics](https://github.com/nyssance/tauri-hasgard/blob/main/docs/protocol.md) · [Troubleshooting](https://github.com/nyssance/tauri-hasgard/blob/main/docs/troubleshooting.md)

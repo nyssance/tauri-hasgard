@@ -1,57 +1,25 @@
 # Tauri Hasgard
 
-macOS support is Apple Silicon (arm64) only. Intel Macs are not supported.
+Automate a running Tauri application through its real native webviews. The CLI, MCP server, and Playwright Test fixture share one JSON-RPC plugin.
 
-Tauri Hasgard is one automation surface for Tauri 3 Wry applications. It combines a native Tauri plugin, a cross-platform CLI, an MCP server, and a Playwright Test fixture without pretending that a WebKit webview is a Chromium `Page`.
+This repository targets **Tauri 3 + Wry**; Tauri 2 projects use Hasgard 0.5.x. macOS requires Apple Silicon. CEF is not supported. The plugin is active only in debug builds.
 
-The project is named after Hasgard, the Taurus Gold Saint from _Saint Seiya: The Lost Canvas_: strong at the boundary, predictable under pressure.
+## Choose a client
 
-The current development line targets Tauri 3 with the Wry runtime. Tauri 2 users
-can continue using the previously published 0.5.x line. 0.6.2 is the current release
-on crates.io, npm, Homebrew and Scoop.
-CEF is not supported by this Wry-specific native keyboard integration.
+Every setup requires the Rust plugin in your application.
 
-## Packages
+| Task                       | Install alongside the plugin                     |
+| -------------------------- | ------------------------------------------------ |
+| Inspect and control an app | `tauri-hasgard` CLI                              |
+| Connect an AI client       | Same CLI, launched with `tauri-hasgard mcp`      |
+| Run E2E tests              | `@nyssance/tauri-hasgard` and `@playwright/test` |
 
-| Package                   | Purpose                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------ |
-| `tauri-plugin-hasgard`    | Debug-only JSON-RPC server injected into every Tauri webview                                     |
-| `tauri-hasgard`           | CLI and MCP server for inspection, interaction, screenshots, recording, and multi-window control |
-| `@nyssance/tauri-hasgard` | Playwright Test fixture backed by the same JSON-RPC protocol                                     |
+There is no `init` command or Hasgard project configuration file.
 
-## What to install
-
-Every Hasgard setup requires `tauri-plugin-hasgard` in the Tauri application. The plugin is the in-process bridge to native webviews; without it, the CLI, MCP server, and Playwright fixture have nothing to connect to.
-
-Choose the client for the job:
-
-| Use case                           | Required                                                     |
-| ---------------------------------- | ------------------------------------------------------------ |
-| Human or AI inspection and control | Rust plugin + `tauri-hasgard` CLI                            |
-| Playwright E2E tests               | Rust plugin + `@nyssance/tauri-hasgard` + `@playwright/test` |
-| Both                               | Rust plugin + CLI + Playwright packages                      |
-
-There is no `tauri-hasgard init` command and no Hasgard project configuration file. Registering the plugin is the complete application-side setup.
-
-## Why one protocol
-
-Tests, agents, and local developer tools must observe the same application and invoke the same commands. Hasgard therefore keeps one transport contract and exposes three clients instead of maintaining separate automation stacks.
-
-On macOS and Linux, Hasgard talks to the real WKWebView/WebKitGTK process through the plugin. On Windows, the same protocol remains available while native CDP can still be used separately when a full Chromium `Page` is required.
-
-## Non-goals
-
-**Hasgard has no mocked browser mode.** It will not run your frontend in headless Chromium against a faked `window.__TAURI_INTERNALS__`.
-
-Such a mode is fast and needs no Rust toolchain, but it does not test the application: the webview is Chromium rather than WKWebView or WebKitGTK, and every Tauri command is a hand-written stub. Once the Rust side changes shape, the stubs keep passing. A green run proves that the frontend works in Chromium under assumptions the test author wrote down, which is not what an E2E suite is for.
-
-Frontend logic that genuinely has no native dependency is already well served: point stock `@playwright/test` at your dev server. That path needs nothing from Hasgard, keeps real Playwright tracing and network interception, and stays honestly labelled as a unit-level test.
-
-Hasgard covers the other half — one running application, real native webviews, one protocol.
-
-## 1. Register the required Tauri plugin
+## Register the plugin
 
 ```sh
+cd src-tauri
 cargo add tauri-plugin-hasgard@0.6.2
 ```
 
@@ -72,7 +40,7 @@ fn run() {
 }
 ```
 
-Grant the plugin's eval callback permission to every webview Hasgard will control in the relevant Tauri capability file, for example `src-tauri/capabilities/default.json`:
+Add `hasgard:default` to the existing permissions in `src-tauri/capabilities/default.json`, covering every window under test. Keep your other permissions; this is only the Hasgard fragment:
 
 ```json
 {
@@ -85,131 +53,16 @@ Grant the plugin's eval callback permission to every webview Hasgard will contro
 
 The plugin is inert in release builds. In debug builds it creates an application-scoped Unix socket or Windows named pipe and injects the Hasgard bridge into each webview.
 
-## 2A. Use the CLI or connect an AI through MCP
+## Start here
 
-Install the native client:
+- [CLI and MCP tutorial](docs/getting-started.md): start the app, inspect a window, click, and capture a screenshot.
+- [Playwright tutorial](packages/playwright/README.md): configure, launch, and test your app.
+- [Troubleshooting](docs/troubleshooting.md): connection, permissions, readiness, and keyboard input.
+- [Contributing](CONTRIBUTING.md): run the repository's example and checks.
+- [Architecture](docs/architecture.md) · [Protocol reference](docs/protocol.md) · [Changelog](CHANGELOG.md)
 
-```sh
-# macOS
-brew install nyssance/tap/tauri-hasgard
-
-# Windows
-scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
-scoop install nyssance/tauri-hasgard
-
-# Linux, or any platform with a Rust toolchain
-cargo install tauri-hasgard-cli
-```
-
-The Homebrew formula lives in `nyssance/tap`, not in homebrew-core, so the
-`nyssance/tap/` prefix is required. Prebuilt archives for all five supported
-targets are attached to each [GitHub Release](https://github.com/nyssance/tauri-hasgard/releases).
-
-Use it directly:
-
-```sh
-tauri-hasgard windows
-tauri-hasgard snapshot
-tauri-hasgard click '@e3'
-tauri-hasgard mcp
-```
-
-`tauri-hasgard mcp` is a standard stdio MCP server. ALwith, Claude Code, and Codex are first-class AI clients; all three launch the same command and receive the same tools.
-
-For ALwith and Claude Code, add the server to the project `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "tauri-hasgard": {
-      "command": "tauri-hasgard",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-For Codex, add it to the project `.codex/config.toml`:
-
-```toml
-[mcp_servers.tauri-hasgard]
-command = "tauri-hasgard"
-args = ["mcp"]
-```
-
-## 2B. Write Playwright E2E tests
-
-```bash
-bun add --dev @nyssance/tauri-hasgard @playwright/test
-```
-
-```ts
-import { createHasgardTest } from "@nyssance/tauri-hasgard"
-import { expect as playwrightExpect, test as playwrightTest } from "@playwright/test"
-
-const { test, expect } = createHasgardTest({
-  test: playwrightTest,
-  expect: playwrightExpect,
-  socketPath: (workerIndex) => `/tmp/my-app-e2e-${workerIndex}.sock`,
-  windowLabel: "main",
-  readySelector: '[data-app-ready="true"]',
-  launch: {
-    command: "bun",
-    args: ["run", "tauri", "dev"],
-    cwd: import.meta.dirname,
-    timeoutMs: 120_000
-  }
-})
-
-test("opens settings", async ({ hasgard, window }) => {
-  await window.getByRole("button", { name: "Settings", exact: true }).click()
-  const settings = await hasgard.waitForWindow("settings", 5_000)
-  await expect(settings.getByRole("heading", { name: "Settings" })).toBeVisible()
-})
-```
-
-Hasgard uses Playwright Test for fixtures, isolation, retries, reporters, and parallel workers. The worker-scoped `hasgard` fixture is a `HasgardApplication`; the test-scoped `window` fixture is the configured primary `HasgardWindow`. There is deliberately no `page` fixture: native Tauri webviews do not implement the complete Playwright `Page` contract.
-
-## Scenarios and native video
-
-CLI and MCP share the TOML scenario runner, including storage assertions and
-deadlines. MCP exposes it as `hasgard.run_scenario`.
-
-On macOS, record one native window with ffmpeg installed:
-
-```sh
-tauri-hasgard --window settings video start --output /tmp/settings.mp4 --max-duration-ms 10000
-tauri-hasgard --window settings video stop
-```
-
-The test client exposes `window.startVideo({ outputPath })`,
-`window.stopVideo()`, and `window.videoStatus()`. See the
-[protocol](docs/protocol.md) for permission requirements, limits, origin binding,
-and error behavior.
-
-## Development checks
-
-Run `fab u` (alias for `fab upgrade`) to upgrade all Bun workspaces and Rust dependencies, including major versions, and refresh both lockfiles. This requires Fabric (`uv tool install fabric`) and cargo-edit (`cargo install cargo-edit`).
-
-Use Bun Canary for development: `bun lint` is currently Canary-only. The package manager tracks `bun@latest`, and CI runs lint in a separate Canary job.
-
-```sh
-bun install --frozen-lockfile
-bun run format:check
-bun run typecheck
-bun lint
-bun run ts7-lint
-bun run test
-bun run build
-bun run test:e2e
-```
-
-Formatting and import sorting use `bun fmt`; type checking uses `bun check`. TypeScript 7 still emits the package's declaration files. `@nyssance/ts7-lint` supplies the modern syntax and import-cycle rules separately from Bun's default lint rules. Repository settings live in `bunfig.toml`.
-
-## Status
-
-The repository starts from the strongest parts of `tauri-pilot` and `tauri-playwright`, then converges them on a single JSON-RPC protocol. See [NOTICE.md](NOTICE.md) for provenance.
+Hasgard exposes `HasgardApplication → HasgardWindow → HasgardLocator`, not a Playwright `Page`. Tests drive the native app; there is no mocked browser mode. For frontend-only browser tests, use stock Playwright against your dev server.
 
 ## License
 
-Apache-2.0. The original MIT notices for adapted upstream work are preserved in [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+Apache-2.0. Upstream MIT notices are preserved in [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
