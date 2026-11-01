@@ -14,7 +14,7 @@ bun run build
 bun run test:e2e
 ```
 
-This builds the CLI and debug fixture app, launches real native windows, and runs Playwright. Linux needs a display; CI uses `xvfb-run --auto-servernum bun run test:e2e`. macOS video tests also require ffmpeg and the appropriate capture permission.
+This builds the CLI and debug fixture app, launches real native windows, and runs Playwright. CI tests native behavior on macOS and Windows; Linux is build-only for release artifacts. Manual Linux E2E needs a display, for example `xvfb-run --auto-servernum bun run test:e2e`. macOS video tests also require ffmpeg and the appropriate capture permission.
 
 The fixture opens on the secondary display by default and fails without one. Windows start hidden and are positioned before the main window is shown. Set `TAURI_HASGARD_DISPLAY` to a display index or name to explicitly choose another display; CI uses `0` for its single display.
 
