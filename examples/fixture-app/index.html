@@ -4,123 +4,155 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hasgard fixture</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <main>
-      <h1>Hasgard fixture</h1>
-      <label for="display-name">Display name</label>
-      <input id="display-name" name="display-name" />
-      <button id="save" type="button">Save</button>
-      <output id="status" role="status"></output>
-      <button id="open-dialog" type="button">Open dialog</button>
-      <button id="open-settings" type="button">Open settings</button>
+      <header class="toolbar">
+        <h1>Hasgard fixture</h1>
+        <label for="display-name">Display name</label>
+        <input id="display-name" name="display-name" />
+        <button class="primary" id="save" type="button">Save</button>
+        <output id="status" role="status"></output>
+        <button id="open-dialog" type="button">Open dialog</button>
+        <button id="open-settings" type="button">Open settings</button>
+      </header>
       <dialog id="confirm-dialog">
         <h2>Confirm action</h2>
         <button id="close-dialog" type="button">Close</button>
       </dialog>
       <section aria-label="Probes" id="probes">
-        <!-- Accessible name and visible text deliberately disagree: getName
+        <section class="probe-group">
+          <h2>Inputs & selectors</h2>
+          <!-- Accessible name and visible text deliberately disagree: getName
              reports "Save profile", so a snapshot-name locator can never reach
              the word the button actually shows. -->
-        <button id="labelled" type="button" aria-label="Save profile">Submit changes</button>
+          <button id="labelled" type="button" aria-label="Save profile">Submit changes</button>
 
-        <!-- Carries both a <label> and a placeholder. getName stops at the
+          <!-- Carries both a <label> and a placeholder. getName stops at the
              label, so the placeholder is invisible to snapshot-based lookup. -->
-        <label for="search">Search records</label>
-        <input id="search" name="search" placeholder="Type to filter" />
+          <div class="control-line">
+            <label for="search">Search records</label>
+            <input id="search" name="search" placeholder="Type to filter" />
+          </div>
 
-        <input id="agree" name="agree" type="checkbox" />
-        <label for="agree">Agree to terms</label>
+          <div class="control-line">
+            <input id="agree" name="agree" type="checkbox" />
+            <label for="agree">Agree to terms</label>
+          </div>
 
-        <button id="locked" type="button" disabled>Locked</button>
-        <button id="aria-locked" type="button" aria-disabled="true">Aria locked</button>
+          <button id="locked" type="button" disabled>Locked</button>
+          <button id="aria-locked" type="button" aria-disabled="true">Aria locked</button>
 
-        <!-- One test id is a prefix of the other. -->
-        <button id="testid-save" type="button" data-testid="save">Save it</button>
-        <button id="testid-draft" type="button" data-testid="save-draft">Draft it</button>
+          <!-- One test id is a prefix of the other. -->
+          <button id="testid-save" type="button" data-testid="save">Save it</button>
+          <button id="testid-draft" type="button" data-testid="save-draft">Draft it</button>
+        </section>
+        <section class="probe-group">
+          <h2>Pointer & focus</h2>
+          <div id="hover-target">Hover target</div>
+          <p class="readout" data-label="Hover" id="hover-state">idle</p>
 
-        <div id="hover-target">Hover target</div>
-        <p id="hover-state">idle</p>
+          <div id="dbl-target">Double click target</div>
+          <p class="readout" data-label="Double clicks" id="dbl-count">0</p>
 
-        <div id="dbl-target">Double click target</div>
-        <p id="dbl-count">0</p>
+          <p class="readout" data-label="Focus" id="focus-state">none</p>
+          <p class="readout" data-label="Readiness" id="delayed">pending</p>
 
-        <p id="focus-state">none</p>
-        <p id="delayed">pending</p>
-
-        <div id="scroller"><div id="scroller-inner"></div></div>
-
-        <!-- Records what the webview actually received, so a keyboard test can
+          <div class="scroll-probe" aria-label="Scroll area" id="scroller"><div id="scroller-inner"></div></div>
+        </section>
+        <section class="probe-group">
+          <h2>Keyboard</h2>
+          <!-- Records what the webview actually received, so a keyboard test can
              assert the delivered KeyboardEvent instead of a downstream side
              effect that several different keys could have produced. -->
-        <label for="key-probe">Key probe</label>
-        <input id="key-probe" name="key-probe" />
-        <p id="key-log"></p>
-
-        <!-- A real <input type=file>: its change handler reads back the
+          <label for="key-probe">Key probe</label>
+          <input id="key-probe" name="key-probe" />
+          <p class="readout" data-label="Keys" id="key-log"></p>
+        </section>
+        <section class="probe-group">
+          <h2>Files</h2>
+          <!-- A real <input type=file>: its change handler reads back the
              FileList, so a test can prove the page saw genuine File objects
              rather than a shape that merely looks like one. -->
-        <label for="upload">Attachment</label>
-        <input id="upload" name="upload" type="file" />
-        <p id="upload-log">none</p>
-        <label for="uploads">Attachments</label>
-        <input id="uploads" name="uploads" type="file" multiple />
-        <p id="uploads-log">none</p>
-
-        <!-- Two wheel targets: one that lets the scroll happen, one that
+          <label for="upload">Attachment</label>
+          <input id="upload" name="upload" type="file" />
+          <p class="readout" data-label="File" id="upload-log">none</p>
+          <label for="uploads">Attachments</label>
+          <input id="uploads" name="uploads" type="file" multiple />
+          <p class="readout" data-label="Files" id="uploads-log">none</p>
+        </section>
+        <section class="probe-group">
+          <h2>Scrolling</h2>
+          <!-- Two wheel targets: one that lets the scroll happen, one that
              cancels it. Only the pair distinguishes "the event fired" from
              "the scroll actually moved". -->
-        <div id="wheel-scroller"><div id="wheel-inner"></div></div>
-        <div id="wheel-blocked"><div id="wheel-blocked-inner"></div></div>
-        <p id="wheel-log">0</p>
-
-        <!-- Modal dialogs. Unintercepted, each of these freezes the webview
+          <div class="scroll-probe" aria-label="Wheel scroll area" id="wheel-scroller">
+            <div id="wheel-inner"></div>
+          </div>
+          <div class="scroll-probe" aria-label="Cancelled wheel area" id="wheel-blocked">
+            <div id="wheel-blocked-inner"></div>
+          </div>
+          <p class="readout" data-label="Wheel events" id="wheel-log">0</p>
+        </section>
+        <section class="probe-group">
+          <h2>Dialogs</h2>
+          <!-- Modal dialogs. Unintercepted, each of these freezes the webview
              and every later bridge call dies on an unrelated timeout. -->
-        <button id="ask-confirm" type="button">Ask confirm</button>
-        <button id="ask-prompt" type="button">Ask prompt</button>
-        <button id="ask-alert" type="button">Ask alert</button>
-        <p id="dialog-answer">none</p>
-
-        <!-- Click shape. `mouse-log` records the event stream verbatim, so a
+          <button id="ask-confirm" type="button">Ask confirm</button>
+          <button id="ask-prompt" type="button">Ask prompt</button>
+          <button id="ask-alert" type="button">Ask alert</button>
+          <p class="readout" data-label="Result" id="dialog-answer">none</p>
+        </section>
+        <section class="probe-group">
+          <h2>Mouse events</h2>
+          <!-- Click shape. `mouse-log` records the event stream verbatim, so a
              test can assert that a right press produced contextmenu and no
              click, rather than only that something happened. `select-log`
              records the modifier a real multi-select list would branch on, and
              `hit-pad` reports where inside the box the press landed. -->
-        <button id="mouse-target" type="button">Mouse target</button>
-        <button id="mouse-reset" type="button">Reset mouse log</button>
-        <p id="mouse-log">none</p>
-        <p id="detail-log">0</p>
-        <ul id="rows">
-          <li class="row" data-row="1">Row 1</li>
-          <li class="row" data-row="2">Row 2</li>
-        </ul>
-        <p id="select-log">none</p>
-        <div id="hit-pad"></div>
-        <p id="hit-log">none</p>
-
-        <!-- A same-origin frame, itself hosting a nested one. The ids inside
+          <button id="mouse-target" type="button">Mouse target</button>
+          <button id="mouse-reset" type="button">Reset mouse log</button>
+          <p class="readout" data-label="Events" id="mouse-log">none</p>
+          <p class="readout" data-label="Click count" id="detail-log">0</p>
+          <ul id="rows">
+            <li class="row" data-row="1">Row 1</li>
+            <li class="row" data-row="2">Row 2</li>
+          </ul>
+          <p class="readout" data-label="Selection" id="select-log">none</p>
+          <div id="hit-pad"></div>
+          <p class="readout" data-label="Position" id="hit-log">none</p>
+        </section>
+        <section class="probe-group">
+          <h2>Frames</h2>
+          <!-- A same-origin frame, itself hosting a nested one. The ids inside
              deliberately repeat ids from this document, so a locator that fell
              back to the top document would still resolve and go unnoticed. -->
-        <h1 id="scope">outer</h1>
-        <button id="pay" type="button">Pay</button>
-        <p id="pay-log">none</p>
-        <iframe id="pane" src="/embedded.html" title="Embedded pane"></iframe>
-
-        <!-- Fetch and XHR probes, so a route can be proved to intercept both.
+          <h1 id="scope">outer</h1>
+          <button id="pay" type="button">Pay</button>
+          <p class="readout" data-label="Frame event" id="pay-log">none</p>
+          <iframe id="pane" src="/embedded.html" title="Embedded pane"></iframe>
+        </section>
+        <section class="probe-group">
+          <h2>Network</h2>
+          <!-- Fetch and XHR probes, so a route can be proved to intercept both.
              Each records the status and body the page actually received. -->
-        <button id="do-fetch" type="button">Fetch</button>
-        <button id="do-xhr" type="button">XHR</button>
-        <button id="net-reset" type="button">Reset net log</button>
-        <p id="net-log">none</p>
-
-        <!-- Same tag, same class: reachable only by refining on text. -->
-        <ul id="tickets">
-          <li class="ticket">Ticket 1 — open</li>
-          <li class="ticket">Ticket 2 — closed</li>
-          <li class="ticket">Ticket 3 — open</li>
-        </ul>
+          <button id="do-fetch" type="button">Fetch</button>
+          <button id="do-xhr" type="button">XHR</button>
+          <button id="net-reset" type="button">Reset net log</button>
+          <p class="readout" data-label="Response" id="net-log">none</p>
+        </section>
+        <section class="probe-group">
+          <h2>Text matching</h2>
+          <!-- Same tag, same class: reachable only by refining on text. -->
+          <ul id="tickets">
+            <li class="ticket">Ticket 1 — open</li>
+            <li class="ticket">Ticket 2 — closed</li>
+            <li class="ticket">Ticket 3 — open</li>
+          </ul>
+        </section>
       </section>
-      <section aria-label="Unequal turns" id="turns"></section>
+      <section aria-label="Unequal turns" id="turns"><h2>Unequal-height content</h2></section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

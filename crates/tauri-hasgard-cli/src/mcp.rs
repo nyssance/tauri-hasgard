@@ -2,7 +2,7 @@ use std::{
     io::IsTerminal,
     path::Path,
     path::PathBuf,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock}
 };
 
 use anyhow::Result;
@@ -10,23 +10,23 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation, JsonObject,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
+        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool, ToolAnnotations
     },
     service::{MaybeSendFuture, RequestContext, RoleServer},
-    transport::stdio,
+    transport::stdio
 };
 use serde_json::{Map, Value, json};
 
 use crate::{
     Scope, build_wait_params, client::Client, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
-    run_set_input_files_command, target_params, with_scope,
+    run_set_input_files_command, target_params, with_scope
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct HasgardMcpServer {
     socket: Option<PathBuf>,
     window: Option<String>,
-    resolved_socket: Arc<OnceLock<PathBuf>>,
+    resolved_socket: Arc<OnceLock<PathBuf>>
 }
 
 pub(crate) async fn run_mcp_server(socket: Option<PathBuf>, window: Option<String>) -> Result<()> {
@@ -91,11 +91,11 @@ impl HasgardMcpServer {
     /// Look up the operating-system window id backing a Tauri webview label.
     ///
     async fn call_app_tool(
-        &self, method: &'static str, params: Option<Value>, window: Option<String>,
+        &self, method: &'static str, params: Option<Value>, window: Option<String>
     ) -> Result<CallToolResult, McpError> {
         Ok(match self.call_app(method, params, window).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(&err),
+            Err(err) => tool_error(&err)
         })
     }
 
@@ -120,7 +120,7 @@ impl HasgardMcpServer {
                         "selector": optional_string(&args, "selector")?,
                         "depth": optional_u8(&args, "depth")?,
                     })),
-                    window,
+                    window
                 )
                 .await
             }
@@ -200,7 +200,7 @@ impl HasgardMcpServer {
                         "amount": optional_i32(&args, "amount")?,
                         "ref": optional_ref(&args)?,
                     })),
-                    window,
+                    window
                 )
                 .await
             }
@@ -260,7 +260,7 @@ impl HasgardMcpServer {
                         "command": required_string(&args, "command")?,
                         "args": args.get("args").cloned(),
                     })),
-                    window,
+                    window
                 )
                 .await
             }
@@ -301,7 +301,7 @@ impl HasgardMcpServer {
                     expression.as_deref(),
                     poll,
                     gone,
-                    timeout,
+                    timeout
                 );
                 self.call_app_tool("wait", Some(params), window).await
             }
@@ -325,7 +325,7 @@ impl HasgardMcpServer {
                         "key": required_string(&args, "key")?,
                         "session": optional_bool(&args, "session")?.unwrap_or(false),
                     })),
-                    window,
+                    window
                 )
                 .await
             }
@@ -337,7 +337,7 @@ impl HasgardMcpServer {
                         "value": required_string(&args, "value")?,
                         "session": optional_bool(&args, "session")?.unwrap_or(false),
                     })),
-                    window,
+                    window
                 )
                 .await
             }
@@ -345,7 +345,7 @@ impl HasgardMcpServer {
                 self.call_app_tool(
                     "storage.list",
                     Some(json!({"session": optional_bool(&args, "session")?.unwrap_or(false)})),
-                    window,
+                    window
                 )
                 .await
             }
@@ -353,7 +353,7 @@ impl HasgardMcpServer {
                 self.call_app_tool(
                     "storage.clear",
                     Some(json!({"session": optional_bool(&args, "session")?.unwrap_or(false)})),
-                    window,
+                    window
                 )
                 .await
             }
@@ -386,7 +386,7 @@ impl HasgardMcpServer {
             "record_status" => self.call_app_tool("record.status", None, window).await,
             "replay" => self.call_replay_tool(args, window).await,
             "run_scenario" => self.call_scenario_tool(&args, window.as_deref()).await,
-            _ => Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, format!("unknown tool: {name}"), None)),
+            _ => Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, format!("unknown tool: {name}"), None))
         }
     }
 
@@ -400,7 +400,7 @@ impl HasgardMcpServer {
         }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(e) => return Ok(tool_error(&e)),
+            Err(e) => return Ok(tool_error(&e))
         };
         Ok(match crate::scenario::run_scenario(&mut client, &scenario, window, fail_fast).await {
             Ok(report) => {
@@ -416,12 +416,12 @@ impl HasgardMcpServer {
                     CallToolResult::structured_error(json!({"result":result}))
                 }
             }
-            Err(e) => tool_error(&e),
+            Err(e) => tool_error(&e)
         })
     }
 
     async fn target_call(
-        &self, method: &'static str, args: &JsonObject, window: Option<String>,
+        &self, method: &'static str, args: &JsonObject, window: Option<String>
     ) -> Result<CallToolResult, McpError> {
         let target = required_string(args, "target")?;
         let mut params = target_params(&target);
@@ -460,27 +460,27 @@ impl HasgardMcpServer {
         }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         Ok(match run_drop_command(&mut client, &target, files, window.as_deref()).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(&err),
+            Err(err) => tool_error(&err)
         })
     }
 
     async fn call_set_input_files_tool(
-        &self, args: JsonObject, window: Option<String>,
+        &self, args: JsonObject, window: Option<String>
     ) -> Result<CallToolResult, McpError> {
         let target = required_string(&args, "target")?;
         // Unlike `drop`, an empty list is meaningful: it deselects.
         let files: Vec<PathBuf> = required_string_array(&args, "files")?.into_iter().map(PathBuf::from).collect();
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         Ok(match run_set_input_files_command(&mut client, &target, files, window.as_deref()).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(&err),
+            Err(err) => tool_error(&err)
         })
     }
 
@@ -546,21 +546,21 @@ impl HasgardMcpServer {
         if let Some(export) = export.as_deref() {
             return Ok(match export_replay_file(&path, export) {
                 Ok(result) => tool_success(result),
-                Err(err) => tool_error(&err),
+                Err(err) => tool_error(&err)
             });
         }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         Ok(match run_replay_command(&mut client, &path, None, window.as_deref()).await {
             Ok(result) => tool_success(result),
-            Err(err) => tool_error(&err),
+            Err(err) => tool_error(&err)
         })
     }
 
     async fn assert_text(
-        &self, args: JsonObject, window: Option<String>, contains: bool,
+        &self, args: JsonObject, window: Option<String>, contains: bool
     ) -> Result<CallToolResult, McpError> {
         let expected = required_string(&args, "expected")?;
         let target = required_string(&args, "target")?;
@@ -569,7 +569,7 @@ impl HasgardMcpServer {
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
             }
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         let passed = if contains { actual.contains(&expected) } else { actual == expected };
         if passed {
@@ -592,7 +592,7 @@ impl HasgardMcpServer {
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
             }
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         if actual == expected {
             Ok(tool_success(json!({"ok": true})))
@@ -602,16 +602,16 @@ impl HasgardMcpServer {
     }
 
     async fn assert_bool(
-        &self, method: &'static str, args: JsonObject, window: Option<String>, expected: bool,
+        &self, method: &'static str, args: JsonObject, window: Option<String>, expected: bool
     ) -> Result<CallToolResult, McpError> {
         let target = required_string(&args, "target")?;
         let field = method;
         let actual = match self.call_app(method, Some(target_params(&target)), window).await {
             Ok(result) => match result.get(field).and_then(Value::as_bool) {
                 Some(value) => value,
-                None => return Ok(tool_error_msg(format!("missing boolean field '{field}'"))),
+                None => return Ok(tool_error_msg(format!("missing boolean field '{field}'")))
             },
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         if actual == expected {
             Ok(tool_success(json!({"ok": true})))
@@ -634,9 +634,9 @@ impl HasgardMcpServer {
         let actual = match self.call_app("count", Some(json!({"selector": selector})), window).await {
             Ok(result) => match result.get("count").and_then(Value::as_u64) {
                 Some(value) => value,
-                None => return Ok(tool_error_msg("missing 'count' field")),
+                None => return Ok(tool_error_msg("missing 'count' field"))
             },
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         if actual == expected {
             Ok(tool_success(json!({"ok": true})))
@@ -652,7 +652,7 @@ impl HasgardMcpServer {
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
             }
-            Err(err) => return Ok(tool_error(&err)),
+            Err(err) => return Ok(tool_error(&err))
         };
         if actual.contains(&expected) {
             Ok(tool_success(json!({"ok": true})))
@@ -672,19 +672,19 @@ impl ServerHandler for HasgardMcpServer {
             .with_server_info(
                 Implementation::new("tauri-hasgard", env!("CARGO_PKG_VERSION"))
                     .with_title("tauri-hasgard")
-                    .with_description("MCP server for testing Tauri apps through tauri-hasgard"),
+                    .with_description("MCP server for testing Tauri apps through tauri-hasgard")
             )
             .with_instructions("Use these tools to inspect and control a running Tauri app through tauri-hasgard.")
     }
 
     fn list_tools(
-        &self, _request: Option<PaginatedRequestParams>, _context: RequestContext<RoleServer>,
+        &self, _request: Option<PaginatedRequestParams>, _context: RequestContext<RoleServer>
     ) -> impl Future<Output = Result<ListToolsResult, McpError>> + MaybeSendFuture + '_ {
         std::future::ready(Ok(ListToolsResult::with_all_items(tools())))
     }
 
     fn call_tool(
-        &self, request: CallToolRequestParams, _context: RequestContext<RoleServer>,
+        &self, request: CallToolRequestParams, _context: RequestContext<RoleServer>
     ) -> impl Future<Output = Result<CallToolResponse, McpError>> + MaybeSendFuture + '_ {
         let name = request.name.to_string();
         let args = request.arguments.unwrap_or_default();
@@ -735,7 +735,7 @@ struct ToolSpec {
     schema: fn() -> Arc<JsonObject>,
     read_only: bool,
     destructive: bool,
-    idempotent: bool,
+    idempotent: bool
 }
 
 #[allow(clippy::too_many_lines)]
@@ -747,7 +747,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "blur",
@@ -755,7 +755,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "bounding_box",
@@ -763,7 +763,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "check",
@@ -772,7 +772,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: check_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "click",
@@ -781,7 +781,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: click_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "dblclick",
@@ -789,7 +789,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "disabled",
@@ -797,7 +797,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "diff",
@@ -805,7 +805,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: diff_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "drag",
@@ -813,7 +813,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: drag_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "clear",
@@ -821,7 +821,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "route",
@@ -829,7 +829,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: route_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "dialog",
@@ -838,7 +838,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: dialog_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "set_input_files",
@@ -846,7 +846,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: set_input_files_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "wheel",
@@ -855,7 +855,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: wheel_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "drop",
@@ -863,7 +863,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: drop_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "eval",
@@ -871,7 +871,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: eval_schema,
             read_only: false,
             destructive: true,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "fill",
@@ -879,7 +879,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: fill_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "focus",
@@ -887,7 +887,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "forms",
@@ -895,7 +895,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: selector_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "hover",
@@ -903,7 +903,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "html",
@@ -911,7 +911,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: optional_target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "ipc",
@@ -919,7 +919,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: ipc_schema,
             read_only: false,
             destructive: true,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "logs",
@@ -927,7 +927,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: logs_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "navigate",
@@ -935,7 +935,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: navigate_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "network",
@@ -943,7 +943,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: network_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "ping",
@@ -951,7 +951,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "press",
@@ -959,7 +959,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: press_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "query",
@@ -969,7 +969,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: query_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "video_start",
@@ -977,7 +977,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: video_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "video_stop",
@@ -985,7 +985,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "video_status",
@@ -993,7 +993,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "record_start",
@@ -1001,7 +1001,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "record_status",
@@ -1009,7 +1009,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "record_stop",
@@ -1017,7 +1017,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "run_scenario",
@@ -1025,7 +1025,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: scenario_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "replay",
@@ -1033,7 +1033,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: replay_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "screenshot",
@@ -1041,7 +1041,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: selector_schema,
             read_only: true,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "screenshot_native",
@@ -1049,7 +1049,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: hasgard_screenshot_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "scroll",
@@ -1057,7 +1057,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: scroll_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "select",
@@ -1065,7 +1065,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: fill_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "snapshot",
@@ -1073,7 +1073,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: snapshot_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "state",
@@ -1081,7 +1081,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "storage_clear",
@@ -1089,7 +1089,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: session_schema,
             read_only: false,
             destructive: true,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "storage_get",
@@ -1097,7 +1097,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: storage_get_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "storage_list",
@@ -1105,7 +1105,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: session_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "storage_set",
@@ -1113,7 +1113,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: storage_set_schema,
             read_only: false,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "text",
@@ -1121,7 +1121,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "title",
@@ -1129,7 +1129,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "type",
@@ -1137,7 +1137,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: type_schema,
             read_only: false,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "url",
@@ -1145,7 +1145,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "value",
@@ -1153,7 +1153,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "wait",
@@ -1161,7 +1161,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: wait_schema,
             read_only: true,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "watch",
@@ -1169,7 +1169,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: watch_schema,
             read_only: true,
             destructive: false,
-            idempotent: false,
+            idempotent: false
         },
         ToolSpec {
             name: "windows",
@@ -1177,7 +1177,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: global_empty_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_checked",
@@ -1185,7 +1185,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_contains",
@@ -1193,7 +1193,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: expected_target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_count",
@@ -1201,7 +1201,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: assert_count_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_hidden",
@@ -1209,7 +1209,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_text",
@@ -1217,7 +1217,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: expected_target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_url",
@@ -1225,7 +1225,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: expected_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_value",
@@ -1233,7 +1233,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: expected_target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
         ToolSpec {
             name: "assert_visible",
@@ -1241,7 +1241,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             schema: target_schema,
             read_only: true,
             destructive: false,
-            idempotent: true,
+            idempotent: true
         },
     ]
 }
@@ -1273,7 +1273,7 @@ fn build_tools_with_flag(enable_dangerous_tools: bool) -> Vec<Tool> {
                     .read_only(spec.read_only)
                     .destructive(spec.destructive)
                     .idempotent(spec.idempotent)
-                    .open_world(false),
+                    .open_world(false)
             )
         })
         .collect()
@@ -1311,7 +1311,7 @@ fn optional_string(args: &JsonObject, name: &str) -> Result<Option<String>, McpE
     match args.get(name) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value.clone())),
-        _ => Err(invalid_params(format!("'{name}' must be a string"))),
+        _ => Err(invalid_params(format!("'{name}' must be a string")))
     }
 }
 
@@ -1324,7 +1324,7 @@ fn required_u64(args: &JsonObject, name: &str) -> Result<u64, McpError> {
 fn optional_u64(args: &JsonObject, name: &str) -> Result<Option<u64>, McpError> {
     match args.get(name) {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_u64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be an integer"))),
+        Some(value) => value.as_u64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be an integer")))
     }
 }
 
@@ -1355,28 +1355,28 @@ fn optional_u8(args: &JsonObject, name: &str) -> Result<Option<u8>, McpError> {
         Some(value) => {
             u8::try_from(value).map(Some).map_err(|_| invalid_params(format!("'{name}' is out of range for u8")))
         }
-        None => Ok(None),
+        None => Ok(None)
     }
 }
 
 fn optional_number(args: &JsonObject, name: &str) -> Result<Option<f64>, McpError> {
     match args.get(name) {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_f64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be a number"))),
+        Some(value) => value.as_f64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be a number")))
     }
 }
 
 fn optional_bool(args: &JsonObject, name: &str) -> Result<Option<bool>, McpError> {
     match args.get(name) {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_bool().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be a boolean"))),
+        Some(value) => value.as_bool().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be a boolean")))
     }
 }
 
 fn optional_ref(args: &JsonObject) -> Result<Option<String>, McpError> {
     match optional_string(args, "ref")? {
         Some(value) => Ok(Some(value.trim_start_matches('@').to_owned())),
-        None => Ok(None),
+        None => Ok(None)
     }
 }
 
@@ -1519,10 +1519,10 @@ fn target_schema() -> Arc<JsonObject> {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Scope to a same-origin iframe: one CSS selector per nesting level, outermost first. Cross-origin frames are unreachable.",
-                }),
-            ),
+                })
+            )
         ]),
-        &["target"],
+        &["target"]
     )
 }
 
@@ -1536,14 +1536,14 @@ fn click_schema() -> Arc<JsonObject> {
                     "type": "array",
                     "items": {"type": "string", "enum": ["Alt", "Control", "Meta", "Shift"]},
                     "description": "Modifiers held for the whole gesture. Meta is Command on macOS.",
-                }),
+                })
             ),
             (
                 "button",
                 enum_prop(
                     "Which button. right raises contextmenu and middle raises auxclick; neither raises click.",
-                    &["left", "middle", "right"],
-                ),
+                    &["left", "middle", "right"]
+                )
             ),
             ("clickCount", integer_prop("Presses in one gesture. 2 also raises a single dblclick.")),
             (
@@ -1552,7 +1552,7 @@ fn click_schema() -> Arc<JsonObject> {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Scope to a same-origin iframe: one CSS selector per nesting level, outermost first. Cross-origin frames are unreachable.",
-                }),
+                })
             ),
             (
                 "position",
@@ -1562,10 +1562,10 @@ fn click_schema() -> Arc<JsonObject> {
                     "required": ["x", "y"],
                     "additionalProperties": false,
                     "description": "Offset from the element's top-left corner. Defaults to its centre.",
-                }),
-            ),
+                })
+            )
         ]),
-        &["target"],
+        &["target"]
     )
 }
 
@@ -1574,9 +1574,9 @@ fn query_schema() -> Arc<JsonObject> {
         props([
             ("by", string_prop("Dimension to match: text, label, placeholder, testid, alt, or title.")),
             ("value", string_prop("Value to match against the chosen dimension.")),
-            ("exact", bool_prop("Require a full, case-sensitive match. Test ids are always exact regardless.")),
+            ("exact", bool_prop("Require a full, case-sensitive match. Test ids are always exact regardless."))
         ]),
-        &["by", "value"],
+        &["by", "value"]
     )
 }
 
@@ -1586,10 +1586,10 @@ fn check_schema() -> Arc<JsonObject> {
             ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
             (
                 "checked",
-                bool_prop("Drive the box to this state instead of toggling. Idempotent, so a retry cannot invert it."),
-            ),
+                bool_prop("Drive the box to this state instead of toggling. Idempotent, so a retry cannot invert it.")
+            )
         ]),
-        &["target"],
+        &["target"]
     )
 }
 
@@ -1605,9 +1605,9 @@ fn expected_target_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
-            ("expected", string_prop("Expected value or substring.")),
+            ("expected", string_prop("Expected value or substring."))
         ]),
-        &["target", "expected"],
+        &["target", "expected"]
     )
 }
 
@@ -1616,9 +1616,9 @@ fn snapshot_schema() -> Arc<JsonObject> {
         props([
             ("interactive", bool_prop("Only include interactive elements.")),
             ("selector", string_prop("CSS selector to scope the snapshot.")),
-            ("depth", integer_prop("Maximum traversal depth.")),
+            ("depth", integer_prop("Maximum traversal depth."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1628,9 +1628,9 @@ fn diff_schema() -> Arc<JsonObject> {
             ("interactive", bool_prop("Only include interactive elements.")),
             ("selector", string_prop("CSS selector to scope the new snapshot.")),
             ("depth", integer_prop("Maximum traversal depth.")),
-            ("reference", any_prop("Optional prior snapshot object to compare against.")),
+            ("reference", any_prop("Optional prior snapshot object to compare against."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1638,9 +1638,9 @@ fn fill_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
-            ("value", string_prop("Value to set.")),
+            ("value", string_prop("Value to set."))
         ]),
-        &["target", "value"],
+        &["target", "value"]
     )
 }
 
@@ -1648,9 +1648,9 @@ fn type_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
-            ("text", string_prop("Text to type.")),
+            ("text", string_prop("Text to type."))
         ]),
-        &["target", "text"],
+        &["target", "text"]
     )
 }
 
@@ -1662,16 +1662,16 @@ fn press_schema() -> Arc<JsonObject> {
                 "completion",
                 enum_prop(
                     "webview waits for trusted keyup (default); native confirms OS posting only for native shortcuts or navigation.",
-                    &["webview", "native"],
-                ),
+                    &["webview", "native"]
+                )
             ),
             (
                 "wait_for",
-                string_prop("JavaScript postcondition to await before another native press may focus a window."),
+                string_prop("JavaScript postcondition to await before another native press may focus a window.")
             ),
-            ("timeout", integer_prop("Postcondition timeout in milliseconds; requires wait_for.")),
+            ("timeout", integer_prop("Postcondition timeout in milliseconds; requires wait_for."))
         ]),
-        &["key"],
+        &["key"]
     )
 }
 
@@ -1680,9 +1680,9 @@ fn scroll_schema() -> Arc<JsonObject> {
         props([
             ("direction", enum_prop("Direction to scroll.", &["up", "down", "left", "right", "top", "bottom"])),
             ("amount", integer_prop("Pixel amount to scroll.")),
-            ("ref", string_prop("Optional element ref, with or without @.")),
+            ("ref", string_prop("Optional element ref, with or without @."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1691,9 +1691,9 @@ fn drag_schema() -> Arc<JsonObject> {
         props([
             ("source", string_prop("Source element ref, selector, or coordinates.")),
             ("target", string_prop("Destination element ref, selector, or coordinates.")),
-            ("offset", any_prop("Optional offset object such as {\"x\": 0, \"y\": 100}.")),
+            ("offset", any_prop("Optional offset object such as {\"x\": 0, \"y\": 100}."))
         ]),
-        &["source"],
+        &["source"]
     )
 }
 
@@ -1701,9 +1701,9 @@ fn drop_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("target", string_prop("Drop target ref, selector, or coordinates.")),
-            ("files", array_string_prop("Local file paths to drop.")),
+            ("files", array_string_prop("Local file paths to drop."))
         ]),
-        &["target", "files"],
+        &["target", "files"]
     )
 }
 
@@ -1711,9 +1711,9 @@ fn set_input_files_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("target", string_prop("The <input type=\"file\"> ref, selector, or coordinates.")),
-            ("files", array_string_prop("Local file paths to attach. Empty clears the selection.")),
+            ("files", array_string_prop("Local file paths to attach. Empty clears the selection."))
         ]),
-        &["target", "files"],
+        &["target", "files"]
     )
 }
 
@@ -1722,9 +1722,9 @@ fn wheel_schema() -> Arc<JsonObject> {
         props([
             ("target", string_prop("Scrollport ref or selector. Omit to scroll the page.")),
             ("delta_x", number_prop("Horizontal scroll delta in pixels.")),
-            ("delta_y", number_prop("Vertical scroll delta in pixels.")),
+            ("delta_y", number_prop("Vertical scroll delta in pixels."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1732,9 +1732,9 @@ fn dialog_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("action", string_prop("One of: accept, dismiss, list, clear.")),
-            ("prompt_text", string_prop("Text submitted to a prompt when action is accept.")),
+            ("prompt_text", string_prop("Text submitted to a prompt when action is accept."))
         ]),
-        &["action"],
+        &["action"]
     )
 }
 
@@ -1746,16 +1746,16 @@ fn route_schema() -> Arc<JsonObject> {
                 "pattern",
                 string_prop(
                     "URL glob, required for fulfill and abort. `*` stays inside one path segment, \
-                     `**` crosses separators, and the pattern must match the whole URL.",
-                ),
+                     `**` crosses separators, and the pattern must match the whole URL."
+                )
             ),
             ("status", integer_prop("HTTP status for fulfill. Defaults to 200.")),
             ("body", string_prop("Response body for fulfill.")),
             ("content_type", string_prop("Response content type for fulfill. Defaults to text/plain.")),
             ("method", string_prop("Restrict to one HTTP verb. Any verb matches when omitted.")),
-            ("times", integer_prop("Stop matching after this many requests, letting later ones through.")),
+            ("times", integer_prop("Stop matching after this many requests, letting later ones through."))
         ]),
-        &["action"],
+        &["action"]
     )
 }
 
@@ -1767,9 +1767,9 @@ fn ipc_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("command", string_prop("Tauri IPC command name.")),
-            ("args", any_prop("Optional JSON object of command arguments.")),
+            ("args", any_prop("Optional JSON object of command arguments."))
         ]),
-        &["command"],
+        &["command"]
     )
 }
 
@@ -1783,17 +1783,17 @@ fn hasgard_screenshot_schema() -> Arc<JsonObject> {
                     "minimum": 0,
                     "maximum": u32::MAX,
                     "description": "Native window id (e.g. `CGWindowID` on macOS) to capture a whole window. Omit to render the routed webview through WebKit (exact pixels, scrolled content included, no screen-recording permission). Must fit in u32.",
-                }),
+                })
             ),
             (
                 "output_path",
                 string_prop(
-                    "Absolute path where the PNG is written. The parent directory must already exist; the file is written atomically via a temp + rename.",
-                ),
+                    "Absolute path where the PNG is written. The parent directory must already exist; the file is written atomically via a temp + rename."
+                )
             ),
-            ("format", enum_prop("Image format. v1 accepts only \"png\".", &["png"])),
+            ("format", enum_prop("Image format. v1 accepts only \"png\".", &["png"]))
         ]),
-        &["output_path"],
+        &["output_path"]
     )
 }
 
@@ -1814,14 +1814,14 @@ fn wait_schema() -> Arc<JsonObject> {
                 "expression",
                 string_prop(
                     "JavaScript expression to poll until it returns a truthy value, which is then returned. \
-                     Catches conditions that flip without a DOM mutation. Cannot be combined with selector or gone.",
-                ),
+                     Catches conditions that flip without a DOM mutation. Cannot be combined with selector or gone."
+                )
             ),
             ("poll", integer_prop("How often to re-evaluate `expression`, in milliseconds.")),
             ("gone", bool_prop("Wait for the element to disappear.")),
-            ("timeout", integer_prop("Timeout in milliseconds.")),
+            ("timeout", integer_prop("Timeout in milliseconds."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1835,11 +1835,11 @@ fn watch_schema() -> Arc<JsonObject> {
                 "require_mutation",
                 bool_prop(
                     "Defer the stability timer until at least one DOM mutation occurs. \
-                     Rejects on timeout when nothing changed.",
-                ),
-            ),
+                     Rejects on timeout when nothing changed."
+                )
+            )
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1848,9 +1848,9 @@ fn logs_schema() -> Arc<JsonObject> {
         props([
             ("level", enum_prop("Optional log level filter.", &["log", "info", "warn", "error"])),
             ("last", integer_prop("Return only the last N log entries.")),
-            ("clear", bool_prop("Clear the log buffer instead of reading it.")),
+            ("clear", bool_prop("Clear the log buffer instead of reading it."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1860,9 +1860,9 @@ fn network_schema() -> Arc<JsonObject> {
             ("filter", string_prop("Optional URL substring filter.")),
             ("failed", bool_prop("Only return failed requests.")),
             ("last", integer_prop("Return only the last N requests.")),
-            ("clear", bool_prop("Clear the request buffer instead of reading it.")),
+            ("clear", bool_prop("Clear the request buffer instead of reading it."))
         ]),
-        &[],
+        &[]
     )
 }
 
@@ -1874,9 +1874,9 @@ fn storage_get_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("key", string_prop("Storage key.")),
-            ("session", bool_prop("Use sessionStorage instead of localStorage.")),
+            ("session", bool_prop("Use sessionStorage instead of localStorage."))
         ]),
-        &["key"],
+        &["key"]
     )
 }
 
@@ -1885,9 +1885,9 @@ fn storage_set_schema() -> Arc<JsonObject> {
         props([
             ("key", string_prop("Storage key.")),
             ("value", string_prop("Storage value.")),
-            ("session", bool_prop("Use sessionStorage instead of localStorage.")),
+            ("session", bool_prop("Use sessionStorage instead of localStorage."))
         ]),
-        &["key", "value"],
+        &["key", "value"]
     )
 }
 
@@ -1895,9 +1895,9 @@ fn assert_count_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("selector", string_prop("CSS selector to count.")),
-            ("expected", integer_prop("Expected element count.")),
+            ("expected", integer_prop("Expected element count."))
         ]),
-        &["selector", "expected"],
+        &["selector", "expected"]
     )
 }
 
@@ -1906,9 +1906,9 @@ fn video_schema() -> Arc<JsonObject> {
         props([
             ("output_path", string_prop("Absolute .mp4 output path; must not exist.")),
             ("fps", json!({"type":"integer","minimum":1,"maximum":10})),
-            ("max_duration_ms", json!({"type":"integer","minimum":100,"maximum":60000})),
+            ("max_duration_ms", json!({"type":"integer","minimum":100,"maximum":60000}))
         ]),
-        &["output_path"],
+        &["output_path"]
     )
 }
 
@@ -1916,9 +1916,9 @@ fn scenario_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("toml", string_prop("TOML scenario with one or more [[step]] entries.")),
-            ("fail_fast", json!({"type":"boolean","description":"Override scenario fail_fast."})),
+            ("fail_fast", json!({"type":"boolean","description":"Override scenario fail_fast."}))
         ]),
-        &["toml"],
+        &["toml"]
     )
 }
 
@@ -1926,9 +1926,9 @@ fn replay_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("path", string_prop("Path to a recording JSON file.")),
-            ("export", enum_prop("Export format instead of replaying.", &["sh"])),
+            ("export", enum_prop("Export format instead of replaying.", &["sh"]))
         ]),
-        &["path"],
+        &["path"]
     )
 }
 
@@ -2000,7 +2000,7 @@ mod tests {
     #[cfg(unix)]
     use tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-        task::JoinHandle,
+        task::JoinHandle
     };
 
     #[test]
@@ -2221,7 +2221,7 @@ mod tests {
                     "byte_size": 1234_u64,
                     "backend": "screencapture",
                     "tcc_denied": false,
-                }),
+                })
             );
             let mut bytes = serde_json::to_vec(&response).expect("serialize response");
             bytes.push(b'\n');
@@ -2294,7 +2294,7 @@ mod tests {
             "java\nscript:alert(1)",         // embedded newline
             "java\rscript:alert(1)",         // embedded carriage return
             "\u{0}javascript:alert(1)",      // leading NUL (C0 control)
-            "\u{1}\u{2}javascript:alert(1)", // leading C0 controls
+            "\u{1}\u{2}javascript:alert(1)"  // leading C0 controls
         ];
 
         for payload in payloads {

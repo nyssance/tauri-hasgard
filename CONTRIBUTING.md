@@ -16,6 +16,8 @@ bun run test:e2e
 
 This builds the CLI and debug fixture app, launches real native windows, and runs Playwright. Linux needs a display; CI uses `xvfb-run --auto-servernum bun run test:e2e`. macOS video tests also require ffmpeg and the appropriate capture permission.
 
+The fixture opens on the secondary display by default and fails without one. Windows start hidden and are positioned before the main window is shown. Set `TAURI_HASGARD_DISPLAY` to a display index or name to explicitly choose another display; CI uses `0` for its single display.
+
 The [fixture setup](examples/fixture-app/e2e/fixtures.ts) launches a prebuilt executable with a unique endpoint. [Native tests](examples/fixture-app/e2e/tests) cover multi-window isolation, unequal content heights, dialogs, keyboard input, screenshots, and process cleanup.
 
 ## Check changes
@@ -36,7 +38,7 @@ cargo test --workspace --all-features --locked
 
 For protocol changes, update the shared definitions and run `bun run protocol:sync`, then check all public clients. Native behavior changes require the real E2E suite; bridge and transport unit tests alone are insufficient. Use `bun run test:e2e:stress` for native focus and keyboard changes.
 
-Formatting uses `bun fmt` and `cargo fmt`; type checking uses `bun check`. TypeScript emits package declarations during `bun run build`.
+Formatting follows `alwith-desktop`: `bun fmt` and `cargo +nightly fmt` (install with `rustup toolchain install nightly --profile minimal --component rustfmt`). Nightly is needed for the shared rustfmt options; builds and tests still use stable Rust. HTML, Markdown, SVG, the root package manifest, and TOML are excluded from Bun formatting. Type checking uses `bun check`. TypeScript emits package declarations during `bun run build`.
 
 ## Dependencies and releases
 

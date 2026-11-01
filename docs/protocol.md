@@ -12,7 +12,7 @@ Response IDs are authoritative: clients must support multiple in-flight requests
 ## Envelope contract and limits
 
 `crates/tauri-plugin-hasgard/src/protocol.rs` is the canonical Rust envelope
-definition, formatted normally by `cargo fmt`. Run `bun run protocol:sync` after
+definition, formatted normally by `cargo +nightly fmt`. Run `bun run protocol:sync` after
 changing it or `protocol/responses.json`. The generator copies the definition
 into the CLI crate and the response vectors into both Rust crates,
 so published crates build and test without sibling workspace directories or a
@@ -71,6 +71,8 @@ presses across connections through this acknowledgement, so its next press
 cannot switch windows while WebKit is still processing the preceding key.
 Only keyups paired with trusted keydowns observed after registration count;
 late modifier releases from the preceding press cannot satisfy a new one.
+Both halves of each pair must arrive, including modifiers. WebKit may deliver
+the DOM keyup before its keydown; completion accepts either delivery order.
 Confirmation expires after 10 seconds. No synthetic DOM keyboard events are
 used to satisfy it. Navigation, native menu interception, or a closed document
 can prevent a DOM acknowledgement; they never silently downgrade completion.

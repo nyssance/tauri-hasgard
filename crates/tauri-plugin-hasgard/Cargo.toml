@@ -35,13 +35,13 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 tauri = { version = "3.0.0-alpha.5", features = ["unstable"] }
 tauri-runtime-wry = "3.0.0-alpha.5"
-enigo = { version = "0.6.1", optional = true }
+enigo = { version = "0.6", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2.191"
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-webview2-com = "0.39.1"
+webview2-com = "0.39"
 windows = { version = "0.62", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
@@ -52,10 +52,10 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
-enigo = { version = "0.6.1", features = ["wayland"], optional = true }
+enigo = { version = "0.6", features = ["wayland"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tempfile = "3.27"
+tempfile = "3"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEvent", "CGEventTypes"] }

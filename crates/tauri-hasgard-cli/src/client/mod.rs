@@ -30,7 +30,7 @@ pub(crate) struct Client {
     reader: BufReader<tokio::io::ReadHalf<tokio::net::windows::named_pipe::NamedPipeClient>>,
     #[cfg(windows)]
     writer: tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeClient>,
-    next_id: u64,
+    next_id: u64
 }
 
 impl Client {
@@ -185,7 +185,7 @@ mod tests {
         for _ in 0..20 {
             match Client::connect(path).await {
                 Ok(c) => return c,
-                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await
             }
         }
         Client::connect(path).await.expect("Failed to connect after retries")

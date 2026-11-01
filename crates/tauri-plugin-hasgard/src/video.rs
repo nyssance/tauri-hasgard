@@ -10,18 +10,18 @@ mod macos {
         process::{Child, Command, Stdio},
         sync::{Mutex, mpsc},
         thread::{self, JoinHandle},
-        time::{Duration, Instant},
+        time::{Duration, Instant}
     };
 
     use std::sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, Ordering}
     };
 
     struct Session {
         abort: Arc<AtomicBool>,
         stop: mpsc::Sender<()>,
-        worker: Mutex<Option<JoinHandle<Result<Value, String>>>>,
+        worker: Mutex<Option<JoinHandle<Result<Value, String>>>>
     }
     impl Drop for Session {
         fn drop(&mut self) {
@@ -37,7 +37,7 @@ mod macos {
     #[derive(Default)]
     pub(crate) struct Videos {
         sessions: Mutex<HashMap<String, Arc<Session>>>,
-        closed: AtomicBool,
+        closed: AtomicBool
     }
 
     struct ChildGuard(Child);
@@ -55,7 +55,7 @@ mod macos {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
-                .map_err(|e| format!("start native recording process: {e}"))?,
+                .map_err(|e| format!("start native recording process: {e}"))?
         );
         let deadline = Instant::now() + timeout;
         loop {
@@ -82,7 +82,7 @@ mod macos {
         run_bounded(
             Command::new("/usr/sbin/screencapture").args(["-x", "-o", "-l"]).arg(window.to_string()).arg(path),
             Duration::from_secs(5),
-            abort,
+            abort
         )?;
         let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
         if size == 0 {
@@ -92,7 +92,7 @@ mod macos {
     }
 
     fn encode(
-        dir: &Path, output: &Path, width: u32, height: u32, fps: u64, abort: Option<&AtomicBool>,
+        dir: &Path, output: &Path, width: u32, height: u32, fps: u64, abort: Option<&AtomicBool>
     ) -> Result<(), String> {
         let filter = format!(
             "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
@@ -105,7 +105,7 @@ mod macos {
                 .args(["-r", &fps.to_string(), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart"])
                 .arg(output),
             Duration::from_secs(30),
-            abort,
+            abort
         )
     }
 
@@ -253,7 +253,7 @@ mod macos {
             let session = sessions.get(window);
             Ok(
                 json!({"active":session.is_some_and(|s| s.worker.lock().expect("worker lock poisoned").as_ref().is_some_and(|w| !w.is_finished())),
-                "pending_result":session.is_some()}),
+                "pending_result":session.is_some()})
             )
         }
     }
@@ -264,7 +264,7 @@ mod macos {
             Some(value) => value
                 .as_u64()
                 .filter(|v| (min..=max).contains(v))
-                .ok_or_else(|| format!("{name} must be an integer in {min}..={max}")),
+                .ok_or_else(|| format!("{name} must be an integer in {min}..={max}"))
         }
     }
 
@@ -281,7 +281,7 @@ mod macos {
                 json!({"output_path":"relative.mp4"}),
                 json!({"output_path":"/tmp/x.png"}),
                 json!({"output_path":"/tmp/x.mp4","fps":0}),
-                json!({"output_path":"/tmp/x.mp4","max_duration_ms":null}),
+                json!({"output_path":"/tmp/x.mp4","max_duration_ms":null})
             ] {
                 assert!(videos.start("main", 1, &params).is_err());
             }
@@ -351,12 +351,12 @@ mod macos {
                 &[255; 16 * 16 * 4],
                 16,
                 16,
-                image::ColorType::Rgba8,
+                image::ColorType::Rgba8
             )
             .expect("png");
             std::fs::write(
                 dir.path().join("frames.txt"),
-                "file 'frame-000000.png'\nduration 0.2\nfile 'frame-000000.png'\n",
+                "file 'frame-000000.png'\nduration 0.2\nfile 'frame-000000.png'\n"
             )
             .expect("manifest");
             let output = dir.path().join("test.mp4");

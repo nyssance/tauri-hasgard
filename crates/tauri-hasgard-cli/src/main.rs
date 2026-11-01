@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use cli::{
     AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction, StorageArgs, Target,
-    parse_target,
+    parse_target
 };
 use client::Client;
 
@@ -149,7 +149,7 @@ enum OutputKind {
     Windows,
     Record,
     Replay,
-    Text,
+    Text
 }
 
 impl From<&Command> for OutputKind {
@@ -165,7 +165,7 @@ impl From<&Command> for OutputKind {
             Command::Windows => OutputKind::Windows,
             Command::Record { .. } => OutputKind::Record,
             Command::Replay { .. } => OutputKind::Replay,
-            _ => OutputKind::Text,
+            _ => OutputKind::Text
         }
     }
 }
@@ -211,7 +211,7 @@ fn format_result(kind: OutputKind, result: &serde_json::Value, emit_json: bool) 
                 println!("{formatted}");
             }
         }
-        OutputKind::Replay | OutputKind::Text => output::format_text(result),
+        OutputKind::Replay | OutputKind::Text => output::format_text(result)
     }
     Ok(())
 }
@@ -242,7 +242,7 @@ fn diagnose_versions(cli: &str, plugin: Option<&str>) -> (String, Option<String>
             Some(format!(
                 "Plugin {p} and CLI {cli} differ. Rebuild your app against \
                  tauri-plugin-hasgard {cli} (or match the CLI) so they stay in sync."
-            )),
+            ))
         ),
         None => (
             format!("Connected. Plugin <= 0.7.0, CLI {cli}."),
@@ -250,13 +250,13 @@ fn diagnose_versions(cli: &str, plugin: Option<&str>) -> (String, Option<String>
                 "This plugin predates version reporting (<= 0.7.0). If eval fails \
                  on macOS, bump tauri-plugin-hasgard to >= {cli} and rebuild the app \
                  (issue #135)."
-            )),
-        ),
+            ))
+        )
     }
 }
 
 async fn follow_logs(
-    client: &mut Client, emit_json: bool, level: Option<&str>, last: Option<usize>, window: Option<&str>,
+    client: &mut Client, emit_json: bool, level: Option<&str>, last: Option<usize>, window: Option<&str>
 ) -> Result<()> {
     let mut last_seen_id: u64 = 0;
     let mut first_poll = true;
@@ -294,7 +294,7 @@ async fn follow_logs(
 }
 
 async fn follow_network(
-    client: &mut Client, emit_json: bool, filter: Option<&str>, last: Option<usize>, failed: bool, window: Option<&str>,
+    client: &mut Client, emit_json: bool, filter: Option<&str>, last: Option<usize>, failed: bool, window: Option<&str>
 ) -> Result<()> {
     let mut last_seen_id: u64 = 0;
     let mut first_poll = true;
@@ -340,7 +340,7 @@ async fn follow_network(
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Scope<'a> {
     pub window: Option<&'a str>,
-    pub frame: &'a [String],
+    pub frame: &'a [String]
 }
 
 pub(crate) fn with_scope(params: Option<Value>, scope: Scope<'_>) -> Option<Value> {
@@ -350,7 +350,7 @@ pub(crate) fn with_scope(params: Option<Value>, scope: Scope<'_>) -> Option<Valu
     let mut map = match params {
         Some(Value::Object(map)) => map,
         Some(other) => return Some(other),
-        None => serde_json::Map::new(),
+        None => serde_json::Map::new()
     };
     if let Some(window) = scope.window {
         map.insert("window".to_string(), json!(window));
@@ -395,7 +395,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
                     let resolved = resolve_native_window_id(client, scope.window).await?;
                     client.call("screenshot_native", request(Some(resolved))).await
                 }
-                result => result,
+                result => result
             }
         }
         Command::Navigate { url } => client.call("navigate", with_scope(Some(json!({"url": url})), scope)).await,
@@ -425,19 +425,19 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
                     ("video.start", Some(json!({"output_path":output,"fps":fps,"max_duration_ms":max_duration_ms})))
                 }
                 cli::VideoAction::Stop => ("video.stop", None),
-                cli::VideoAction::Status => ("video.status", None),
+                cli::VideoAction::Status => ("video.status", None)
             };
             client.call(method, with_scope(params, scope)).await
         }
         Command::Record { action } => run_record_command(client, action, scope).await,
         Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), scope.window).await,
-        cmd => run_dom_command(client, cmd, scope).await,
+        cmd => run_dom_command(client, cmd, scope).await
     }
 }
 
 async fn run_snapshot_command(
     client: &mut Client, interactive: bool, selector: Option<String>, depth: Option<u8>,
-    save: Option<std::path::PathBuf>, window: Option<&str>,
+    save: Option<std::path::PathBuf>, window: Option<&str>
 ) -> Result<serde_json::Value> {
     tracing::info!(
         interactive,
@@ -452,7 +452,7 @@ async fn run_snapshot_command(
             "selector": selector,
             "depth": depth,
         })),
-        Scope { window, ..Scope::default() },
+        Scope { window, ..Scope::default() }
     );
     let mut result = client.call("snapshot", params).await?;
     if let Some(ref path) = save {
@@ -477,7 +477,7 @@ async fn run_snapshot_command(
 
 async fn run_watch_command(
     client: &mut Client, selector: Option<String>, timeout: u64, stable: u64, require_mutation: bool,
-    window: Option<&str>,
+    window: Option<&str>
 ) -> Result<serde_json::Value> {
     let mut params = serde_json::Map::new();
     params.insert("timeout".into(), json!(timeout));
@@ -495,7 +495,7 @@ async fn run_watch_command(
 
 async fn run_diff_command(
     client: &mut Client, ref_path: Option<std::path::PathBuf>, interactive: bool, selector: Option<String>,
-    depth: Option<u8>, window: Option<&str>,
+    depth: Option<u8>, window: Option<&str>
 ) -> Result<serde_json::Value> {
     let mut params = json!({
         "interactive": interactive,
@@ -534,7 +534,7 @@ async fn handle_eval(client: &mut Client, script: Option<String>, scope: Scope<'
             );
             read_script(&mut std::io::stdin())?
         }
-        Some(s) => s.to_owned(),
+        Some(s) => s.to_owned()
     };
     client.call("eval", with_scope(Some(json!({"script": script})), scope)).await
 }
@@ -568,7 +568,7 @@ async fn run_route_command(client: &mut Client, action: RouteCommand, scope: Sco
             ("route.add", Some(params))
         }
         RouteCommand::List => ("route.list", None),
-        RouteCommand::Clear => ("route.clear", None),
+        RouteCommand::Clear => ("route.clear", None)
     };
     client.call(method, with_scope(params, scope)).await
 }
@@ -576,7 +576,7 @@ async fn run_route_command(client: &mut Client, action: RouteCommand, scope: Sco
 #[allow(clippy::too_many_arguments)]
 async fn run_click(
     client: &mut Client, target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>,
-    position: Option<(f64, f64)>, scope: Scope<'_>,
+    position: Option<(f64, f64)>, scope: Scope<'_>
 ) -> Result<serde_json::Value> {
     let params = click_params(target, modifiers, button, click_count, position);
     client.call("click", with_scope(Some(params), scope)).await
@@ -622,7 +622,7 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
                 }
                 DialogCommand::Dismiss => ("dialog.handle", Some(json!({"action": "dismiss"}))),
                 DialogCommand::List => ("dialog.list", None),
-                DialogCommand::Clear => ("dialog.clear", None),
+                DialogCommand::Clear => ("dialog.clear", None)
             };
             client.call(method, with_scope(params, scope)).await
         }
@@ -668,7 +668,7 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             client
                 .call(
                     "scroll",
-                    with_scope(Some(json!({"direction": direction, "amount": amount, "ref": r#ref})), scope),
+                    with_scope(Some(json!({"direction": direction, "amount": amount, "ref": r#ref})), scope)
                 )
                 .await
         }
@@ -695,7 +695,7 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             }
             client.call("drag", with_scope(Some(p), scope)).await
         }
-        _ => anyhow::bail!("unexpected command in run_dom_command"),
+        _ => anyhow::bail!("unexpected command in run_dom_command")
     }
 }
 
@@ -729,7 +729,7 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, scope: Scope<
         AssertKind::Visible { target } => {
             let visible = require_bool_field(
                 &client.call("visible", with_scope(Some(target_params(&target)), scope)).await?,
-                "visible",
+                "visible"
             )?;
             if !visible {
                 assert_fail("element is not visible");
@@ -738,7 +738,7 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, scope: Scope<
         AssertKind::Hidden { target } => {
             let visible = require_bool_field(
                 &client.call("visible", with_scope(Some(target_params(&target)), scope)).await?,
-                "visible",
+                "visible"
             )?;
             if visible {
                 assert_fail("element is visible");
@@ -764,7 +764,7 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, scope: Scope<
         AssertKind::Checked { target } => {
             let checked = require_bool_field(
                 &client.call("checked", with_scope(Some(target_params(&target)), scope)).await?,
-                "checked",
+                "checked"
             )?;
             if !checked {
                 assert_fail("element is not checked");
@@ -789,19 +789,19 @@ async fn run_assert_command(client: &mut Client, kind: AssertKind, scope: Scope<
 }
 
 async fn run_ipc_command(
-    client: &mut Client, command: &str, args: Option<&str>, window: Option<&str>,
+    client: &mut Client, command: &str, args: Option<&str>, window: Option<&str>
 ) -> Result<serde_json::Value> {
     let parsed_args: Option<serde_json::Value> = args.map(serde_json::from_str).transpose()?;
     client
         .call(
             "ipc",
-            with_scope(Some(json!({"command": command, "args": parsed_args})), Scope { window, ..Scope::default() }),
+            with_scope(Some(json!({"command": command, "args": parsed_args})), Scope { window, ..Scope::default() })
         )
         .await
 }
 
 async fn run_logs_command(
-    client: &mut Client, level: Option<String>, last: Option<usize>, clear: bool, follow: bool, window: Option<&str>,
+    client: &mut Client, level: Option<String>, last: Option<usize>, clear: bool, follow: bool, window: Option<&str>
 ) -> Result<serde_json::Value> {
     if follow {
         anyhow::bail!("follow mode must be handled before run_command");
@@ -819,14 +819,14 @@ async fn run_logs_command(
     client
         .call(
             "console.getLogs",
-            with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() }),
+            with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() })
         )
         .await
 }
 
 async fn run_network_command(
     client: &mut Client, filter: Option<String>, failed: bool, last: Option<usize>, clear: bool, follow: bool,
-    window: Option<&str>,
+    window: Option<&str>
 ) -> Result<serde_json::Value> {
     if follow {
         anyhow::bail!("follow mode must be handled before run_command");
@@ -847,7 +847,7 @@ async fn run_network_command(
     client
         .call(
             "network.getRequests",
-            with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() }),
+            with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() })
         )
         .await
 }
@@ -858,7 +858,7 @@ async fn run_forms_command(client: &mut Client, args: FormsArgs, scope: Scope<'_
 }
 
 async fn run_storage_command(
-    client: &mut Client, args: StorageArgs, window: Option<&str>,
+    client: &mut Client, args: StorageArgs, window: Option<&str>
 ) -> Result<serde_json::Value> {
     let session = args.session;
     match args.action {
@@ -866,7 +866,7 @@ async fn run_storage_command(
             client
                 .call(
                     "storage.get",
-                    with_scope(Some(json!({"key": key, "session": session})), Scope { window, ..Scope::default() }),
+                    with_scope(Some(json!({"key": key, "session": session})), Scope { window, ..Scope::default() })
                 )
                 .await
         }
@@ -876,8 +876,8 @@ async fn run_storage_command(
                     "storage.set",
                     with_scope(
                         Some(json!({"key": key, "value": value, "session": session})),
-                        Scope { window, ..Scope::default() },
-                    ),
+                        Scope { window, ..Scope::default() }
+                    )
                 )
                 .await
         }
@@ -885,7 +885,7 @@ async fn run_storage_command(
             client
                 .call(
                     "storage.list",
-                    with_scope(Some(json!({"session": session})), Scope { window, ..Scope::default() }),
+                    with_scope(Some(json!({"session": session})), Scope { window, ..Scope::default() })
                 )
                 .await
         }
@@ -893,7 +893,7 @@ async fn run_storage_command(
             client
                 .call(
                     "storage.clear",
-                    with_scope(Some(json!({"session": session})), Scope { window, ..Scope::default() }),
+                    with_scope(Some(json!({"session": session})), Scope { window, ..Scope::default() })
                 )
                 .await
         }
@@ -927,7 +927,7 @@ fn encode_files(paths: &[std::path::PathBuf]) -> Result<Vec<serde_json::Value>> 
 }
 
 pub(crate) async fn run_drop_command(
-    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, window: Option<&str>,
+    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, window: Option<&str>
 ) -> Result<serde_json::Value> {
     let mut p = target_params(target);
     p["files"] = json!(encode_files(&file)?);
@@ -935,7 +935,7 @@ pub(crate) async fn run_drop_command(
 }
 
 pub(crate) async fn run_set_input_files_command(
-    client: &mut Client, target: &str, files: Vec<std::path::PathBuf>, window: Option<&str>,
+    client: &mut Client, target: &str, files: Vec<std::path::PathBuf>, window: Option<&str>
 ) -> Result<serde_json::Value> {
     let mut p = target_params(target);
     // An empty list is meaningful here, unlike for `drop`: it deselects.
@@ -991,7 +991,7 @@ pub(crate) fn target_params(raw: &str) -> serde_json::Value {
     match parse_target(raw) {
         Target::Ref(r) => json!({"ref": r}),
         Target::Selector(s) => json!({"selector": s}),
-        Target::Coords(x, y) => json!({"x": x, "y": y}),
+        Target::Coords(x, y) => json!({"x": x, "y": y})
     }
 }
 
@@ -1000,7 +1000,7 @@ pub(crate) fn target_params(raw: &str) -> serde_json::Value {
 /// Unset options are omitted rather than sent as null, so the bridge keeps
 /// applying its own defaults; sending `button: null` would fail its validation.
 pub(crate) fn click_params(
-    target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>, position: Option<(f64, f64)>,
+    target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>, position: Option<(f64, f64)>
 ) -> serde_json::Value {
     let mut params = target_params(target);
     if !modifiers.is_empty() {
@@ -1029,7 +1029,7 @@ pub(crate) fn click_params(
 /// - With neither target nor selector, only `gone`/`timeout` are sent and the
 ///   bridge `waitFor` rejects up-front (issue #74).
 pub(crate) fn build_wait_params(
-    target: Option<&str>, selector: Option<&str>, expression: Option<&str>, poll: Option<u64>, gone: bool, timeout: u64,
+    target: Option<&str>, selector: Option<&str>, expression: Option<&str>, poll: Option<u64>, gone: bool, timeout: u64
 ) -> serde_json::Value {
     // An expression wait has no element to observe, so `gone` is meaningless
     // here and clap rejects the combination up front. Send only what the
@@ -1050,9 +1050,9 @@ pub(crate) fn build_wait_params(
             Target::Ref(r) if r.is_empty() => json!({ "gone": gone, "timeout": timeout }),
             Target::Ref(r) => json!({ "ref": r, "gone": gone, "timeout": timeout }),
             Target::Selector(s) => json!({ "selector": s, "gone": gone, "timeout": timeout }),
-            Target::Coords(..) => json!({ "selector": t, "gone": gone, "timeout": timeout }),
+            Target::Coords(..) => json!({ "selector": t, "gone": gone, "timeout": timeout })
         },
-        (None, None) => json!({ "gone": gone, "timeout": timeout }),
+        (None, None) => json!({ "gone": gone, "timeout": timeout })
     }
 }
 
@@ -1073,7 +1073,7 @@ fn mime_from_ext(path: &std::path::Path) -> &'static str {
         Some("csv") => "text/csv",
         Some("xml") => "application/xml",
         Some("zip") => "application/zip",
-        _ => "application/octet-stream",
+        _ => "application/octet-stream"
     }
 }
 
@@ -1109,12 +1109,12 @@ async fn run_record_command(client: &mut Client, action: RecordAction, scope: Sc
                 "count": entries.len()
             }))
         }
-        RecordAction::Status => client.call("record.status", with_scope(None, scope)).await,
+        RecordAction::Status => client.call("record.status", with_scope(None, scope)).await
     }
 }
 
 pub(crate) async fn run_replay_command(
-    client: &mut Client, path: &std::path::Path, export: Option<&str>, window: Option<&str>,
+    client: &mut Client, path: &std::path::Path, export: Option<&str>, window: Option<&str>
 ) -> Result<Value> {
     let entries = read_replay_entries(path)?;
 
@@ -1339,7 +1339,7 @@ fn entry_to_cli_command(action: &str, entry: &Value) -> String {
                 (Some(s), Some(d), _) => format!("tauri-hasgard drag {s} {d}"),
                 (Some(s), None, Some(off)) => format!("tauri-hasgard drag {s} --offset {off}"),
                 (Some(s), None, None) => format!("tauri-hasgard drag {s}"),
-                _ => "# drag: missing source ref/selector".to_string(),
+                _ => "# drag: missing source ref/selector".to_string()
             }
         }
         "drop" => {
@@ -1360,7 +1360,7 @@ fn entry_to_cli_command(action: &str, entry: &Value) -> String {
 
 async fn run_scenario_command(
     scenario_path: &std::path::Path, junit: Option<&std::path::Path>, no_fail_fast: bool,
-    explicit_socket: Option<PathBuf>, window: Option<&str>,
+    explicit_socket: Option<PathBuf>, window: Option<&str>
 ) -> Result<()> {
     let loaded = scenario::load_scenario(scenario_path)?;
 
@@ -1374,7 +1374,7 @@ async fn run_scenario_command(
         Some(t) => tokio::time::timeout(t, Client::connect(&socket))
             .await
             .map_err(|_| anyhow::anyhow!("connection timed out after {}ms", t.as_millis()))??,
-        None => Client::connect(&socket).await?,
+        None => Client::connect(&socket).await?
     };
 
     let fail_fast_override = if no_fail_fast { Some(false) } else { None };
@@ -1436,7 +1436,7 @@ fn resolve_socket_windows() -> Result<PathBuf> {
                 }
                 alive
             }
-            Err(_) => false,
+            Err(_) => false
         }
     }
 
@@ -1444,7 +1444,7 @@ fn resolve_socket_windows() -> Result<PathBuf> {
     struct InstanceEntry {
         pid: u32,
         pipe: String,
-        created_at: u64,
+        created_at: u64
     }
 
     let local_app_data = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).ok_or_else(|| {
@@ -1490,7 +1490,7 @@ fn resolve_socket_windows() -> Result<PathBuf> {
         }
         let should_update = match newest {
             None => true,
-            Some((current_max, _)) => info.created_at > current_max,
+            Some((current_max, _)) => info.created_at > current_max
         };
         if should_update {
             newest = Some((info.created_at, PathBuf::from(info.pipe)));
@@ -1534,7 +1534,7 @@ mod tests {
     fn shell_export_preserves_each_recorded_window() {
         let script = super::export_shell_script(&[
             serde_json::json!({"action":"click","timestamp":0,"selector":"#save","window":"settings"}),
-            serde_json::json!({"action":"click","timestamp":1,"selector":"#save","window":"main"}),
+            serde_json::json!({"action":"click","timestamp":1,"selector":"#save","window":"main"})
         ]);
         assert!(script.contains("tauri-hasgard --window 'settings' click '#save'"));
         assert!(script.contains("tauri-hasgard --window 'main' click '#save'"));
@@ -1740,7 +1740,7 @@ mod tests {
                 "pipe": pipe,
                 "created_at": 1_745_200_000_u64
             }))
-            .expect("serialize mock entry"),
+            .expect("serialize mock entry")
         )
         .expect("write mock registry file");
 
@@ -1785,12 +1785,12 @@ mod tests {
         });
         std::fs::write(
             instances_dir.join("old_app.json"),
-            serde_json::to_string(&old_entry).expect("serialize old entry"),
+            serde_json::to_string(&old_entry).expect("serialize old entry")
         )
         .expect("write mock old instance");
         std::fs::write(
             instances_dir.join("new_app.json"),
-            serde_json::to_string(&new_entry).expect("serialize new entry"),
+            serde_json::to_string(&new_entry).expect("serialize new entry")
         )
         .expect("write mock new instance");
 

@@ -314,9 +314,9 @@ test("screenshotNative captures the webview itself when no window id is given", 
 
   expect(shot.backend).toBe("wkwebview")
   // No window listing round-trip: the plugin resolves the routed label and
-  // renders through WebKit, so the request carries only the output path.
+  // renders through WebKit using the window label and output path.
   expect(call).toHaveBeenCalledTimes(1)
-  expect(call).toHaveBeenLastCalledWith("screenshot_native", { output_path: "/tmp/shot.png" })
+  expect(call).toHaveBeenLastCalledWith("screenshot_native", { window: "settings", output_path: "/tmp/shot.png" })
 })
 
 test("an explicit windowId skips the lookup entirely", async () => {

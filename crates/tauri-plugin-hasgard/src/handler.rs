@@ -73,7 +73,7 @@ fn extract_window(params: Option<&serde_json::Value>) -> (Option<String>, Option
             }
             (Some(w), Some(cleaned))
         }
-        (w, _) => (w, None),
+        (w, _) => (w, None)
     }
 }
 
@@ -91,7 +91,7 @@ fn inject_plugin_version(result: &mut serde_json::Value) {
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub(crate) async fn dispatch(
     method: &str, params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>,
-    list_fn: Option<&ListWindowsFn>, press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
+    list_fn: Option<&ListWindowsFn>, press_hooks: Option<&PressHooksRef>, recorder: &Recorder
 ) -> Result<serde_json::Value, RpcError> {
     #[cfg(not(feature = "press"))]
     let _ = press_hooks;
@@ -100,7 +100,7 @@ pub(crate) async fn dispatch(
         let object = params.as_object().ok_or_else(|| RpcError {
             code: -32602,
             message: "params must be an object of named parameters".to_owned(),
-            data: None,
+            data: None
         })?;
         if let Some(window) = object.get("window")
             && window.as_str().is_none_or(str::is_empty)
@@ -114,7 +114,7 @@ pub(crate) async fn dispatch(
             return Err(RpcError {
                 code: -32602,
                 message: "timeout must be an integer between 0 and 2147483647 milliseconds".to_owned(),
-                data: None,
+                data: None
             });
         }
     }
@@ -152,7 +152,7 @@ pub(crate) async fn dispatch(
         "press" => Err(RpcError {
             code: -32601,
             message: "press disabled (compile `tauri-plugin-hasgard` with the `press` feature)".to_owned(),
-            data: None,
+            data: None
         }),
         "click" | "fill" | "type" | "select" | "check" | "scroll" | "drag" | "drop" | "text" | "html" | "value"
         | "attrs" | "eval" | "ipc" | "navigate" | "url" | "title" | "visible" | "count" | "checked" | "disabled"
@@ -190,7 +190,9 @@ pub(crate) async fn dispatch(
         // two surfaces can't be confused by callers or accidentally folded
         // together by a future refactor.
         "screenshot" => handle_eval_method(method, params, engine, eval_fn, win, SCREENSHOT_TIMEOUT).await,
-        "screenshot_native" => screenshot::handle_screenshot(params).await,
+        // Native capture resolves its own target; keep the window label that
+        // is stripped from parameters sent to the JavaScript bridge.
+        "screenshot_native" => screenshot::handle_screenshot(original_params).await,
         "console.getLogs" => handle_eval_method("consoleLogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "console.clear" => handle_eval_method("clearLogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "network.getRequests" => {
@@ -218,7 +220,7 @@ pub(crate) async fn dispatch(
                     let listing = list_fn.ok_or_else(|| RpcError {
                         code: -32603,
                         message: "No window manager available".into(),
-                        data: None,
+                        data: None
                     })?()
                     .map_err(|message| RpcError { code: -32603, message, data: None })?;
                     let id = listing
@@ -233,7 +235,7 @@ pub(crate) async fn dispatch(
                         .ok_or_else(|| RpcError {
                             code: -32602,
                             message: format!("No native window ID for '{label}'"),
-                            data: None,
+                            data: None
                         })?;
                     Some(id)
                 } else {
@@ -243,7 +245,7 @@ pub(crate) async fn dispatch(
                 tokio::task::spawn_blocking(move || match method.as_str() {
                     "video.start" => videos.start(&label, native_id.expect("start resolves native ID"), &params),
                     "video.stop" => videos.stop(&label),
-                    _ => videos.status(&label),
+                    _ => videos.status(&label)
                 })
                 .await
                 .map_err(|e| RpcError { code: -32603, message: e.to_string(), data: None })?
@@ -254,7 +256,7 @@ pub(crate) async fn dispatch(
                 Err(RpcError {
                     code: -32603,
                     message: "Native video recording is supported on macOS only".into(),
-                    data: None,
+                    data: None
                 })
             }
         }
@@ -266,7 +268,7 @@ pub(crate) async fn dispatch(
             let entries = recorder.stop().ok_or_else(|| RpcError {
                 code: -32602,
                 message: "No active recording; call record.start first".to_owned(),
-                data: None,
+                data: None
             })?;
             let count = entries.len();
             Ok(serde_json::json!({"entries": entries, "count": count}))
@@ -278,7 +280,7 @@ pub(crate) async fn dispatch(
             recorder.add_entry(entry);
             Ok(serde_json::json!({"status": "ok"}))
         }
-        _ => Err(RpcError { code: -32601, message: format!("Method not found: {method}"), data: None }),
+        _ => Err(RpcError { code: -32601, message: format!("Method not found: {method}"), data: None })
     };
 
     // Auto-record on successful dispatches
@@ -291,12 +293,12 @@ pub(crate) async fn dispatch(
 
 /// Handle the "diff" method: take a new snapshot, compare with the reference, and return `DiffResult`.
 async fn handle_diff(
-    params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>, window: Option<&str>,
+    params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>, window: Option<&str>
 ) -> Result<serde_json::Value, RpcError> {
     let eval_fn = eval_fn.ok_or_else(|| RpcError {
         code: -32603,
         message: "No webview available for eval".to_owned(),
-        data: None,
+        data: None
     })?;
 
     // Determine reference snapshot: from params["reference"] or last stored snapshot
@@ -306,7 +308,7 @@ async fn handle_diff(
         engine.get_last_snapshot(window).ok_or_else(|| RpcError {
             code: -32602,
             message: "No previous snapshot available. Run `snapshot` first or use `diff --ref <file>`".to_owned(),
-            data: None,
+            data: None
         })?
     };
 
@@ -322,7 +324,7 @@ async fn handle_diff(
     let script = build_bridge_call("snapshot", snapshot_params.as_ref()).map_err(|msg| RpcError {
         code: -32602,
         message: msg,
-        data: None,
+        data: None
     })?;
     let (id, rx) = engine.register();
     let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
@@ -332,14 +334,14 @@ async fn handle_diff(
         return Err(RpcError {
             code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
             message: format!("Eval failed: {e}"),
-            data: None,
+            data: None
         });
     }
 
     let result = engine.wait(id, rx, DEFAULT_TIMEOUT).await.map_err(|e| RpcError {
         code: -32603,
         message: format!("Eval error: {e}"),
-        data: None,
+        data: None
     })?;
 
     // Parse both snapshots: extract "elements" arrays
@@ -348,13 +350,13 @@ async fn handle_diff(
         .ok_or_else(|| RpcError {
             code: -32602,
             message: "Reference snapshot requires an elements array".to_owned(),
-            data: None,
+            data: None
         })
         .map(|v| serde_json::from_value(v.clone()))?
         .map_err(|e| RpcError {
             code: -32602,
             message: format!("Failed to parse reference snapshot elements: {e}"),
-            data: None,
+            data: None
         })?;
 
     let new_elements: Vec<diff::SnapshotElement> = result
@@ -362,13 +364,13 @@ async fn handle_diff(
         .ok_or_else(|| RpcError {
             code: -32603,
             message: "New snapshot is missing its elements array".to_owned(),
-            data: None,
+            data: None
         })
         .map(|v| serde_json::from_value(v.clone()))?
         .map_err(|e| RpcError {
             code: -32603,
             message: format!("Failed to parse new snapshot elements: {e}"),
-            data: None,
+            data: None
         })?;
 
     let diff_result = diff::compute_diff(&old_elements, &new_elements);
@@ -379,7 +381,7 @@ async fn handle_diff(
     serde_json::to_value(&diff_result).map_err(|e| RpcError {
         code: -32603,
         message: format!("Serialization error: {e}"),
-        data: None,
+        data: None
     })
 }
 
@@ -387,7 +389,7 @@ async fn handle_diff(
 struct PressRequest<'a> {
     key_str: &'a str,
     wait_for: Option<&'a str>,
-    webview_completion: bool,
+    webview_completion: bool
 }
 
 #[cfg(feature = "press")]
@@ -403,7 +405,7 @@ fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, R
             value.as_str().filter(|s| !s.trim().is_empty()).ok_or_else(|| RpcError {
                 code: -32602,
                 message: "press waitFor must be a non-empty JavaScript expression".to_owned(),
-                data: None,
+                data: None
             })
         })
         .transpose()?;
@@ -415,8 +417,8 @@ fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, R
             || RpcError {
                 code: -32602,
                 message: "press requires a non-empty \"key\" string param".to_owned(),
-                data: None,
-            },
+                data: None
+            }
         )?;
 
     // Parse the combo up front: a bad combo is a client input error, so we
@@ -426,15 +428,15 @@ fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, R
     let parsed = key::parse_combo(key_str).map_err(|e| RpcError {
         code: -32602,
         message: format!("invalid press combo: {e}"),
-        data: None,
+        data: None
     })?;
     let completion = match params.and_then(|p| p.get("completion")) {
         None => "webview",
         Some(value) => value.as_str().filter(|s| matches!(*s, "webview" | "native")).ok_or_else(|| RpcError {
             code: -32602,
             message: "press completion must be webview or native".to_owned(),
-            data: None,
-        })?,
+            data: None
+        })?
     };
     let modifier_only =
         matches!(parsed.key, enigo::Key::Shift | enigo::Key::Control | enigo::Key::Alt | enigo::Key::Meta);
@@ -444,7 +446,7 @@ fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, R
         return Err(RpcError {
             code: -32602,
             message: "press postcondition timeout must be an integer between 0 and 10000 milliseconds".to_owned(),
-            data: None,
+            data: None
         });
     }
 
@@ -465,21 +467,17 @@ fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, R
 #[cfg(feature = "press")]
 async fn handle_press(
     params: Option<&serde_json::Value>, press_hooks: Option<&PressHooksRef>, window: Option<&str>, engine: &EvalEngine,
-    eval_fn: Option<&EvalFn>,
+    eval_fn: Option<&EvalFn>
 ) -> Result<serde_json::Value, RpcError> {
     let PressRequest { key_str, wait_for, webview_completion } = parse_press(params)?;
     if (webview_completion || wait_for.is_some()) && eval_fn.is_none() {
-        return Err(RpcError {
-            code: -32603,
-            message: "press completion requires an eval host".to_owned(),
-            data: None,
-        });
+        return Err(RpcError { code: -32603, message: "press completion requires an eval host".to_owned(), data: None });
     }
 
     let hooks = press_hooks.cloned().ok_or_else(|| RpcError {
         code: -32603,
         message: "native press requires host focus and injection hooks".to_owned(),
-        data: None,
+        data: None
     })?;
 
     // Serialize focus and injection, including requests on different sockets.
@@ -520,7 +518,7 @@ async fn handle_press(
             injection_window.as_deref(),
             marker,
             webview_completion,
-            Box::new(move || key::simulate_press(&combo, marker).map_err(|e| e.to_string())),
+            Box::new(move || key::simulate_press(&combo, marker).map_err(|e| e.to_string()))
         )
     })
     .await
@@ -545,7 +543,7 @@ async fn handle_press(
                 .await
                 .map(|_| ())
         }
-        other => other,
+        other => other
     };
     if webview_completion {
         // The bridge also expires observers itself, so navigation or a dead
@@ -575,7 +573,7 @@ async fn handle_press(
             engine,
             eval_fn,
             window,
-            bridge_eval_timeout(Some(&wait_params)),
+            bridge_eval_timeout(Some(&wait_params))
         )
         .await
         .map_err(|mut error| {
@@ -592,19 +590,19 @@ fn injection_error(error: &crate::server::InjectionError) -> RpcError {
     RpcError {
         code: -32603,
         message: format!("press failed: {}", error.message),
-        data: Some(serde_json::json!({"phase":"injection", "injected":injected})),
+        data: Some(serde_json::json!({"phase":"injection", "injected":injected}))
     }
 }
 
 /// Handle a method that requires JS evaluation via the bridge.
 async fn handle_eval_method(
     method: &str, params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>,
-    window: Option<&str>, timeout: Duration,
+    window: Option<&str>, timeout: Duration
 ) -> Result<serde_json::Value, RpcError> {
     let eval_fn = eval_fn.ok_or_else(|| RpcError {
         code: -32603,
         message: "No webview available for eval".to_owned(),
-        data: None,
+        data: None
     })?;
 
     let script =
@@ -618,14 +616,14 @@ async fn handle_eval_method(
         return Err(RpcError {
             code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
             message: format!("Eval failed: {e}"),
-            data: None,
+            data: None
         });
     }
 
     engine.wait(id, rx, timeout).await.map_err(|e| RpcError {
         code: -32603,
         message: format!("Eval error: {e}"),
-        data: None,
+        data: None
     })
 }
 
@@ -634,7 +632,7 @@ async fn handle_eval_method(
 fn build_bridge_call(method: &str, params: Option<&serde_json::Value>) -> Result<String, String> {
     let args = match params {
         Some(v) if !v.is_null() => v.to_string(),
-        _ => "{}".to_owned(),
+        _ => "{}".to_owned()
     };
 
     if method == "navigate" {
@@ -672,7 +670,7 @@ pub(crate) fn handle_callback(engine: &EvalEngine, id: u64, result: Option<Strin
             serde_json::from_str(&result).map_err(|error| format!("Invalid callback result JSON: {error}"))
         }
         (None, Some(error)) => Err(error),
-        _ => Err("Callback requires exactly one of result or error".to_owned()),
+        _ => Err("Callback requires exactly one of result or error".to_owned())
     };
     engine.resolve(id, outcome);
 }
@@ -681,7 +679,7 @@ fn callback_outcome(result: Option<String>, error: Option<String>) -> Result<ser
     match (result, error) {
         (Some(result), None) => serde_json::from_str(&result).map_err(|e| format!("Invalid callback result JSON: {e}")),
         (None, Some(error)) => Err(error),
-        _ => Err("Callback requires exactly one of result or error".to_owned()),
+        _ => Err("Callback requires exactly one of result or error".to_owned())
     }
 }
 
@@ -689,7 +687,7 @@ fn callback_outcome(result: Option<String>, error: Option<String>) -> Result<ser
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn callback<R: tauri::Runtime>(
     eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
-    error: Option<String>, nonce: Option<String>,
+    error: Option<String>, nonce: Option<String>
 ) -> Result<(), String> {
     let url = webview.url().map_err(|e| e.to_string())?;
     if id == 0 {
@@ -708,7 +706,7 @@ pub(crate) fn callback<R: tauri::Runtime>(
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn __callback<R: tauri::Runtime>(
     eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
-    error: Option<String>, nonce: Option<String>,
+    error: Option<String>, nonce: Option<String>
 ) -> Result<(), String> {
     callback(eval_engine, webview, id, result, error, nonce)
 }
@@ -812,7 +810,7 @@ mod tests {
             None,
             None,
             None,
-            &Recorder::new(),
+            &Recorder::new()
         )
         .await;
         let err = result.expect_err("dispatch returns Err");
@@ -834,7 +832,7 @@ mod tests {
     async fn default_window_focus_failure_never_injects_keys() {
         let hooks = std::sync::Arc::new(crate::server::PressHooks {
             focus: Box::new(|_| Err("focus denied".to_owned())),
-            run_injection: Box::new(|_, _, _, _| panic!("must not inject after failed focus")),
+            run_injection: Box::new(|_, _, _, _| panic!("must not inject after failed focus"))
         });
         let error = dispatch(
             "press",
@@ -843,7 +841,7 @@ mod tests {
             None,
             None,
             Some(&hooks),
-            &Recorder::new(),
+            &Recorder::new()
         )
         .await
         .expect_err("focus must fail closed");
@@ -859,7 +857,7 @@ mod tests {
                 focus: Box::new(|_| Ok(())),
                 run_injection: Box::new(move |_, _, _, _| {
                     Err(crate::server::InjectionError { message: "injection rejected".to_owned(), started })
-                }),
+                })
             });
             let error = dispatch(
                 "press",
@@ -868,7 +866,7 @@ mod tests {
                 None,
                 None,
                 Some(&hooks),
-                &Recorder::new(),
+                &Recorder::new()
             )
             .await
             .expect_err("runner failed");
@@ -889,7 +887,7 @@ mod tests {
             None,
             None,
             None,
-            &Recorder::new(),
+            &Recorder::new()
         )
         .await
         .expect_err("missing hooks must fail closed");
@@ -1463,7 +1461,7 @@ mod tests {
             Some(&eval_fn),
             None,
             None,
-            &Recorder::new(),
+            &Recorder::new()
         )
         .await
         .expect_err("dispatch must time out");
@@ -1488,7 +1486,7 @@ mod tests {
             Some(&eval_fn),
             None,
             None,
-            &Recorder::new(),
+            &Recorder::new()
         )
         .await
         .expect_err("dispatch must time out");
@@ -1519,7 +1517,7 @@ mod tests {
             Some(&eval_fn),
             None,
             None,
-            &Recorder::new(),
+            &Recorder::new()
         )
         .await
         .expect("dispatch should resolve via callback, not time out");

@@ -702,6 +702,7 @@ export class HasgardWindow {
     // on-screen window at the window-server level instead.
     const value = expectRecord(
       await this.rpc.call("screenshot_native", {
+        window: this.label,
         ...(options.windowId === undefined ? {} : { window_id: options.windowId }),
         output_path: options.outputPath
       }),

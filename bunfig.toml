@@ -5,6 +5,10 @@ trailingComma = "none"
 sortImports = true
 ignorePatterns = [
   "bun.lock",
+  "**/*.svg",
+  "**/*.html",
+  "**/*.md",
+  "package.json",
   "**/dist/**",
   "target/**",
   "benchmarks/macos/results/**",

@@ -9,20 +9,20 @@ pub(crate) struct RecordEntry {
     pub action: String,
     pub timestamp: u64,
     #[serde(flatten)]
-    pub params: serde_json::Map<String, Value>,
+    pub params: serde_json::Map<String, Value>
 }
 
 struct RecorderState {
     active: bool,
     start_time: Option<Instant>,
-    entries: Vec<RecordEntry>,
+    entries: Vec<RecordEntry>
 }
 
 /// Recording engine — wraps state in `Arc<Mutex<...>>` so it can be cloned
 /// and shared across connection tasks (same pattern as `EvalEngine`).
 #[derive(Clone)]
 pub(crate) struct Recorder {
-    state: Arc<Mutex<RecorderState>>,
+    state: Arc<Mutex<RecorderState>>
 }
 
 impl Recorder {
@@ -191,7 +191,7 @@ mod tests {
                 let mut m = serde_json::Map::new();
                 m.insert("url".to_string(), json!("/home"));
                 m
-            },
+            }
         };
         rec.add_entry(entry);
         let entries = rec.stop().expect("recording active");

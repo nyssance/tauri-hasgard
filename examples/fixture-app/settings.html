@@ -4,19 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Settings</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <main>
-      <h1>Settings</h1>
-      <label for="theme">Theme</label>
-      <select id="theme">
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-      <button id="apply" type="button">Apply</button>
-      <output id="settings-status" role="status"></output>
-      <label for="settings-key-probe">Settings key probe</label>
-      <input id="settings-key-probe" />
+      <header class="toolbar">
+        <h1>Settings</h1>
+        <label for="theme">Theme</label>
+        <select id="theme">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <button class="primary" id="apply" type="button">Apply</button>
+        <output id="settings-status" role="status"></output>
+      </header>
+      <section class="probe-group">
+        <h2>Keyboard</h2>
+        <label for="settings-key-probe">Settings key probe</label>
+        <input id="settings-key-probe" />
+      </section>
     </main>
     <script type="module" src="/src/settings.ts"></script>
   </body>

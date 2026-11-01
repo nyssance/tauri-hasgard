@@ -19,7 +19,7 @@ pub(crate) struct WebviewSnapshot {
     /// `NSWindow` number of the hosting window, when it could be read.
     pub(crate) window_id: Option<u32>,
     /// Backing scale of the hosting window, so callers can relate pixels to points.
-    pub(crate) scale_factor: f64,
+    pub(crate) scale_factor: f64
 }
 
 /// `WebKit` renders the snapshot on its own schedule; a wedged `WebContent`
@@ -38,10 +38,10 @@ const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 /// be reached, `WebKit` reports an error or no image, the image cannot be
 /// encoded as PNG, or the completion handler never fires.
 pub(crate) fn capture_wkwebview_png<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::WebviewWindow<R>
 ) -> Result<WebviewSnapshot, ScreenshotError>
 where
-    R::Handle: tauri_runtime_wry::AsWryHandle,
+    R::Handle: tauri_runtime_wry::AsWryHandle
 {
     use block2::RcBlock;
     use objc2::{MainThreadMarker, MainThreadOnly};

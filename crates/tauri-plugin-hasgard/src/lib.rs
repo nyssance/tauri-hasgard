@@ -47,7 +47,7 @@ pub(crate) const BRIDGE_JS: &str =
 #[must_use]
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R>
 where
-    R::Handle: tauri_runtime_wry::AsWryHandle,
+    R::Handle: tauri_runtime_wry::AsWryHandle
 {
     #[cfg(not(all(any(unix, windows), debug_assertions)))]
     {
@@ -212,7 +212,7 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
 #[cfg(all(target_os = "macos", debug_assertions))]
 fn make_snapshot_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> screenshot::SnapshotFn
 where
-    R::Handle: tauri_runtime_wry::AsWryHandle,
+    R::Handle: tauri_runtime_wry::AsWryHandle
 {
     let handle = app.clone();
     Arc::new(move |window: Option<&str>| {
@@ -225,7 +225,7 @@ where
 #[cfg(all(any(unix, windows), debug_assertions))]
 fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef
 where
-    R::Handle: tauri_runtime_wry::AsWryHandle,
+    R::Handle: tauri_runtime_wry::AsWryHandle
 {
     let focus_handle = app.clone();
     // Only the macOS runner hops threads; elsewhere this handle would be an
@@ -275,7 +275,7 @@ where
             let label = label.unwrap_or("main");
             let target = main_handle.get_webview_window(label).ok_or_else(|| server::InjectionError {
                 message: format!("Window '{label}' not found"),
-                started: false,
+                started: false
             })?;
             macos_keyboard::inject(&target, marker, confirm, task)
         }),
@@ -287,7 +287,7 @@ where
         #[cfg(not(target_os = "macos"))]
         run_injection: Box::new(|_window, _marker, _confirm, task| {
             task().map_err(|message| server::InjectionError { message, started: true })
-        }),
+        })
     })
 }
 

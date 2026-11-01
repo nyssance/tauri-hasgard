@@ -14,6 +14,7 @@
       {
         "label": "main",
         "title": "Hasgard Fixture",
+        "visible": false,
         "width": 900,
         "height": 700
       },

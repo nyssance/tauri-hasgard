@@ -14,7 +14,7 @@ pub(crate) enum ScreenshotBackend {
     /// `PERMISSION_DENIED` IPC error. Never constructed today; the non-macOS
     /// IPC branch short-circuits before reaching the probe.
     #[allow(dead_code, reason = "kept for the exhaustive match in the macOS dispatcher")]
-    PlatformUnsupported,
+    PlatformUnsupported
 }
 
 static BACKEND: OnceLock<ScreenshotBackend> = OnceLock::new();

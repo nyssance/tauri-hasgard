@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   native-e2e:
+    env:
+      TAURI_HASGARD_DISPLAY: "0"
     strategy:
       fail-fast: false
       matrix:

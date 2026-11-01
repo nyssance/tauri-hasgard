@@ -2128,6 +2128,7 @@
     })
     const entry = { promise, cleanup: null }
     const pressedCodes = new Set()
+    const releasedCodes = new Set()
     let sawMainKey = false
     function removeListeners() {
       for (const context of contexts) {
@@ -2139,10 +2140,20 @@
       if (event.isTrusted && event.code) {
         pressedCodes.add(event.code)
         if (!/^(Shift|Control|Alt|Meta)(Left|Right)$/.test(event.code)) sawMainKey = true
+        complete()
       }
     }
     function released(event) {
-      if (!event.isTrusted || !pressedCodes.delete(event.code) || pressedCodes.size !== 0 || !sawMainKey) return
+      if (!event.isTrusted || !event.code) return
+      releasedCodes.add(event.code)
+      complete()
+    }
+    function complete() {
+      // WebKit can deliver keyup before the corresponding keydown while
+      // processing native input. Require both trusted events for every code,
+      // including modifiers, without assuming their DOM delivery order.
+      if (!sawMainKey || pressedCodes.size !== releasedCodes.size) return
+      for (const code of pressedCodes) if (!releasedCodes.has(code)) return
       removeListeners()
       resolve({ ok: true })
     }

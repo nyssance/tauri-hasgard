@@ -21,7 +21,7 @@ fn fixture_shortcut(app: tauri::AppHandle, action: String) -> Result<u32, String
         }
         "unregister" => app.global_shortcut().unregister("Control+Alt+Shift+F12").map_err(|e| e.to_string())?,
         "count" => (),
-        _ => return Err("Unknown shortcut fixture action".to_owned()),
+        _ => return Err("Unknown shortcut fixture action".to_owned())
     }
     Ok(SHORTCUT_COUNT.load(Ordering::SeqCst))
 }
@@ -47,6 +47,30 @@ pub fn run() {
     }
     let builder = tauri::Builder::default()
         .runtime(tauri_runtime_wry::Wry::default())
+        .setup(|app| {
+            // Keep fixture windows hidden until they are on the chosen display.
+            // Local debugging defaults to a secondary display; CI opts into 0.
+            let wanted = match std::env::var("TAURI_HASGARD_DISPLAY") {
+                Ok(value) => value,
+                Err(std::env::VarError::NotPresent) => "secondary".to_owned(),
+                Err(error) => return Err(error.into())
+            };
+            let monitors = app.available_monitors()?;
+            let primary = app.primary_monitor()?.ok_or("Primary display not found")?;
+            let target = if wanted.eq_ignore_ascii_case("secondary") {
+                monitors.iter().find(|monitor| monitor.position() != primary.position())
+            } else if let Ok(index) = wanted.parse::<usize>() {
+                monitors.get(index)
+            } else {
+                monitors.iter().find(|monitor| monitor.name().is_some_and(|name| name.eq_ignore_ascii_case(&wanted)))
+            }
+            .ok_or_else(|| format!("Display '{wanted}' not found; fixture will not open on another display"))?;
+            for window in app.webview_windows().values() {
+                window.set_position(*target.position())?;
+            }
+            app.get_webview_window("main").ok_or("Main window not found")?.show()?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![open_settings, fixture_process_id]);
 
     #[cfg(all(target_os = "macos", feature = "hasgard-testing"))]

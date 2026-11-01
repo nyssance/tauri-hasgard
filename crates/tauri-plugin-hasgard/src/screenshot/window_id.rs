@@ -8,7 +8,7 @@ pub(crate) struct DiscoveredWindow {
     pub(crate) window_id: u32,
     pub(crate) owner: String,
     pub(crate) title: String,
-    pub(crate) layer: i32,
+    pub(crate) layer: i32
 }
 
 /// Logical (in points, not pixels) bounds of a window, used to derive
@@ -16,7 +16,7 @@ pub(crate) struct DiscoveredWindow {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct WindowBounds {
     pub(crate) width: f64,
-    pub(crate) height: f64,
+    pub(crate) height: f64
 }
 
 /// Result of a single-pass walk over the on-screen window list. Bundles the
@@ -24,7 +24,7 @@ pub(crate) struct WindowBounds {
 /// with the bounds of the requested target (when it is a layer-0 window).
 pub(crate) struct EnumeratedLayerZeroWindows {
     pub(crate) available: Vec<DiscoveredWindow>,
-    pub(crate) target_bounds: Option<WindowBounds>,
+    pub(crate) target_bounds: Option<WindowBounds>
 }
 
 /// Hard cap on the `available_windows` list returned in `WINDOW_NOT_FOUND`
@@ -55,7 +55,7 @@ pub(crate) fn enumerate_layer_zero_windows(target: u32) -> Result<EnumeratedLaye
     use core_graphics::window::{
         CGWindowListCopyWindowInfo, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer,
         kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowName, kCGWindowNumber,
-        kCGWindowOwnerName,
+        kCGWindowOwnerName
     };
 
     // SAFETY: `CGWindowListCopyWindowInfo` is a thread-safe CoreGraphics entry
@@ -68,7 +68,7 @@ pub(crate) fn enumerate_layer_zero_windows(target: u32) -> Result<EnumeratedLaye
     let raw = unsafe {
         CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-            kCGNullWindowID,
+            kCGNullWindowID
         )
     };
     if raw.is_null() {

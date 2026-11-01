@@ -17,7 +17,7 @@ pub(crate) struct Display {
     pub y: f64,
     pub width: f64,
     pub height: f64,
-    pub primary: bool,
+    pub primary: bool
 }
 
 /// The display a `TAURI_HASGARD_DISPLAY` value names.
@@ -54,7 +54,7 @@ pub(crate) fn place<R: tauri::Runtime>(window: &tauri::Window<R>) {
                     y: position.y,
                     width: size.width,
                     height: size.height,
-                    primary: Some(*monitor.position()) == primary,
+                    primary: Some(*monitor.position()) == primary
                 }
             })
             .collect(),
@@ -95,7 +95,7 @@ mod tests {
                 y: 0.0,
                 width: 1152.0,
                 height: 2048.0,
-                primary: false,
+                primary: false
             },
         ]
     }

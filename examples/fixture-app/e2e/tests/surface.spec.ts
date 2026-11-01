@@ -228,6 +228,24 @@ test("captures the webview through WebKit without being told a window id", async
   expect(shot.byte_size).toBeGreaterThan(1_000)
 })
 
+test("native screenshots stay scoped to differently sized windows", async ({ hasgard, window }, testInfo) => {
+  test.skip(process.platform !== "darwin", "native capture is macOS-only")
+  await window.locator("#open-settings").click()
+  const settings = await hasgard.waitForWindowReady("settings", 'html[data-hasgard-ready="true"]', 5_000)
+  const mainShot = await window.screenshotNative({ outputPath: testInfo.outputPath("main-scoped.png") })
+  const settingsShot = await settings.screenshotNative({ outputPath: testInfo.outputPath("settings-scoped.png") })
+
+  expect(mainShot.window_id).toBe(await window.nativeId())
+  expect(settingsShot.window_id).toBe(await settings.nativeId())
+  expect(settingsShot.window_id).not.toBe(mainShot.window_id)
+  const width = await settings.evaluate<number>("innerWidth * devicePixelRatio")
+  expect(settingsShot.width).toBe(Math.round(width))
+  expect(settingsShot.width).toBeLessThan(mainShot.width)
+  await expect(
+    hasgard.window("missing-window").screenshotNative({ outputPath: testInfo.outputPath("missing.png") })
+  ).rejects.toThrow(/not found/)
+})
+
 // A plain character is the case that used to abort the entire host application:
 // enigo's layout lookup calls TSMGetInputSourceProperty, which asserts it is on
 // the main dispatch queue and raises SIGTRAP anywhere else. Named keys like Tab
