@@ -18,7 +18,6 @@ const hash = (name) =>
     .digest("hex")
 
 const macArm = `${asset("aarch64-apple-darwin")}.tar.gz`
-const winArm = `${asset("aarch64-pc-windows-msvc")}.zip`
 const winIntel = `${asset("x86_64-pc-windows-msvc")}.zip`
 
 const formula = `class TauriHasgard < Formula
@@ -48,8 +47,7 @@ const scoop = {
   homepage: repository,
   license: "Apache-2.0",
   architecture: {
-    "64bit": { url: `${release}/${winIntel}`, hash: hash(winIntel), extract_dir: asset("x86_64-pc-windows-msvc") },
-    arm64: { url: `${release}/${winArm}`, hash: hash(winArm), extract_dir: asset("aarch64-pc-windows-msvc") }
+    "64bit": { url: `${release}/${winIntel}`, hash: hash(winIntel), extract_dir: asset("x86_64-pc-windows-msvc") }
   },
   bin: "tauri-hasgard.exe",
   checkver: { github: repository },
@@ -58,10 +56,6 @@ const scoop = {
       "64bit": {
         url: `${repository}/releases/download/v$version/tauri-hasgard-$version-x86_64-pc-windows-msvc.zip`,
         extract_dir: "tauri-hasgard-$version-x86_64-pc-windows-msvc"
-      },
-      arm64: {
-        url: `${repository}/releases/download/v$version/tauri-hasgard-$version-aarch64-pc-windows-msvc.zip`,
-        extract_dir: "tauri-hasgard-$version-aarch64-pc-windows-msvc"
       }
     }
   }

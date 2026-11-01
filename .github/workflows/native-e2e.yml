@@ -48,13 +48,3 @@ jobs:
           name: playwright-report-${{ matrix.target }}
           path: examples/fixture-app/playwright-report
           if-no-files-found: ignore
-
-  windows-arm64-check:
-    runs-on: windows-11-arm
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-arm64-check
-      - run: cargo check --workspace --all-features --locked

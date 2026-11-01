@@ -9,4 +9,4 @@ Fix native keyboard completion and multi-window screenshots, and improve the exa
 
 Validated locally on macOS: 74 native E2E tests, three 200-round multi-window keyboard stress cases, 130 client unit tests, 138 bridge tests, and the Rust workspace tests. Cross-platform checks run in the release workflow.
 
-Requires Tauri 3 + Wry. Tauri 2 applications should use Hasgard 0.5.x. macOS supports Apple Silicon only.
+Requires Tauri 3 + Wry. Tauri 2 applications should use Hasgard 0.5.x. CLI binaries: macOS Apple Silicon, Windows x64, and Linux x64.

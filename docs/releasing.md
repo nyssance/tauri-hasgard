@@ -50,7 +50,7 @@ git push origin --force v0.2.1
 ```
 
 The release workflow validates the version, tests the workspace, publishes both Rust crates and the
-npm package, builds six CLI archives, creates checksums and GitHub provenance attestations, creates
+npm package, builds three CLI archives (macOS Apple Silicon, Windows x64, Linux x64), creates checksums and GitHub provenance attestations, creates
 the GitHub Release, then updates the Homebrew Tap and Scoop Bucket with a short-lived GitHub App
 installation token. Every CLI archive and the npm package include `LICENSE` and `NOTICE.md`.
 

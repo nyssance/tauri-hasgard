@@ -19,8 +19,7 @@ cargo install tauri-hasgard-cli
 ```
 
 The Homebrew formula lives in `nyssance/tap`, not in homebrew-core, so the
-`nyssance/tap/` prefix is required. Prebuilt archives for all five supported
-targets are attached to each [GitHub Release](https://github.com/nyssance/tauri-hasgard/releases).
+`nyssance/tap/` prefix is required. Prebuilt archives for macOS Apple Silicon, Windows x64, and Linux x64 are attached to each [GitHub Release](https://github.com/nyssance/tauri-hasgard/releases).
 
 ## Start and inspect the app
 

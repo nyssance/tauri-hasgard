@@ -10,3 +10,4 @@
 - Keep stable Rust dependency requirements concise: major version for 1.0+, major.minor for 0.x. Keep required prerelease identifiers; lock exact resolved versions in Cargo.lock.
 - Match alwith-desktop formatting: use the shared Bun formatting options and rustfmt.toml, run Rust formatting with nightly so unstable options are applied. Keep generated and upstream vendor files excluded.
 - CI and release validation test native behavior on macOS and Windows only. Do not add Linux Rust or native E2E test jobs; keep Linux release artifact builds.
+- Publish CLI archives only for macOS Apple Silicon (aarch64-apple-darwin), Windows x64 (x86_64-pc-windows-msvc), and Linux x64 (x86_64-unknown-linux-gnu). Do not add Windows ARM64 or Linux ARM64 jobs or manifests.
