@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3 — 2026-11-01
+
+- Send the target window label in native screenshot requests.
+- Complete the cross-platform setup tutorial and document worker state and lifecycle behavior.
+
 ## 0.6.0-alpha.5 — 2026-10-26
 
 - Require Node 24 or later.

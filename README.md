@@ -20,14 +20,14 @@ There is no `init` command or Hasgard project configuration file.
 
 ```sh
 cd src-tauri
-cargo add tauri-plugin-hasgard@0.6.2
+cargo add tauri-plugin-hasgard@0.6.3
 ```
 
 ```toml
 [dependencies]
 tauri = "3.0.0-alpha.5"
 tauri-runtime-wry = "3.0.0-alpha.5"
-tauri-plugin-hasgard = "0.6.2"
+tauri-plugin-hasgard = "0.6.3"
 ```
 
 ```rust

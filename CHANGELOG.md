@@ -1,3 +1,10 @@
+# 0.6.3 (2026-11-01)
+
+- Fix native keyboard completion when WebKit delivers a trusted keyup before its keydown. Completion still requires paired trusted events for the main key and modifiers.
+- Preserve window labels in native screenshot requests through both the Playwright client and plugin dispatcher; secondary-window captures no longer target the main window.
+- Restyle the fixture with shared lightweight CSS and compact toolbars. Local fixture windows now start hidden and open on the secondary display by default; a missing display is an error. CI explicitly selects display 0.
+- Add concise setup, Playwright, and troubleshooting tutorials; align formatting with alwith-desktop and simplify stable Rust dependency requirements.
+
 # 0.6.2 (2026-10-28)
 
 - Add `TAURI_HASGARD_DISPLAY` (`secondary`, a display index, or a display name) to place every new window on one display: the plugin moves it by that display's own scale factor, shrinks it to fit, and shows it, so automated runs stay off the developer's main screen. Applications that create their windows hidden in test builds never flash on the primary display.
