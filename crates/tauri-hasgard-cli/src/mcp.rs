@@ -379,6 +379,10 @@ impl HasgardMcpServer {
                 }
                 self.call_app_tool("video.start", Some(params), window).await
             }
+            "heap_snapshot" => {
+                let params = json!({"output_path":required_string(&args,"output_path")?});
+                self.call_app_tool("heap.snapshot", Some(params), window).await
+            }
             "video_stop" => self.call_app_tool("video.stop", None, window).await,
             "video_status" => self.call_app_tool("video.status", None, window).await,
             "record_start" => self.call_app_tool("record.start", None, window).await,
@@ -970,6 +974,14 @@ fn tool_specs() -> Vec<ToolSpec> {
             read_only: true,
             destructive: false,
             idempotent: true
+        },
+        ToolSpec {
+            name: "heap_snapshot",
+            description: "Write a JavaScript heap snapshot of the target webview after a full GC: JavaScriptCore inspector JSON on macOS, V8 .heapsnapshot on Windows.",
+            schema: heap_snapshot_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false
         },
         ToolSpec {
             name: "video_start",
@@ -1912,6 +1924,13 @@ fn video_schema() -> Arc<JsonObject> {
     )
 }
 
+fn heap_snapshot_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([("output_path", string_prop("Absolute output path; its directory must exist. Replaced if present."))]),
+        &["output_path"]
+    )
+}
+
 fn scenario_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2035,6 +2054,7 @@ mod tests {
             "fill",
             "focus",
             "forms",
+            "heap_snapshot",
             "hover",
             "html",
             "ipc",

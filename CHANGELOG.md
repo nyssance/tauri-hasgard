@@ -1,3 +1,7 @@
+# Unreleased
+
+- Add `heap.snapshot` (CLI `heap-snapshot --output`, MCP `heap_snapshot`, Playwright `window.heapSnapshot(path)`): writes a JavaScript heap snapshot of the target webview after a full collection, and reports its `format`. macOS connects WebKit's in-process inspector (`_WKInspector`, no window) and asks its heap agent, giving JavaScriptCore's inspector JSON (`jsc`); the inspector is detached again afterwards. Windows uses WebView2's DevTools protocol `HeapProfiler.takeHeapSnapshot`, giving a V8 `.heapsnapshot` (`v8`). Debug builds only, like the rest of the plugin.
+
 # 0.6.3 (2026-11-01)
 
 - Fix native keyboard completion when WebKit delivers a trusted keyup before its keydown. Completion still requires paired trusted events for the main key and modifiers.

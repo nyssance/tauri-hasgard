@@ -319,6 +319,21 @@ test("screenshotNative captures the webview itself when no window id is given", 
   expect(call).toHaveBeenLastCalledWith("screenshot_native", { window: "settings", output_path: "/tmp/shot.png" })
 })
 
+test("heapSnapshot routes to the window and validates the format", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ output_path: "/tmp/heap.json", byte_size: 42, format: "jsc" })
+
+  await expect(new HasgardWindow(rpc, "settings").heapSnapshot("/tmp/heap.json")).resolves.toEqual({
+    outputPath: "/tmp/heap.json",
+    byteSize: 42,
+    format: "jsc"
+  })
+  expect(call).toHaveBeenLastCalledWith("heap.snapshot", { window: "settings", output_path: "/tmp/heap.json" })
+
+  call.mockResolvedValue({ output_path: "/tmp/heap.json", byte_size: 42, format: "hprof" })
+  await expect(new HasgardWindow(rpc, "main").heapSnapshot("/tmp/heap.json")).rejects.toThrow("unexpected hprof")
+})
+
 test("an explicit windowId skips the lookup entirely", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({

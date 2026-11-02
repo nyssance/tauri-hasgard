@@ -193,6 +193,14 @@ pub(crate) async fn dispatch(
         // Native capture resolves its own target; keep the window label that
         // is stripped from parameters sent to the JavaScript bridge.
         "screenshot_native" => screenshot::handle_screenshot(original_params).await,
+        #[cfg(all(any(target_os = "macos", windows), debug_assertions))]
+        "heap.snapshot" => crate::heap::handle_heap_snapshot(window.clone(), params).await,
+        #[cfg(not(all(any(target_os = "macos", windows), debug_assertions)))]
+        "heap.snapshot" => Err(RpcError {
+            code: -32601,
+            message: "heap.snapshot is only available on macOS and Windows".to_owned(),
+            data: None
+        }),
         "console.getLogs" => handle_eval_method("consoleLogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "console.clear" => handle_eval_method("clearLogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "network.getRequests" => {

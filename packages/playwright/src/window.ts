@@ -695,6 +695,25 @@ export class HasgardWindow {
    * The operating-system window id is resolved from this window's label, so
    * callers do not have to discover it themselves.
    */
+  /**
+   * Write a JavaScript heap snapshot of this webview after a full collection:
+   * JavaScriptCore's inspector JSON on macOS (`format: "jsc"`), a V8
+   * `.heapsnapshot` on Windows (`format: "v8"`). `outputPath` must be absolute.
+   */
+  async heapSnapshot(outputPath: string): Promise<{ outputPath: string; byteSize: number; format: "jsc" | "v8" }> {
+    const value = expectRecord(
+      await this.rpc.call("heap.snapshot", { window: this.label, output_path: outputPath }),
+      "heap.snapshot result"
+    )
+    const format = expectString(value.format, "heap.snapshot.format")
+    if (format !== "jsc" && format !== "v8") throw new Error(`heap.snapshot.format: unexpected ${format}`)
+    return {
+      outputPath: expectString(value.output_path, "heap.snapshot.output_path"),
+      byteSize: expectNumber(value.byte_size, "heap.snapshot.byte_size"),
+      format
+    }
+  }
+
   async screenshotNative(options: NativeScreenshotOptions): Promise<NativeScreenshot> {
     // Without a window id the plugin renders this webview through WKWebView
     // `takeSnapshot:` (backend "wkwebview"): exact pixels, scrolled content

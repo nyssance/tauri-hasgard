@@ -239,6 +239,14 @@ pub(crate) enum Command {
         #[arg(long, default_value = "png")]
         format: String
     },
+    /// Write a JavaScript heap snapshot of the target webview: `JavaScriptCore`'s
+    /// inspector JSON on macOS, a V8 `.heapsnapshot` on Windows. The engine
+    /// collects garbage first, so the file holds live objects only.
+    #[command(name = "heap_snapshot", visible_alias = "heap-snapshot")]
+    HeapSnapshot {
+        #[arg(long)]
+        output: PathBuf
+    },
     /// Navigate to a URL.
     Navigate { url: String },
     /// Get current URL.
@@ -848,6 +856,14 @@ mod tests {
         } else {
             panic!("Expected ScreenshotNative command");
         }
+    }
+
+    #[test]
+    fn test_heap_snapshot_command() {
+        let cli = Cli::parse_from(["tauri-hasgard", "heap-snapshot", "--output", "/tmp/heap.json"]);
+        assert!(
+            matches!(cli.command, Command::HeapSnapshot { ref output } if output == std::path::Path::new("/tmp/heap.json"))
+        );
     }
 
     #[test]

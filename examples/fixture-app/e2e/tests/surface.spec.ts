@@ -4,6 +4,8 @@
 // real engine behaves — event dispatch, label association, computed geometry,
 // and storage all differ from a hand-built stub in ways a unit test cannot see.
 
+import { readFile } from "node:fs/promises"
+
 import type { HasgardWindow } from "@nyssance/tauri-hasgard"
 
 import { expect, test } from "../fixtures.js"
@@ -244,6 +246,30 @@ test("native screenshots stay scoped to differently sized windows", async ({ has
   await expect(
     hasgard.window("missing-window").screenshotNative({ outputPath: testInfo.outputPath("missing.png") })
   ).rejects.toThrow(/not found/)
+})
+
+test("heap snapshots hold the page's live objects and leave the webview usable", async ({
+  hasgard,
+  window
+}, testInfo) => {
+  test.skip(process.platform !== "darwin" && process.platform !== "win32", "heap snapshots need WebKit or WebView2")
+  await window.evaluate(
+    "window.__heapProbe = Array.from({ length: 2000 }, () => new (class HasgardHeapProbe {})()); true"
+  )
+  const format = process.platform === "darwin" ? "jsc" : "v8"
+  // Twice in a row: the inspector backend is detached after each snapshot and must reattach.
+  for (const name of ["first", "second"]) {
+    const outputPath = testInfo.outputPath(`${name}.heap.json`)
+    const snapshot = await window.heapSnapshot(outputPath)
+    expect(snapshot).toEqual({ outputPath, byteSize: expect.any(Number), format })
+    const text = await readFile(outputPath, "utf8")
+    expect(text.length).toBe(snapshot.byteSize)
+    expect(text).toContain("HasgardHeapProbe")
+  }
+  expect(await window.evaluate<number>("window.__heapProbe.length")).toBe(2000)
+  await expect(hasgard.window("missing-window").heapSnapshot(testInfo.outputPath("missing.heap.json"))).rejects.toThrow(
+    /not found/
+  )
 })
 
 // A plain character is the case that used to abort the entire host application:

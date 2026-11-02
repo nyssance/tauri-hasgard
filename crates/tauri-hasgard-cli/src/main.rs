@@ -398,6 +398,11 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
                 result => result
             }
         }
+        Command::HeapSnapshot { output } => {
+            // The plugin writes the file itself and only accepts absolute paths.
+            let output = std::path::absolute(&output)?;
+            client.call("heap.snapshot", with_scope(Some(json!({ "output_path": output })), scope)).await
+        }
         Command::Navigate { url } => client.call("navigate", with_scope(Some(json!({"url": url})), scope)).await,
         Command::Url => client.call("url", with_scope(None, scope)).await,
         Command::Title => client.call("title", with_scope(None, scope)).await,

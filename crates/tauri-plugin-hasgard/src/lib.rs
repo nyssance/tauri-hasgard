@@ -6,6 +6,9 @@ mod error;
 pub(crate) mod eval;
 #[cfg(any(unix, windows))]
 mod handler;
+// JavaScript heap snapshots for `heap.snapshot`: WebKit's inspector on macOS, CDP on WebView2.
+#[cfg(all(any(target_os = "macos", windows), debug_assertions))]
+pub(crate) mod heap;
 #[cfg(feature = "press")]
 pub(crate) mod key;
 #[cfg(all(target_os = "macos", debug_assertions))]
@@ -91,6 +94,8 @@ where
                 let press_hooks = make_press_hooks(app);
                 #[cfg(target_os = "macos")]
                 screenshot::register_snapshot_fn(make_snapshot_fn(app));
+                #[cfg(any(target_os = "macos", windows))]
+                heap::register_heap_snapshot_fn(make_heap_snapshot_fn(app));
 
                 let recorder = Recorder::new();
 
@@ -219,6 +224,20 @@ where
         let label = window.unwrap_or("main");
         let target = handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?;
         screenshot::capture_wkwebview_png(&target).map_err(|err| err.to_string())
+    })
+}
+
+/// `heap.snapshot`: resolves the label like `EvalFn` and snapshots that webview's heap.
+#[cfg(all(any(target_os = "macos", windows), debug_assertions))]
+fn make_heap_snapshot_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> heap::HeapSnapshotFn
+where
+    R::Handle: tauri_runtime_wry::AsWryHandle
+{
+    let handle = app.clone();
+    Arc::new(move |window: Option<&str>| {
+        let label = window.unwrap_or("main");
+        let target = handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?;
+        heap::capture(&target)
     })
 }
 
