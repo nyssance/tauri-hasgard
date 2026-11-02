@@ -99,7 +99,7 @@ impl HasgardMcpServer {
         })
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn call_tool_by_name(&self, name: &str, args: JsonObject) -> Result<CallToolResult, McpError> {
         let name = normalize_tool_name(name);
         if DANGEROUS_MCP_TOOLS.contains(&name) && !dangerous_mcp_tools_enabled() {
@@ -738,7 +738,7 @@ struct ToolSpec {
     idempotent: bool
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn tool_specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {

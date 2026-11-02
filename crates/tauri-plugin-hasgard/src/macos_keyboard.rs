@@ -32,7 +32,7 @@ fn macos_window_is_focused<R: tauri::Runtime>(
             native.makeKeyAndOrderFront(None);
         }
         if !application.isActive() {
-            #[allow(deprecated, reason = "supports Tauri's older macOS deployment targets")]
+            #[expect(deprecated, reason = "supports Tauri's older macOS deployment targets")]
             application.activateIgnoringOtherApps(true);
         }
     }

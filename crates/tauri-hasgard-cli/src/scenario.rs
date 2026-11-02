@@ -11,7 +11,7 @@ use crate::{Scope, build_wait_params, target_params, with_scope};
 
 // ── TOML schema ──────────────────────────────────────────────────────────────
 
-#[allow(clippy::module_name_repetitions, clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Scenario {
@@ -29,7 +29,6 @@ pub(crate) struct Connect {
     pub(crate) timeout_ms: Option<u64>
 }
 
-#[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScenarioMeta {
@@ -49,7 +48,7 @@ fn default_true() -> bool {
     true
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Step {
@@ -96,7 +95,6 @@ pub(crate) struct StepResult {
     pub(crate) outcome: StepOutcome
 }
 
-#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub(crate) struct ScenarioReport {
     pub(crate) name: String,
@@ -229,7 +227,7 @@ async fn run_step(client: &mut Client, step: &Step, window: Option<&str>) -> Res
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -> Result<Value> {
     let timeout_ms = step.timeout_ms;
     match step.action.as_str() {

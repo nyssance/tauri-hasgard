@@ -88,7 +88,7 @@ fn inject_plugin_version(result: &mut serde_json::Value) {
 }
 
 /// Dispatch a JSON-RPC method call to the appropriate handler.
-#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+#[expect(clippy::too_many_lines)]
 pub(crate) async fn dispatch(
     method: &str, params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>,
     list_fn: Option<&ListWindowsFn>, press_hooks: Option<&PressHooksRef>, recorder: &Recorder
@@ -684,7 +684,7 @@ fn callback_outcome(result: Option<String>, error: Option<String>) -> Result<ser
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 pub(crate) fn callback<R: tauri::Runtime>(
     eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
     error: Option<String>, nonce: Option<String>
@@ -703,7 +703,6 @@ pub(crate) fn callback<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn __callback<R: tauri::Runtime>(
     eval_engine: tauri::State<'_, EvalEngine>, webview: tauri::Webview<R>, id: u64, result: Option<String>,
     error: Option<String>, nonce: Option<String>

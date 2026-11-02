@@ -159,7 +159,6 @@ fn parse_modifier(token: &str) -> Result<Key, KeyError> {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn parse_key(token: &str) -> Result<Key, KeyError> {
     if let Some(ch) = single_char(token) {
         return Ok(Key::Unicode(ch));

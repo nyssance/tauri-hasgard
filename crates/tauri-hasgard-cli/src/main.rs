@@ -573,7 +573,6 @@ async fn run_route_command(client: &mut Client, action: RouteCommand, scope: Sco
     client.call(method, with_scope(params, scope)).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_click(
     client: &mut Client, target: &str, modifiers: &[String], button: Option<&str>, click_count: Option<u32>,
     position: Option<(f64, f64)>, scope: Scope<'_>
@@ -582,7 +581,7 @@ async fn run_click(
     client.call("click", with_scope(Some(params), scope)).await
 }
 
-#[allow(clippy::too_many_lines, reason = "one match keeps CLI-to-protocol mappings reviewable together")]
+#[expect(clippy::too_many_lines, reason = "one match keeps CLI-to-protocol mappings reviewable together")]
 async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>) -> Result<serde_json::Value> {
     match command {
         Command::Query { by, value, exact } => {

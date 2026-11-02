@@ -542,7 +542,7 @@ fn compute_scale_factor(pixel_width: u32, logical: super::WindowBounds) -> Resul
         // factors land in a small finite range (1.0 / 2.0 / 3.0) that f32
         // represents losslessly.
         let rounded = (scale * 100.0).round() / 100.0;
-        #[allow(clippy::cast_possible_truncation, reason = "Retina scale factors fit in f32 without loss")]
+        #[expect(clippy::cast_possible_truncation, reason = "Retina scale factors fit in f32 without loss")]
         let scale_f32 = rounded as f32;
         if scale_f32.is_finite() && scale_f32 > 0.0 {
             Ok(scale_f32)

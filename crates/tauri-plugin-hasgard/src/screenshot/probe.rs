@@ -6,14 +6,14 @@ pub(crate) enum ScreenshotBackend {
     /// `takeSnapshot:` wiring lands. The auto-probe never selects it today;
     /// it stays in the enum so callers can opt in explicitly when the
     /// follow-up milestone wires it.
-    #[allow(dead_code, reason = "constructed in the WkWebView milestone")]
+    #[expect(dead_code, reason = "constructed in the WkWebView milestone")]
     WkWebViewSnapshot,
     CgWindowList,
     ScreencaptureProbe,
     /// Sentinel matched by the macOS dispatcher to surface a
     /// `PERMISSION_DENIED` IPC error. Never constructed today; the non-macOS
     /// IPC branch short-circuits before reaching the probe.
-    #[allow(dead_code, reason = "kept for the exhaustive match in the macOS dispatcher")]
+    #[expect(dead_code, reason = "kept for the exhaustive match in the macOS dispatcher")]
     PlatformUnsupported
 }
 
