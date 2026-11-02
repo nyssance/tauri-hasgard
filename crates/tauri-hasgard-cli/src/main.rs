@@ -919,7 +919,11 @@ fn encode_files(paths: &[std::path::PathBuf]) -> Result<Vec<serde_json::Value>> 
         let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
         total_encoded += encoded.len();
         anyhow::ensure!(total_encoded <= MAX_TOTAL_DROP_SIZE, "Total file payload exceeds 100 MB limit");
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .with_context(|| format!("File path has no file name: {}", path.display()))?
+            .to_string_lossy()
+            .into_owned();
         files.push(json!({"name": name, "type": mime_from_ext(path), "data": encoded}));
     }
     Ok(files)

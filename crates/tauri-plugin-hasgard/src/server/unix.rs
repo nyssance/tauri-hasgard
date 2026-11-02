@@ -293,7 +293,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         // Create a private temp dir (0o700) to simulate a valid XDG_RUNTIME_DIR.
         let dir = std::env::temp_dir().join(format!("tauri-hasgard-xdg-test-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create xdg test dir");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("set dir permissions");
         let result = socket_dir_from(Some(dir.as_os_str().to_owned()));
         let _ = std::fs::remove_dir(&dir);

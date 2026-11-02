@@ -34,7 +34,7 @@ pub(crate) struct Cli {
 fn parse_position(raw: &str) -> Result<(f64, f64), String> {
     let (x, y) = raw.split_once(',').ok_or_else(|| format!("expected X,Y (for example 10,5), got {raw:?}"))?;
     let parse = |part: &str, axis: &str| {
-        part.trim().parse::<f64>().map_err(|_| format!("{axis} offset must be a number, got {part:?}"))
+        part.trim().parse::<f64>().map_err(|error| format!("{axis} offset must be a number, got {part:?}: {error}"))
     };
     Ok((parse(x, "x")?, parse(y, "y")?))
 }

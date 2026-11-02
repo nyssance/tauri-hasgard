@@ -204,7 +204,9 @@ async fn run_scenario_steps(
                 let dur = step_start.elapsed();
                 let msg = format!("{e:#}");
                 print_step_fail(idx, scenario.step.len(), &step_name, &msg);
-                let _ = take_failure_screenshot(client, &step_name, window).await;
+                if let Err(error) = take_failure_screenshot(client, &step_name, window).await {
+                    eprintln!("  {} {error:#}", crate::style::dim("failure screenshot not saved:"));
+                }
                 failed = true;
                 StepOutcome::Failed { duration: dur, message: msg }
             }
