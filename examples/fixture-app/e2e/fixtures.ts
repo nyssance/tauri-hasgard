@@ -19,6 +19,8 @@ export const { test, expect } = createHasgardTest({
     command: executablePath,
     args: [],
     cwd: join(import.meta.dirname, ".."),
-    timeoutMs: 30_000
+    // A fresh Windows runner image initialises WebView2 on the first launches: on image 20261030.294.1 the first two
+    // launches each missed a 30 s window-load deadline and every later one loaded in under a second.
+    timeoutMs: process.platform === "win32" ? 120_000 : 30_000
   }
 })
