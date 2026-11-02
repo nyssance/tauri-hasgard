@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4 — 2026-11-02
+
+- Add `window.heapSnapshot(outputPath)`: writes the webview's JavaScript heap snapshot and returns `{ outputPath, byteSize, format }` (`"jsc"` on macOS, `"v8"` on Windows).
+
 ## 0.6.3 — 2026-11-01
 
 - Send the target window label in native screenshot requests.
