@@ -14,7 +14,7 @@ use tokio::net::UnixListener;
 pub struct SocketGuard {
     path: std::path::PathBuf,
     inode: u64,
-    device: u64
+    device: u64,
 }
 
 impl Drop for SocketGuard {
@@ -41,7 +41,7 @@ fn is_private_dir(path: &std::path::Path) -> bool {
             let my_uid = unsafe { libc::getuid() };
             m.is_dir() && m.uid() == my_uid && m.mode().trailing_zeros() >= 6
         }
-        Err(_) => false
+        Err(_) => false,
     }
 }
 
@@ -94,7 +94,7 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
                 Ok(_) => {
                     return Err(Error::Io(std::io::Error::new(
                         std::io::ErrorKind::AddrInUse,
-                        format!("socket already in use: {}", socket_path.display())
+                        format!("socket already in use: {}", socket_path.display()),
                     )));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
@@ -107,7 +107,7 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
                 }
             }
         }
-        Err(e) => return Err(Error::Io(e))
+        Err(e) => return Err(Error::Io(e)),
     };
 
     // FD metadata identifies the kernel socket, not its filesystem entry.
@@ -128,7 +128,7 @@ pub fn bind(socket_path: &std::path::Path) -> Result<(std::os::unix::net::UnixLi
 /// The `_guard` is held for its `Drop` cleanup.
 pub async fn run(
     listener: std::os::unix::net::UnixListener, _guard: SocketGuard, engine: EvalEngine, eval_fn: Option<EvalFn>,
-    list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder
+    list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) {
     let listener = match UnixListener::from_std(listener) {
         Ok(l) => l,
@@ -144,7 +144,7 @@ pub async fn run(
 
 async fn accept_loop(
     listener: UnixListener, engine: EvalEngine, eval_fn: Option<EvalFn>, list_fn: Option<ListWindowsFn>,
-    press_hooks: Option<PressHooksRef>, recorder: Recorder
+    press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) -> Result<(), Error> {
     let ctx = Arc::new((engine, eval_fn, list_fn, press_hooks, recorder));
 

@@ -55,7 +55,7 @@ fn rpc_error(rpc_code: i32, domain: &str, message: impl Into<String>, extras: Va
 #[cfg_attr(not(target_os = "macos"), allow(dead_code, reason = "fields are read by the macOS-only capture pipeline"))]
 struct ScreenshotRequest {
     target: ScreenshotTarget,
-    output_path: std::path::PathBuf
+    output_path: std::path::PathBuf,
 }
 
 /// What a `screenshot_native` request captures.
@@ -65,7 +65,7 @@ enum ScreenshotTarget {
     /// rendered by `WebKit` itself.
     Webview(Option<String>),
     /// An on-screen window by platform id, captured at the window-server level.
-    NativeWindow(u32)
+    NativeWindow(u32),
 }
 
 /// Validate the request envelope. Order of checks is fixed by the contract:
@@ -79,7 +79,7 @@ fn parse_request(params: Option<&Value>) -> Result<ScreenshotRequest, RpcError> 
             RPC_INVALID_PARAMS,
             codes::INVALID_PARAMS,
             "screenshot requires an object params payload",
-            Value::Null
+            Value::Null,
         )
     })?;
 
@@ -92,7 +92,7 @@ fn parse_request(params: Option<&Value>) -> Result<ScreenshotRequest, RpcError> 
             RPC_INVALID_PARAMS,
             codes::UNSUPPORTED_FORMAT,
             format!("format \"{format}\" is not supported in v1 (only \"png\")"),
-            Value::Null
+            Value::Null,
         ));
     }
 
@@ -106,7 +106,7 @@ fn parse_request(params: Option<&Value>) -> Result<ScreenshotRequest, RpcError> 
                     RPC_INVALID_PARAMS,
                     codes::INVALID_PARAMS,
                     "\"window_id\" must be a non-negative integer",
-                    Value::Null
+                    Value::Null,
                 )
             })?;
             let window_id = u32::try_from(window_id_u64).map_err(|_| {
@@ -130,7 +130,7 @@ fn parse_output_path(obj: &serde_json::Map<String, Value>) -> Result<std::path::
             RPC_INVALID_PARAMS,
             codes::INVALID_OUTPUT_PATH,
             "screenshot requires a string \"output_path\"",
-            Value::Null
+            Value::Null,
         )
     })?;
     let output_path = std::path::PathBuf::from(output_path_str);
@@ -139,7 +139,7 @@ fn parse_output_path(obj: &serde_json::Map<String, Value>) -> Result<std::path::
             RPC_INVALID_PARAMS,
             codes::INVALID_OUTPUT_PATH,
             format!("output_path must be absolute, got \"{}\"", output_path.display()),
-            Value::Null
+            Value::Null,
         ));
     }
     // A pre-existing symlink at `output_path` is a footgun: the atomic rename
@@ -152,7 +152,7 @@ fn parse_output_path(obj: &serde_json::Map<String, Value>) -> Result<std::path::
             RPC_INVALID_PARAMS,
             codes::INVALID_OUTPUT_PATH,
             format!("output_path must not be a symlink: {}", output_path.display()),
-            Value::Null
+            Value::Null,
         ));
     }
     if output_path.is_dir() {
@@ -160,7 +160,7 @@ fn parse_output_path(obj: &serde_json::Map<String, Value>) -> Result<std::path::
             RPC_INVALID_PARAMS,
             codes::INVALID_OUTPUT_PATH,
             format!("output_path must be a file path, got directory: {}", output_path.display()),
-            Value::Null
+            Value::Null,
         ));
     }
     let parent = output_path.parent().ok_or_else(|| {
@@ -168,7 +168,7 @@ fn parse_output_path(obj: &serde_json::Map<String, Value>) -> Result<std::path::
             RPC_INVALID_PARAMS,
             codes::INVALID_OUTPUT_PATH,
             format!("output_path \"{}\" has no parent directory", output_path.display()),
-            Value::Null
+            Value::Null,
         )
     })?;
     // Refuse to create parent directories: an absolute path beneath a
@@ -179,7 +179,7 @@ fn parse_output_path(obj: &serde_json::Map<String, Value>) -> Result<std::path::
             RPC_INVALID_PARAMS,
             codes::INVALID_OUTPUT_PATH,
             format!("output_path parent directory does not exist: {}", parent.display()),
-            Value::Null
+            Value::Null,
         ));
     }
     Ok(output_path)
@@ -201,7 +201,7 @@ pub(crate) async fn handle_screenshot(params: Option<&Value>) -> Result<Value, R
                 RPC_INTERNAL_ERROR,
                 codes::CAPTURE_FAILED,
                 format!("screenshot capture task did not complete: {join_err}"),
-                Value::Null
+                Value::Null,
             )
         })?
     }
@@ -215,7 +215,7 @@ pub(crate) async fn handle_screenshot(params: Option<&Value>) -> Result<Value, R
             RPC_INTERNAL_ERROR,
             codes::PERMISSION_DENIED,
             "screenshot is only available on macOS in this release",
-            Value::Null
+            Value::Null,
         ))
     }
 }
@@ -223,13 +223,13 @@ pub(crate) async fn handle_screenshot(params: Option<&Value>) -> Result<Value, R
 #[cfg(target_os = "macos")]
 fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
     use super::{
-        EnumeratedLayerZeroWindows, ScreenshotBackend, ScreenshotError, enumerate_layer_zero_windows, selected_backend
+        EnumeratedLayerZeroWindows, ScreenshotBackend, ScreenshotError, enumerate_layer_zero_windows, selected_backend,
     };
 
     let ScreenshotRequest { target, output_path } = req;
     let window_id = match target {
         ScreenshotTarget::Webview(label) => return capture_webview(label.as_deref(), &output_path),
-        ScreenshotTarget::NativeWindow(window_id) => window_id
+        ScreenshotTarget::NativeWindow(window_id) => window_id,
     };
 
     // Single pass over the on-screen window list collects both the
@@ -242,14 +242,14 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
             RPC_INTERNAL_ERROR,
             codes::PERMISSION_DENIED,
             "screenshot is only available on macOS in this release",
-            Value::Null
+            Value::Null,
         ),
         ScreenshotError::CaptureFailed { message } => rpc_error(
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to enumerate windows: {message}"),
-            Value::Null
-        )
+            Value::Null,
+        ),
     })?;
 
     let Some(logical_bounds) = target_bounds else {
@@ -259,7 +259,7 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
             format!("window_id {window_id} not found"),
             json!({
                 "available_windows": render_available_windows(&discovered),
-            })
+            }),
         ));
     };
     if !logical_bounds.width.is_finite()
@@ -271,7 +271,7 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             "window has invalid logical bounds",
-            Value::Null
+            Value::Null,
         ));
     }
 
@@ -302,7 +302,7 @@ fn run_macos(req: ScreenshotRequest) -> Result<Value, RpcError> {
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to rename {} to {}: {err}", tmp_path.display(), output_path.display()),
-            Value::Null
+            Value::Null,
         ));
     }
 
@@ -348,7 +348,7 @@ fn render_available_windows(discovered: &[super::DiscoveredWindow]) -> Vec<Value
 struct PngMetadata {
     width: u32,
     height: u32,
-    byte_size: u64
+    byte_size: u64,
 }
 
 /// Monotonic counter appended to the tmp filename so two concurrent captures
@@ -392,7 +392,7 @@ fn capture_webview(label: Option<&str>, output_path: &Path) -> Result<Value, Rpc
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             "webview snapshot is not available in this process",
-            Value::Null
+            Value::Null,
         )
     })?;
     let snapshot = capture(label).map_err(|message| {
@@ -410,7 +410,7 @@ fn capture_webview(label: Option<&str>, output_path: &Path) -> Result<Value, Rpc
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to write {}: {err}", tmp_path.display()),
-            Value::Null
+            Value::Null,
         ));
     }
     let metadata = match read_png_metadata(&tmp_path) {
@@ -426,7 +426,7 @@ fn capture_webview(label: Option<&str>, output_path: &Path) -> Result<Value, Rpc
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to rename {} to {}: {err}", tmp_path.display(), output_path.display()),
-            Value::Null
+            Value::Null,
         ));
     }
     Ok(json!({
@@ -443,7 +443,7 @@ fn capture_webview(label: Option<&str>, output_path: &Path) -> Result<Value, Rpc
 
 #[cfg(target_os = "macos")]
 fn capture_with_fallback(
-    primary: super::ScreenshotBackend, window_id: u32, tmp_path: &Path
+    primary: super::ScreenshotBackend, window_id: u32, tmp_path: &Path,
 ) -> Result<(super::ScreenshotBackend, bool), RpcError> {
     use super::{ScreenshotBackend, capture_cgwindow, capture_screencapture};
 
@@ -466,7 +466,7 @@ fn capture_with_fallback(
                                 format!(
                                     "screencapture failed ({primary_err}) and CGWindow fallback also failed ({fallback_err})"
                                 ),
-                                Value::Null
+                                Value::Null,
                             ))
                         }
                     }
@@ -481,7 +481,7 @@ fn capture_with_fallback(
                     RPC_INTERNAL_ERROR,
                     codes::CAPTURE_FAILED,
                     format!("CGWindow capture failed: {err}"),
-                    Value::Null
+                    Value::Null,
                 ))
             }
         },
@@ -489,8 +489,8 @@ fn capture_with_fallback(
             RPC_INTERNAL_ERROR,
             codes::PERMISSION_DENIED,
             "screenshot is only available on macOS in this release",
-            Value::Null
-        ))
+            Value::Null,
+        )),
     }
 }
 
@@ -501,7 +501,7 @@ fn read_png_metadata(path: &Path) -> Result<PngMetadata, RpcError> {
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to stat captured PNG {}: {err}", path.display()),
-            Value::Null
+            Value::Null,
         )
     })?;
     let byte_size = metadata.len();
@@ -515,7 +515,7 @@ fn read_png_metadata(path: &Path) -> Result<PngMetadata, RpcError> {
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to open captured PNG {}: {err}", path.display()),
-            Value::Null
+            Value::Null,
         )
     })?;
     let (width, height) = reader.into_dimensions().map_err(|err| {
@@ -523,7 +523,7 @@ fn read_png_metadata(path: &Path) -> Result<PngMetadata, RpcError> {
             RPC_INTERNAL_ERROR,
             codes::CAPTURE_FAILED,
             format!("failed to read PNG dimensions from {}: {err}", path.display()),
-            Value::Null
+            Value::Null,
         )
     })?;
     Ok(PngMetadata { width, height, byte_size })

@@ -24,7 +24,7 @@ pub(crate) type InjectionTask = Box<dyn FnOnce() -> Result<(), String> + Send>;
 #[derive(Debug)]
 pub(crate) struct InjectionError {
     pub(crate) message: String,
-    pub(crate) started: bool
+    pub(crate) started: bool,
 }
 pub(crate) type InjectionRunner =
     Box<dyn Fn(Option<&str>, i64, bool, InjectionTask) -> Result<(), InjectionError> + Send + Sync>;
@@ -39,17 +39,17 @@ pub(crate) struct PressHooks {
     /// Which thread is required is a per-platform answer, so the choice lives
     /// in the hook rather than in the caller: macOS must hop to the main
     /// thread, and the other backends must not (see `make_press_hooks`).
-    pub(crate) run_injection: InjectionRunner
+    pub(crate) run_injection: InjectionRunner,
 }
 
 pub(crate) type PressHooksRef = Arc<PressHooks>;
 
 pub(crate) async fn handle_connection<S>(
     stream: S, engine: &EvalEngine, eval_fn: Option<&EvalFn>, list_fn: Option<&ListWindowsFn>,
-    press_hooks: Option<&PressHooksRef>, recorder: &Recorder
+    press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
 ) -> Result<(), Error>
 where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     const MAX_LINE_LENGTH: usize = crate::protocol::MAX_REQUEST_BYTES;
 
@@ -86,10 +86,10 @@ where
             Ok(req) if req.jsonrpc != "2.0" => Response::error(
                 serde_json::Value::Number(req.id.into()),
                 -32600,
-                "Invalid JSON-RPC version (expected \"2.0\")"
+                "Invalid JSON-RPC version (expected \"2.0\")",
             ),
             Ok(req) => dispatch_request(&req, engine, eval_fn, list_fn, press_hooks, recorder).await,
-            Err(e) => Response::error(serde_json::Value::Null, -32700, format!("Parse error: {e}"))
+            Err(e) => Response::error(serde_json::Value::Null, -32700, format!("Parse error: {e}")),
         };
 
         let mut resp_bytes = serde_json::to_vec(&response)?;
@@ -103,7 +103,7 @@ where
 
 pub(crate) async fn dispatch_request(
     req: &Request, engine: &EvalEngine, eval_fn: Option<&EvalFn>, list_fn: Option<&ListWindowsFn>,
-    press_hooks: Option<&PressHooksRef>, recorder: &Recorder
+    press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
 ) -> Response {
     match handler::dispatch(&req.method, req.params.as_ref(), engine, eval_fn, list_fn, press_hooks, recorder).await {
         Ok(result) => Response::success(req.id, result),
@@ -111,8 +111,8 @@ pub(crate) async fn dispatch_request(
             jsonrpc: "2.0".to_owned(),
             id: serde_json::Value::from(req.id),
             result: None,
-            error: Some(rpc_err)
-        }
+            error: Some(rpc_err),
+        },
     }
 }
 

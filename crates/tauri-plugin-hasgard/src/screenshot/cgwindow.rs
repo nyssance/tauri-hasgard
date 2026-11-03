@@ -21,7 +21,7 @@ pub(crate) fn capture_cgwindow(window_id: u32, path: &Path) -> Result<(), Screen
     use core_graphics::geometry::{CGPoint, CGRect, CGSize};
     use core_graphics::window::{
         create_image, kCGWindowImageBoundsIgnoreFraming, kCGWindowImageNominalResolution,
-        kCGWindowListOptionIncludingWindow
+        kCGWindowListOptionIncludingWindow,
     };
 
     let rect = CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(f64::INFINITY, f64::INFINITY));
@@ -29,7 +29,7 @@ pub(crate) fn capture_cgwindow(window_id: u32, path: &Path) -> Result<(), Screen
         rect,
         kCGWindowListOptionIncludingWindow,
         window_id,
-        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution
+        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution,
     )
     .ok_or_else(|| ScreenshotError::CaptureFailed { message: "CGWindowListCreateImage returned null".to_owned() })?;
 

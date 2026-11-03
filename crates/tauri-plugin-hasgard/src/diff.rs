@@ -14,21 +14,21 @@ pub struct SnapshotElement {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled: Option<bool>
+    pub disabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChangedEntry {
     pub old: SnapshotElement,
     pub new: SnapshotElement,
-    pub changes: Vec<String>
+    pub changes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DiffResult {
     pub added: Vec<SnapshotElement>,
     pub removed: Vec<SnapshotElement>,
-    pub changed: Vec<ChangedEntry>
+    pub changed: Vec<ChangedEntry>,
 }
 
 /// Identity key for stable matching between snapshots.
@@ -37,7 +37,7 @@ pub struct DiffResult {
 struct ElementKey {
     role: String,
     name: Option<String>,
-    depth: u64
+    depth: u64,
 }
 
 impl ElementKey {
@@ -126,7 +126,7 @@ mod tests {
             name: None,
             value: None,
             checked: None,
-            disabled: None
+            disabled: None,
         }
     }
 
@@ -138,7 +138,7 @@ mod tests {
             name: Some(name.to_owned()),
             value: None,
             checked: None,
-            disabled: None
+            disabled: None,
         }
     }
 
@@ -191,7 +191,7 @@ mod tests {
             name: Some("username".to_owned()),
             value: Some("old".to_owned()),
             checked: None,
-            disabled: None
+            disabled: None,
         }];
         let new = vec![SnapshotElement {
             ref_id: "e2".to_owned(),
@@ -200,7 +200,7 @@ mod tests {
             name: Some("username".to_owned()),
             value: Some("new".to_owned()),
             checked: None,
-            disabled: None
+            disabled: None,
         }];
         let result = compute_diff(&old, &new);
         assert_eq!(result.added, [] as [SnapshotElement; 0]);
@@ -218,7 +218,7 @@ mod tests {
             name: Some("agree".to_owned()),
             value: Some("on".to_owned()),
             checked: Some(false),
-            disabled: Some(false)
+            disabled: Some(false),
         }];
         let new = vec![SnapshotElement {
             ref_id: "e2".to_owned(),
@@ -227,7 +227,7 @@ mod tests {
             name: Some("agree".to_owned()),
             value: Some("off".to_owned()),
             checked: Some(true),
-            disabled: Some(true)
+            disabled: Some(true),
         }];
         let result = compute_diff(&old, &new);
         assert_eq!(result.added, [] as [SnapshotElement; 0]);
@@ -249,7 +249,7 @@ mod tests {
                 name: Some("email".to_owned()),
                 value: Some("old@example.com".to_owned()),
                 checked: None,
-                disabled: None
+                disabled: None,
             },
             el_named("e3", "link", 3, "home"),
         ];
@@ -262,7 +262,7 @@ mod tests {
                 name: Some("email".to_owned()),
                 value: Some("new@example.com".to_owned()),
                 checked: None,
-                disabled: None
+                disabled: None,
             },
             el_named("e5", "paragraph", 4, "info"),
         ];
@@ -296,7 +296,7 @@ mod tests {
                 name: None,
                 value: Some("save".to_owned()),
                 checked: None,
-                disabled: None
+                disabled: None,
             },
             SnapshotElement {
                 ref_id: "e2".to_owned(),
@@ -305,7 +305,7 @@ mod tests {
                 name: None,
                 value: Some("cancel".to_owned()),
                 checked: None,
-                disabled: None
+                disabled: None,
             },
         ];
         let new = vec![
@@ -316,7 +316,7 @@ mod tests {
                 name: None,
                 value: Some("save".to_owned()),
                 checked: None,
-                disabled: None
+                disabled: None,
             },
             SnapshotElement {
                 ref_id: "e4".to_owned(),
@@ -325,7 +325,7 @@ mod tests {
                 name: None,
                 value: Some("cancel".to_owned()),
                 checked: None,
-                disabled: None
+                disabled: None,
             },
         ];
         let result = compute_diff(&old, &new);

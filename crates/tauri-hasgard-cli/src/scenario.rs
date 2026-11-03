@@ -19,14 +19,14 @@ pub(crate) struct Scenario {
     #[serde(default)]
     pub(crate) scenario: ScenarioMeta,
     #[serde(default)]
-    pub(crate) step: Vec<Step>
+    pub(crate) step: Vec<Step>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Connect {
     pub(crate) socket: Option<PathBuf>,
-    pub(crate) timeout_ms: Option<u64>
+    pub(crate) timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,7 +35,7 @@ pub(crate) struct ScenarioMeta {
     pub(crate) name: Option<String>,
     #[serde(default = "default_true")]
     pub(crate) fail_fast: bool,
-    pub(crate) global_timeout_ms: Option<u64>
+    pub(crate) global_timeout_ms: Option<u64>,
 }
 
 impl Default for ScenarioMeta {
@@ -71,7 +71,7 @@ pub(crate) struct Step {
     pub(crate) gone: Option<bool>,
     pub(crate) stable: Option<u64>,
     pub(crate) require_mutation: Option<bool>,
-    pub(crate) path: Option<PathBuf>
+    pub(crate) path: Option<PathBuf>,
 }
 
 impl Step {
@@ -86,20 +86,20 @@ impl Step {
 pub(crate) enum StepOutcome {
     Passed { duration: Duration },
     Failed { duration: Duration, message: String },
-    Skipped
+    Skipped,
 }
 
 #[derive(Debug)]
 pub(crate) struct StepResult {
     pub(crate) name: String,
-    pub(crate) outcome: StepOutcome
+    pub(crate) outcome: StepOutcome,
 }
 
 #[derive(Debug)]
 pub(crate) struct ScenarioReport {
     pub(crate) name: String,
     pub(crate) results: Vec<StepResult>,
-    pub(crate) total_duration: Duration
+    pub(crate) total_duration: Duration,
 }
 
 impl ScenarioReport {
@@ -152,7 +152,7 @@ fn validate_step(step: &Step) -> Result<()> {
         "assert-text" | "assert-value" => &[("target", step.target.as_deref()), ("expected", step.expected.as_deref())],
         "assert-url" => &[("expected", step.expected.as_deref())],
         "scroll" | "wait" | "watch" | "screenshot" => &[],
-        action => anyhow::bail!("unknown step action: {action:?}")
+        action => anyhow::bail!("unknown step action: {action:?}"),
     };
     for (name, value) in required {
         anyhow::ensure!(value.is_some(), "{} requires '{name}'", step.action);
@@ -161,19 +161,19 @@ fn validate_step(step: &Step) -> Result<()> {
 }
 
 pub(crate) async fn run_scenario(
-    client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>
+    client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>,
 ) -> Result<ScenarioReport> {
     let run = run_scenario_steps(client, scenario, window, fail_fast_override);
     match scenario.scenario.global_timeout_ms {
         Some(ms) => tokio::time::timeout(Duration::from_millis(ms), run)
             .await
             .map_err(|_| anyhow::anyhow!("scenario exceeded global timeout of {ms}ms"))?,
-        None => run.await
+        None => run.await,
     }
 }
 
 async fn run_scenario_steps(
-    client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>
+    client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>,
 ) -> Result<ScenarioReport> {
     let meta = &scenario.scenario;
     let name = meta.name.clone().unwrap_or_else(|| "unnamed scenario".to_string());
@@ -225,7 +225,7 @@ async fn run_step(client: &mut Client, step: &Step, window: Option<&str>) -> Res
         (false, Some(ms)) => tokio::time::timeout(Duration::from_millis(ms), dispatch_step(client, step, window))
             .await
             .map_err(|_| anyhow::anyhow!("step '{}' timed out after {ms}ms", step.action))?,
-        _ => dispatch_step(client, step, window).await
+        _ => dispatch_step(client, step, window).await,
     }
 }
 
@@ -277,8 +277,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
                             "amount": step.amount,
                             "ref": step.step_ref,
                         })),
-                        Scope { window, ..Scope::default() }
-                    )
+                        Scope { window, ..Scope::default() },
+                    ),
                 )
                 .await
         }
@@ -329,8 +329,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
                     "screenshot",
                     with_scope(
                         Some(json!({"path": step.path, "selector": step.selector})),
-                        Scope { window, ..Scope::default() }
-                    )
+                        Scope { window, ..Scope::default() },
+                    ),
                 )
                 .await?;
             if let Some(path) = &step.path {
@@ -345,8 +345,8 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
                     "storage.get",
                     with_scope(
                         Some(json!({"key":key, "session":step.session.unwrap_or(false)})),
-                        Scope { window, ..Scope::default() }
-                    )
+                        Scope { window, ..Scope::default() },
+                    ),
                 )
                 .await?;
             validate_storage_result(&result, step.expected.as_deref())?;
@@ -414,7 +414,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             anyhow::ensure!(actual.contains(expected), "URL does not contain {expected:?}, got {actual:?}");
             Ok(json!({"ok": true}))
         }
-        other => anyhow::bail!("unknown step action: {other:?}")
+        other => anyhow::bail!("unknown step action: {other:?}"),
     }
 }
 
@@ -478,7 +478,7 @@ fn print_step_line(idx: usize, total: usize, name: &str, status: &str) {
     let colored = match status {
         "ok" => crate::style::success(status),
         "SKIP" => crate::style::dim(status),
-        _ => crate::style::failure(status)
+        _ => crate::style::failure(status),
     };
     eprintln!("  [{step_num}/{total}] {name} {colored}");
 }
@@ -548,7 +548,7 @@ pub(crate) fn write_junit_xml(report: &ScenarioReport, path: &Path) -> Result<()
                 let d = duration.as_secs_f64();
                 format!("{d:.3}")
             }
-            StepOutcome::Skipped => "0.000".to_string()
+            StepOutcome::Skipped => "0.000".to_string(),
         };
 
         let mut tc = BytesStart::new("testcase");
@@ -618,7 +618,7 @@ mod tests {
                 .into_iter()
                 .map(|(name, outcome)| StepResult { name: name.to_string(), outcome })
                 .collect(),
-            total_duration: Duration::from_millis(1234)
+            total_duration: Duration::from_millis(1234),
         }
     }
 
@@ -730,7 +730,7 @@ action = "ping"
             gone: None,
             stable: None,
             require_mutation: None,
-            path: None
+            path: None,
         };
         assert_eq!(step.display_name(0), "my step");
     }
@@ -756,7 +756,7 @@ action = "ping"
             gone: None,
             stable: None,
             require_mutation: None,
-            path: None
+            path: None,
         };
         assert_eq!(step.display_name(2), "step-3");
     }

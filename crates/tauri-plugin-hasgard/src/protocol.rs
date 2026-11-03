@@ -14,12 +14,12 @@ pub(crate) const RPC_INTERNAL_ERROR: i32 = -32603;
 /// Deserialize params, normalizing `null` to `None`.
 fn deserialize_params<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
 where
-    D: Deserializer<'de>
+    D: Deserializer<'de>,
 {
     let val: Option<serde_json::Value> = Option::deserialize(deserializer)?;
     match val {
         Some(serde_json::Value::Null) => Ok(None),
-        other => Ok(other)
+        other => Ok(other),
     }
 }
 
@@ -30,7 +30,7 @@ pub(crate) struct Request {
     pub id: u64,
     pub method: String,
     #[serde(default, deserialize_with = "deserialize_params")]
-    pub params: Option<serde_json::Value>
+    pub params: Option<serde_json::Value>,
 }
 
 /// A JSON-RPC 2.0 response.
@@ -41,7 +41,7 @@ pub(crate) struct Response {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<RpcError>
+    pub error: Option<RpcError>,
 }
 
 impl<'de> Deserialize<'de> for Response {
@@ -74,7 +74,7 @@ impl<'de> Deserialize<'de> for Response {
             id: id.clone(),
             // Preserve explicit null: it is a valid result, unlike an absent field.
             result: object.get("result").cloned(),
-            error
+            error,
         })
     }
 }
@@ -85,7 +85,7 @@ pub(crate) struct RpcError {
     pub code: i32,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<serde_json::Value>
+    pub data: Option<serde_json::Value>,
 }
 
 impl Response {
@@ -102,7 +102,7 @@ impl Response {
             jsonrpc: "2.0".to_owned(),
             id,
             result: None,
-            error: Some(RpcError { code, message: message.into(), data: None })
+            error: Some(RpcError { code, message: message.into(), data: None }),
         }
     }
 }
@@ -166,7 +166,7 @@ mod tests {
             jsonrpc: "2.0".to_owned(),
             id: 42,
             method: "click".to_owned(),
-            params: Some(json!({"ref": "e1"}))
+            params: Some(json!({"ref": "e1"})),
         };
         let serialized = serde_json::to_string(&req).expect("serialize");
         let deserialized: Request = serde_json::from_str(&serialized).expect("deserialize");

@@ -68,7 +68,7 @@ fn snapshot_save_json_stdout_is_pure_parseable_json() {
             "--json",
             "snapshot",
             "--save",
-            save_path.to_str().expect("save path is UTF-8")
+            save_path.to_str().expect("save path is UTF-8"),
         ])
         .output()
         .expect("run tauri-hasgard");
@@ -122,7 +122,7 @@ fn snapshot_save_json_stdout_clean_with_rust_log_info() {
             "--json",
             "snapshot",
             "--save",
-            save_path.to_str().expect("save path is UTF-8")
+            save_path.to_str().expect("save path is UTF-8"),
         ])
         .output()
         .expect("run tauri-hasgard");

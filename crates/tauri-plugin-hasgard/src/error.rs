@@ -7,5 +7,5 @@ pub enum Error {
 
     /// A JSON serialization/deserialization error occurred.
     #[error("json error: {0}")]
-    Json(#[from] serde_json::Error)
+    Json(#[from] serde_json::Error),
 }

@@ -21,7 +21,7 @@ fn fixture_shortcut(app: tauri::AppHandle, action: String) -> Result<u32, String
         }
         "unregister" => app.global_shortcut().unregister("Control+Alt+Shift+F12").map_err(|e| e.to_string())?,
         "count" => (),
-        _ => return Err("Unknown shortcut fixture action".to_owned())
+        _ => return Err("Unknown shortcut fixture action".to_owned()),
     }
     Ok(SHORTCUT_COUNT.load(Ordering::SeqCst))
 }
@@ -53,7 +53,7 @@ pub fn run() {
             let wanted = match std::env::var("TAURI_HASGARD_DISPLAY") {
                 Ok(value) => value,
                 Err(std::env::VarError::NotPresent) => "secondary".to_owned(),
-                Err(error) => return Err(error.into())
+                Err(error) => return Err(error.into()),
             };
             let monitors = app.available_monitors()?;
             let primary = app.primary_monitor()?.ok_or("Primary display not found")?;

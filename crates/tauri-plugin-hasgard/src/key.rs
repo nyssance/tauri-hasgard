@@ -71,14 +71,14 @@ pub enum KeyError {
     #[error("enigo init failed: {0}")]
     EnigoInit(String),
     #[error("enigo input failed: {0}")]
-    EnigoInput(String)
+    EnigoInput(String),
 }
 
 /// Parsed combo: zero or more modifiers and exactly one main key.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Combo {
     pub modifiers: Vec<Key>,
-    pub key: Key
+    pub key: Key,
 }
 
 /// Parse a combo string like `"Control+Shift+P"` into modifiers + main key.
@@ -109,7 +109,7 @@ pub fn parse_combo(combo: &str) -> Result<Combo, KeyError> {
             None if !prefix.is_empty() => {
                 return Err(KeyError::UnknownKey(combo.trim().to_owned()));
             }
-            None => (prefix, "+")
+            None => (prefix, "+"),
         }
     } else {
         match trimmed.rsplit_once('+') {
@@ -120,7 +120,7 @@ pub fn parse_combo(combo: &str) -> Result<Combo, KeyError> {
                 return Err(KeyError::UnknownKey(combo.trim().to_owned()));
             }
             Some((mods, k)) => (mods, k.trim()),
-            None => ("", trimmed)
+            None => ("", trimmed),
         }
     };
 
@@ -155,7 +155,7 @@ fn parse_modifier(token: &str) -> Result<Key, KeyError> {
         "shift" => Ok(Key::Shift),
         "alt" | "option" => Ok(Key::Alt),
         "meta" | "super" | "cmd" | "command" | "win" => Ok(Key::Meta),
-        other => Err(KeyError::UnknownKey(other.to_owned()))
+        other => Err(KeyError::UnknownKey(other.to_owned())),
     }
 }
 
@@ -195,7 +195,7 @@ fn parse_key(token: &str) -> Result<Key, KeyError> {
         "f10" => Key::F10,
         "f11" => Key::F11,
         "f12" => Key::F12,
-        _ => return Err(KeyError::UnknownKey(token.to_owned()))
+        _ => return Err(KeyError::UnknownKey(token.to_owned())),
     };
     Ok(key)
 }
@@ -218,7 +218,7 @@ fn linux_digit_keycode(ch: char) -> Option<u16> {
     match ch {
         '1'..='9' => Some(10 + (ch as u16 - '1' as u16)),
         '0' => Some(19),
-        _ => None
+        _ => None,
     }
 }
 
@@ -234,7 +234,7 @@ fn linux_digit_keycode(ch: char) -> Option<u16> {
 fn physical_digit_keycode(key: Key, has_modifiers: bool) -> Option<u16> {
     match key {
         Key::Unicode(ch) if has_modifiers => linux_digit_keycode(ch),
-        _ => None
+        _ => None,
     }
 }
 
@@ -263,7 +263,7 @@ fn physical_digit_keycode(key: Key, has_modifiers: bool) -> Option<u16> {
 fn normalize_main_key(key: Key, has_modifiers: bool) -> Key {
     match key {
         Key::Unicode(ch) if has_modifiers && ch.is_ascii_uppercase() => Key::Unicode(ch.to_ascii_lowercase()),
-        _ => key
+        _ => key,
     }
 }
 
@@ -359,7 +359,7 @@ pub fn simulate_press(combo: &str, marker: i64) -> Result<(), KeyError> {
     press_outcome?;
     match release_error {
         Some(e) => Err(e),
-        None => Ok(())
+        None => Ok(()),
     }
 }
 

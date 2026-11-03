@@ -13,13 +13,13 @@ pub(crate) enum EvalError {
     #[error("JavaScript error: {0}")]
     JsError(String),
     #[error("eval channel closed unexpectedly")]
-    ChannelClosed
+    ChannelClosed,
 }
 
 struct Pending {
     nonce: String,
     sender: oneshot::Sender<Result<serde_json::Value, String>>,
-    source: Option<(String, String)>
+    source: Option<(String, String)>,
 }
 type PendingMap = HashMap<u64, Pending>;
 
@@ -31,7 +31,7 @@ pub(crate) fn origin(url: &tauri::Url) -> Result<String, String> {
 
 struct PendingGuard<'a> {
     pending: &'a Mutex<PendingMap>,
-    id: u64
+    id: u64,
 }
 
 impl Drop for PendingGuard<'_> {
@@ -52,7 +52,7 @@ pub(crate) struct EvalEngine {
     next_id: Arc<AtomicU64>,
     allowed: Arc<Mutex<HashMap<String, String>>>,
     handshakes: Arc<Mutex<HashMap<String, (String, String)>>>,
-    last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>
+    last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
 impl EvalEngine {
@@ -64,7 +64,7 @@ impl EvalEngine {
             next_id: Arc::new(AtomicU64::new(1)),
             allowed: Arc::new(Mutex::new(HashMap::new())),
             handshakes: Arc::default(),
-            last_snapshot: Arc::new(Mutex::new(HashMap::new()))
+            last_snapshot: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -149,7 +149,7 @@ impl EvalEngine {
     }
 
     pub fn resolve_from(
-        &self, id: u64, window: &str, url: &tauri::Url, nonce: Option<&str>, result: Result<serde_json::Value, String>
+        &self, id: u64, window: &str, url: &tauri::Url, nonce: Option<&str>, result: Result<serde_json::Value, String>,
     ) {
         let mut pending = self.pending.lock().expect("pending lock poisoned");
         let Some(request) = pending.get(&id) else { return };
@@ -163,7 +163,7 @@ impl EvalEngine {
         }
         let result = match origin(url) {
             Ok(actual) if &actual == expected_origin => result,
-            _ => Err("Window origin changed while automation was pending".to_owned())
+            _ => Err("Window origin changed while automation was pending".to_owned()),
         };
         if let Some(request) = pending.remove(&id) {
             let _ = request.sender.send(result);
@@ -225,7 +225,7 @@ impl EvalEngine {
     /// Wait for a pending eval result with timeout.
     /// Cleans up on every exit, including cancellation of the waiting task.
     pub async fn wait(
-        &self, id: u64, rx: oneshot::Receiver<Result<serde_json::Value, String>>, timeout: Duration
+        &self, id: u64, rx: oneshot::Receiver<Result<serde_json::Value, String>>, timeout: Duration,
     ) -> Result<serde_json::Value, EvalError> {
         let _pending = PendingGuard { pending: &self.pending, id };
         let result = tokio::time::timeout(timeout, rx).await;
@@ -233,7 +233,7 @@ impl EvalEngine {
         match result {
             Ok(Ok(inner)) => inner.map_err(EvalError::JsError),
             Ok(Err(_)) => Err(EvalError::ChannelClosed),
-            Err(_) => Err(EvalError::Timeout(timeout))
+            Err(_) => Err(EvalError::Timeout(timeout)),
         }
     }
 }

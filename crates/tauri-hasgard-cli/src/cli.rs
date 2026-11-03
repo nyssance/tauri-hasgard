@@ -25,7 +25,7 @@ pub(crate) struct Cli {
     pub frame: Vec<String>,
 
     #[command(subcommand)]
-    pub command: Command
+    pub command: Command,
 }
 
 /// Parse an `X,Y` click offset. Rejected rather than defaulted, because a
@@ -58,7 +58,7 @@ pub(crate) enum Command {
         #[arg(short, long)]
         depth: Option<u8>,
         #[arg(long, value_name = "FILE")]
-        save: Option<std::path::PathBuf>
+        save: Option<std::path::PathBuf>,
     },
     /// Compare the current webview with a previous snapshot, showing only differences.
     Diff {
@@ -73,7 +73,7 @@ pub(crate) enum Command {
         selector: Option<String>,
         /// Maximum depth to traverse
         #[arg(short, long)]
-        depth: Option<u8>
+        depth: Option<u8>,
     },
     /// Find elements by text, label, placeholder, test id, alt, or title.
     ///
@@ -87,7 +87,7 @@ pub(crate) enum Command {
         value: String,
         /// Require a full, case-sensitive match. Test ids are always exact.
         #[arg(long)]
-        exact: bool
+        exact: bool,
     },
     /// Click an element.
     ///
@@ -106,7 +106,7 @@ pub(crate) enum Command {
         click_count: Option<u32>,
         /// Press at this offset from the element's top-left, not its centre.
         #[arg(long, value_name = "X,Y", value_parser = parse_position)]
-        position: Option<(f64, f64)>
+        position: Option<(f64, f64)>,
     },
     /// Double-click an element. Shorthand for `click --click-count 2`.
     Dblclick { target: String },
@@ -129,7 +129,7 @@ pub(crate) enum Command {
         target: String,
         /// Repeat to attach several files. Omit to clear the selection.
         #[arg(long = "file", value_name = "PATH")]
-        files: Vec<std::path::PathBuf>
+        files: Vec<std::path::PathBuf>,
     },
     /// Scroll by wheel, letting the page cancel it as a real wheel would.
     Wheel {
@@ -138,7 +138,7 @@ pub(crate) enum Command {
         #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
         delta_x: f64,
         #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
-        delta_y: f64
+        delta_y: f64,
     },
     /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
     #[command(subcommand)]
@@ -159,7 +159,7 @@ pub(crate) enum Command {
         wait_for: Option<String>,
         /// Postcondition timeout in milliseconds.
         #[arg(long, requires = "wait_for")]
-        timeout: Option<u32>
+        timeout: Option<u32>,
     },
     /// Select an option in a `<select>` element.
     Select { target: String, value: String },
@@ -169,14 +169,14 @@ pub(crate) enum Command {
         /// Drive the checkbox to `on` or `off` instead of toggling. Idempotent,
         /// so a retry cannot invert the box the way a repeated toggle does.
         #[arg(long, value_parser = ["on", "off"])]
-        state: Option<String>
+        state: Option<String>,
     },
     /// Scroll the webview document or an element.
     Scroll {
         direction: String,
         amount: Option<i32>,
         #[arg(long)]
-        r#ref: Option<String>
+        r#ref: Option<String>,
     },
     /// Drag an element to another element or by offset.
     Drag {
@@ -185,14 +185,14 @@ pub(crate) enum Command {
         target: Option<String>,
         /// Pixel offset as X,Y (e.g., "0,100").
         #[arg(long, value_name = "X,Y", conflicts_with = "target")]
-        offset: Option<String>
+        offset: Option<String>,
     },
     /// Simulate a file drop on an element.
     Drop {
         target: String,
         /// File(s) to drop. Can be repeated.
         #[arg(long, required = true)]
-        file: Vec<std::path::PathBuf>
+        file: Vec<std::path::PathBuf>,
     },
     /// Get text content of an element.
     Text { target: String },
@@ -206,13 +206,13 @@ pub(crate) enum Command {
     /// Pass `-` as the script or omit it to read from stdin.
     Eval {
         /// JavaScript to evaluate. Use `-` or omit to read from stdin.
-        script: Option<String>
+        script: Option<String>,
     },
     /// Invoke a Tauri IPC command.
     Ipc {
         command: String,
         #[arg(long)]
-        args: Option<String>
+        args: Option<String>,
     },
     /// Render the full webview document to a PNG from the DOM.
     ///
@@ -222,7 +222,7 @@ pub(crate) enum Command {
     Screenshot {
         path: Option<PathBuf>,
         #[arg(long)]
-        selector: Option<String>
+        selector: Option<String>,
     },
     /// Capture rendered pixels as a PNG: the target webview via `WebKit`, or any
     /// on-screen window by platform window id.
@@ -237,7 +237,7 @@ pub(crate) enum Command {
         #[arg(long)]
         output: PathBuf,
         #[arg(long, default_value = "png")]
-        format: String
+        format: String,
     },
     /// Write a JavaScript heap snapshot of the target webview: `JavaScriptCore`'s
     /// inspector JSON on macOS, a V8 `.heapsnapshot` on Windows. The engine
@@ -245,7 +245,7 @@ pub(crate) enum Command {
     #[command(name = "heap_snapshot", visible_alias = "heap-snapshot")]
     HeapSnapshot {
         #[arg(long)]
-        output: PathBuf
+        output: PathBuf,
     },
     /// Navigate to a URL.
     Navigate { url: String },
@@ -269,7 +269,7 @@ pub(crate) enum Command {
         #[arg(long)]
         gone: bool,
         #[arg(long, default_value = "10000")]
-        timeout: u64
+        timeout: u64,
     },
     /// Watch for DOM mutations and report changes.
     Watch {
@@ -286,7 +286,7 @@ pub(crate) enum Command {
         /// Defer the stability timer until at least one mutation occurs.
         /// Use after IPC calls that trigger async re-renders (e.g., React state updates).
         #[arg(long)]
-        require_mutation: bool
+        require_mutation: bool,
     },
     /// Display or stream captured console logs.
     Logs {
@@ -304,7 +304,7 @@ pub(crate) enum Command {
 
         /// Continuously poll for new logs.
         #[arg(long, short = 'f')]
-        follow: bool
+        follow: bool,
     },
     /// Display or stream captured network requests.
     Network {
@@ -326,7 +326,7 @@ pub(crate) enum Command {
 
         /// Continuously poll for new requests.
         #[arg(long, short = 'f')]
-        follow: bool
+        follow: bool,
     },
     /// Assert element state
     #[command(subcommand)]
@@ -338,12 +338,12 @@ pub(crate) enum Command {
     /// Record native window video (macOS, requires ffmpeg).
     Video {
         #[command(subcommand)]
-        action: VideoAction
+        action: VideoAction,
     },
     /// Record interactions for replay
     Record {
         #[command(subcommand)]
-        action: RecordAction
+        action: RecordAction,
     },
     /// Replay a recorded session
     Replay {
@@ -351,7 +351,7 @@ pub(crate) enum Command {
         path: PathBuf,
         /// Export format instead of replaying (e.g., "sh")
         #[arg(long)]
-        export: Option<String>
+        export: Option<String>,
     },
     /// Execute a declarative scenario from a TOML file.
     Run {
@@ -362,8 +362,8 @@ pub(crate) enum Command {
         junit: Option<PathBuf>,
         /// Override `fail_fast` setting from the scenario file.
         #[arg(long)]
-        no_fail_fast: bool
-    }
+        no_fail_fast: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -383,7 +383,7 @@ pub(crate) enum AssertKind {
     /// Assert text contains substring
     Contains { target: String, expected: String },
     /// Assert current URL contains string
-    Url { expected: String }
+    Url { expected: String },
 }
 
 #[derive(clap::Args, Debug)]
@@ -392,14 +392,14 @@ pub(crate) struct StorageArgs {
     #[arg(long)]
     pub session: bool,
     #[command(subcommand)]
-    pub action: StorageAction
+    pub action: StorageAction,
 }
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct FormsArgs {
     /// Target a specific form by CSS selector.
     #[arg(long)]
-    pub selector: Option<String>
+    pub selector: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -411,7 +411,7 @@ pub(crate) enum StorageAction {
     /// List all key-value pairs.
     List,
     /// Clear all storage.
-    Clear
+    Clear,
 }
 
 /// How modal dialogs are answered.
@@ -425,14 +425,14 @@ pub(crate) enum DialogCommand {
     Accept {
         /// Text submitted to a `prompt`. Its own default is used when omitted.
         #[arg(long)]
-        prompt_text: Option<String>
+        prompt_text: Option<String>,
     },
     /// Answer subsequent dialogs with Cancel. This is the default.
     Dismiss,
     /// Show the dialogs the page has opened, and the current policy.
     List,
     /// Forget the recorded dialogs, leaving the policy alone.
-    Clear
+    Clear,
 }
 
 #[derive(Subcommand, Debug)]
@@ -453,7 +453,7 @@ pub(crate) enum RouteCommand {
         method: Option<String>,
         /// Stop matching after this many requests, letting later ones through.
         #[arg(long)]
-        times: Option<u32>
+        times: Option<u32>,
     },
     /// Fail matching requests the way a dropped connection does.
     Abort {
@@ -461,12 +461,12 @@ pub(crate) enum RouteCommand {
         #[arg(long)]
         method: Option<String>,
         #[arg(long)]
-        times: Option<u32>
+        times: Option<u32>,
     },
     /// Show the active rules and every request they answered.
     List,
     /// Remove every rule and its interception log.
-    Clear
+    Clear,
 }
 
 #[derive(Debug, Subcommand)]
@@ -477,10 +477,10 @@ pub(crate) enum VideoAction {
         #[arg(long, default_value_t = 5)]
         fps: u64,
         #[arg(long, default_value_t = 60_000)]
-        max_duration_ms: u64
+        max_duration_ms: u64,
     },
     Stop,
-    Status
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -491,10 +491,10 @@ pub(crate) enum RecordAction {
     Stop {
         /// Output file path (JSON)
         #[arg(short, long)]
-        output: PathBuf
+        output: PathBuf,
     },
     /// Show recording status
-    Status
+    Status,
 }
 
 /// Parsed target for element-targeting commands.
@@ -502,7 +502,7 @@ pub(crate) enum RecordAction {
 pub(crate) enum Target {
     Ref(String),
     Selector(String),
-    Coords(i32, i32)
+    Coords(i32, i32),
 }
 
 /// Parse a target string into a `Target` variant.
@@ -619,7 +619,7 @@ mod tests {
             "--timeout",
             "5000",
             "--stable",
-            "500"
+            "500",
         ]);
         if let Command::Watch { selector, timeout, stable, require_mutation } = cli.command {
             assert_eq!(selector, Some(".results".to_owned()));
@@ -665,7 +665,7 @@ mod tests {
             "#root",
             "--require-mutation",
             "--stable",
-            "500"
+            "500",
         ]);
         if let Command::Watch { selector, stable, require_mutation, .. } = cli.command {
             assert_eq!(selector, Some("#root".to_owned()));
@@ -707,7 +707,7 @@ mod tests {
             "--file",
             "a.png",
             "--file",
-            "b.txt"
+            "b.txt",
         ]);
         if let Command::Drop { file, .. } = cli.command {
             assert_eq!(file.len(), 2);
@@ -726,7 +726,7 @@ mod tests {
             "@e5",
             "@e6",
             "--offset",
-            "0,100"
+            "0,100",
         ]);
         assert!(result.is_err());
     }
@@ -847,7 +847,7 @@ mod tests {
             "--window-id",
             "42",
             "--output",
-            "/tmp/out.png"
+            "/tmp/out.png",
         ]);
         if let Command::ScreenshotNative { window_id, output, format } = cli.command {
             assert_eq!(window_id, Some(42));

@@ -12,7 +12,7 @@ Response IDs are authoritative: clients must support multiple in-flight requests
 ## Envelope contract and limits
 
 `crates/tauri-plugin-hasgard/src/protocol.rs` is the canonical Rust envelope
-definition, formatted normally by `cargo +nightly fmt`. Run `bun run protocol:sync` after
+definition, formatted normally by `cargo fmt`. Run `bun run protocol:sync` after
 changing it or `protocol/responses.json`. The generator copies the definition
 into the CLI crate and the response vectors into both Rust crates,
 so published crates build and test without sibling workspace directories or a

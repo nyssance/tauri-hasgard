@@ -17,7 +17,7 @@ use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDL
 use windows::Win32::Security::{
     ACL, ACL_REVISION, AddAccessAllowedAce, EqualSid, GetLengthSid, GetTokenInformation, InitializeAcl,
     InitializeSecurityDescriptor, PSECURITY_DESCRIPTOR, PSID, RevertToSelf, SECURITY_ATTRIBUTES,
-    SetSecurityDescriptorDacl, TOKEN_QUERY, TOKEN_USER, TokenUser
+    SetSecurityDescriptorDacl, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken};
@@ -30,7 +30,7 @@ pub fn socket_path(identifier: &str) -> PathBuf {
 pub(crate) struct InstanceEntry {
     pub pipe: String,
     pub pid: u32,
-    pub created_at: u64
+    pub created_at: u64,
 }
 
 fn instances_dir() -> std::io::Result<PathBuf> {
@@ -63,7 +63,7 @@ fn register_instance(identifier: &str, pipe_path: &Path) -> std::io::Result<()> 
     let entry = InstanceEntry {
         pipe: pipe_path.to_string_lossy().into_owned(),
         pid: std::process::id(),
-        created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()
+        created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
     };
     atomic_write_instance(&path, &entry)
 }
@@ -77,7 +77,7 @@ fn unregister_instance(identifier: &str) -> std::io::Result<()> {
 }
 
 pub struct RegistryGuard {
-    identifier: String
+    identifier: String,
 }
 
 impl Drop for RegistryGuard {
@@ -97,7 +97,7 @@ impl Drop for RegistryGuard {
 /// Owns a raw allocation backing an ACL with the correct layout.
 struct AclBuffer {
     ptr: *mut ACL,
-    layout: Layout
+    layout: Layout,
 }
 
 impl AclBuffer {
@@ -148,7 +148,7 @@ struct SecurityAttributesGuard {
     /// Backing storage for the SID (referenced by the ACE we add to the ACL).
     _sid_buf: Vec<u8>,
     /// The token handle used to obtain the SID.
-    _token: OwnedHandle
+    _token: OwnedHandle,
 }
 
 /// Opens the current process token for reading the creator's SID.
@@ -200,7 +200,7 @@ fn get_user_sid(token: &OwnedHandle) -> std::io::Result<(Vec<u8>, PSID)> {
             TokenUser,
             Some(buf.as_mut_ptr().cast::<c_void>()),
             return_length,
-            &raw mut return_length
+            &raw mut return_length,
         )
     }
     .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -317,7 +317,7 @@ fn build_acl(user_sid: PSID) -> std::io::Result<AclBuffer> {
 
 /// Allocates a `SECURITY_DESCRIPTOR` and attaches the given ACL as its DACL.
 fn build_security_descriptor(
-    acl: &AclBuffer
+    acl: &AclBuffer,
 ) -> std::io::Result<Box<MaybeUninit<windows::Win32::Security::SECURITY_DESCRIPTOR>>> {
     let sd_box = Box::new(MaybeUninit::<windows::Win32::Security::SECURITY_DESCRIPTOR>::uninit());
     let sd_ptr = PSECURITY_DESCRIPTOR(sd_box.as_ptr() as *mut c_void);
@@ -345,7 +345,7 @@ fn create_user_only_security_attributes() -> std::io::Result<(SECURITY_ATTRIBUTE
         nLength: u32::try_from(mem::size_of::<SECURITY_ATTRIBUTES>())
             .expect("SECURITY_ATTRIBUTES size must fit in u32"),
         lpSecurityDescriptor: sd_ptr.0,
-        bInheritHandle: windows::core::BOOL(0)
+        bInheritHandle: windows::core::BOOL(0),
     };
 
     let guard = SecurityAttributesGuard { _sd: sd, _acl: acl, _sid_buf: sid_buf, _token: token };
@@ -396,7 +396,7 @@ pub fn bind(pipe_path: &Path) -> Result<(NamedPipeServer, RegistryGuard), Error>
 /// task instead of taking down the host app.
 pub async fn run(
     pipe_path: PathBuf, engine: EvalEngine, eval_fn: Option<EvalFn>, list_fn: Option<ListWindowsFn>,
-    press_hooks: Option<PressHooksRef>, recorder: Recorder
+    press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) {
     let (first_server, guard) = match bind(&pipe_path) {
         Ok(bound) => bound,
@@ -413,7 +413,7 @@ pub async fn run(
 
 async fn accept_loop(
     first_server: NamedPipeServer, identifier: &str, engine: EvalEngine, eval_fn: Option<EvalFn>,
-    list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder
+    list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) -> Result<(), Error> {
     let ctx = Arc::new((engine, eval_fn, list_fn, press_hooks, recorder));
     let mut server = first_server;
@@ -613,7 +613,7 @@ mod tests {
         use windows::Win32::Foundation::LocalFree;
         use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
         use windows::Win32::Security::{
-            ACL_SIZE_INFORMATION, AclSizeInformation, DACL_SECURITY_INFORMATION, GetAclInformation
+            ACL_SIZE_INFORMATION, AclSizeInformation, DACL_SECURITY_INFORMATION, GetAclInformation,
         };
 
         let pipe = unique_pipe_path();
@@ -636,7 +636,7 @@ mod tests {
                 None,
                 Some(&raw mut dacl_ptr),
                 None,
-                Some(&raw mut sd_ptr)
+                Some(&raw mut sd_ptr),
             )
         }
         .ok()

@@ -83,13 +83,13 @@ return snapshotData;";
     enum Attempt {
         /// `inspectorWebView` is not there yet; ask again.
         FrontendPending,
-        Requested(mpsc::Receiver<Result<String, String>>)
+        Requested(mpsc::Receiver<Result<String, String>>),
     }
 
     /// Take a heap snapshot of a Tauri `WebviewWindow`, blocking the calling (non-main) thread.
     pub(crate) fn capture<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<String, String>
     where
-        R::Handle: tauri_runtime_wry::AsWryHandle
+        R::Handle: tauri_runtime_wry::AsWryHandle,
     {
         let mut attempts = 0;
         let outcome = loop {
@@ -99,8 +99,8 @@ return snapshotData;";
                     // A reconnected inspector reuses its frontend view and reloads it;
                     // a script that arrived before that navigation dies with the old page.
                     Ok(Err(message)) if message.contains(FRONTEND_RELOADED) => Some(message),
-                    outcome => break outcome.map_err(|err| format!("heap snapshot did not complete: {err}"))
-                }
+                    outcome => break outcome.map_err(|err| format!("heap snapshot did not complete: {err}")),
+                },
             };
             if attempts == FRONTEND_ATTEMPTS {
                 break Err(retry.unwrap_or_else(|| "Web Inspector frontend did not load".to_owned()));
@@ -116,7 +116,7 @@ return snapshotData;";
 
     fn request<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<Attempt, String>
     where
-        R::Handle: tauri_runtime_wry::AsWryHandle
+        R::Handle: tauri_runtime_wry::AsWryHandle,
     {
         use block2::RcBlock;
         use objc2::MainThreadMarker;
@@ -182,7 +182,7 @@ return snapshotData;";
                                 .downcast_ref::<NSString>()
                                 .map(ToString::to_string)
                                 .ok_or_else(|| "heap snapshot result is not a string".to_owned()),
-                            (None, None) => Err("heap snapshot returned nothing".to_owned())
+                            (None, None) => Err("heap snapshot returned nothing".to_owned()),
                         };
                         reply(&slot, outcome);
                     });
@@ -193,7 +193,7 @@ return snapshotData;";
                             None,
                             None,
                             &WKContentWorld::pageWorld(mtm),
-                            Some(&block)
+                            Some(&block),
                         );
                     }
                     Ok(Attempt::Requested(receiver))
@@ -221,7 +221,7 @@ return snapshotData;";
 
     fn close<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>)
     where
-        R::Handle: tauri_runtime_wry::AsWryHandle
+        R::Handle: tauri_runtime_wry::AsWryHandle,
     {
         use objc2::rc::Retained;
         use objc2::runtime::{AnyObject, Bool};
@@ -253,7 +253,7 @@ mod platform {
     /// Take a heap snapshot of a Tauri `WebviewWindow`, blocking the calling (non-UI) thread.
     pub(crate) fn capture<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<String, String>
     where
-        R::Handle: tauri_runtime_wry::AsWryHandle
+        R::Handle: tauri_runtime_wry::AsWryHandle,
     {
         use tauri_runtime_wry::WebviewWryExt;
         use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
@@ -318,7 +318,7 @@ mod platform {
                             snapshot_core.CallDevToolsProtocolMethod(
                                 w!("HeapProfiler.takeHeapSnapshot"),
                                 w!("{\"reportProgress\":false}"),
-                                &on_snapshot
+                                &on_snapshot,
                             )
                         } {
                             reply(&enabled_slot, Err(format!("HeapProfiler.takeHeapSnapshot failed: {err}")));
@@ -359,7 +359,7 @@ pub(crate) async fn handle_heap_snapshot(window: Option<String>, params: Option<
             |err| {
                 let _ = std::fs::remove_file(&partial);
                 internal(format!("failed to write {}: {err}", output_path.display()))
-            }
+            },
         )?;
         Ok(json!({ "output_path": output_path, "byte_size": snapshot.len(), "format": FORMAT }))
     })
@@ -379,7 +379,7 @@ fn output_path(params: Option<&Value>) -> Result<PathBuf, RpcError> {
     }
     match path.parent() {
         Some(parent) if parent.is_dir() => Ok(path.to_path_buf()),
-        _ => Err(invalid(format!("output_path parent directory does not exist: {raw}")))
+        _ => Err(invalid(format!("output_path parent directory does not exist: {raw}"))),
     }
 }
 
@@ -400,7 +400,7 @@ mod tests {
             None,
             Some(json!({})),
             Some(json!({ "output_path": "relative/heap.json" })),
-            Some(json!({ "output_path": directory.join("hasgard-missing-directory/heap.json") }))
+            Some(json!({ "output_path": directory.join("hasgard-missing-directory/heap.json") })),
         ] {
             assert_eq!(super::output_path(params.as_ref()).expect_err("rejected").code, -32602);
         }

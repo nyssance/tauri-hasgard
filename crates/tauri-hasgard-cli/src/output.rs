@@ -72,7 +72,7 @@ pub(crate) fn format_text(value: &serde_json::Value) {
         value.get("x").and_then(serde_json::Value::as_f64),
         value.get("y").and_then(serde_json::Value::as_f64),
         value.get("width").and_then(serde_json::Value::as_f64),
-        value.get("height").and_then(serde_json::Value::as_f64)
+        value.get("height").and_then(serde_json::Value::as_f64),
     ) {
         println!("{width}×{height} at ({x}, {y})");
         return;
@@ -89,7 +89,7 @@ pub(crate) fn format_text(value: &serde_json::Value) {
     match value {
         serde_json::Value::String(s) => println!("{s}"),
         serde_json::Value::Null => {}
-        other => println!("{other}")
+        other => println!("{other}"),
     }
 }
 
@@ -166,13 +166,13 @@ pub(crate) fn format_logs(value: &serde_json::Value) -> String {
                 .map(|a| {
                     let raw = match a {
                         serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string()
+                        other => other.to_string(),
                     };
                     strip_ansi(&raw)
                 })
                 .collect::<Vec<_>>()
                 .join(" "),
-            None => String::new()
+            None => String::new(),
         };
 
         // Color by level
@@ -180,7 +180,7 @@ pub(crate) fn format_logs(value: &serde_json::Value) -> String {
             "error" => crate::style::error(level),
             "warn" => crate::style::warn(level),
             "info" => crate::style::info(level),
-            _ => crate::style::dim(level)
+            _ => crate::style::dim(level),
         };
 
         let _ = writeln!(output, "[{time_str}] {level_display} {args_str}");
@@ -217,7 +217,7 @@ pub(crate) fn format_network(value: &serde_json::Value) -> String {
             200..=299 => crate::style::success(&status.to_string()),
             300..=399 => crate::style::info(status),
             400..=499 => crate::style::warn(status),
-            _ => crate::style::error(&status.to_string())
+            _ => crate::style::error(&status.to_string()),
         };
 
         let method_display = crate::style::bold(method_safe);
@@ -285,7 +285,7 @@ fn format_form_field(field: &serde_json::Value) {
         Some(serde_json::Value::Array(arr)) => {
             arr.iter().filter_map(|v| v.as_str()).map(strip_ansi).collect::<Vec<_>>().join(", ")
         }
-        _ => strip_ansi(field_value_raw.and_then(serde_json::Value::as_str).unwrap_or(""))
+        _ => strip_ansi(field_value_raw.and_then(serde_json::Value::as_str).unwrap_or("")),
     };
     let checked = field.get("checked").and_then(serde_json::Value::as_bool);
 
@@ -479,17 +479,17 @@ pub(crate) fn format_diff(value: &serde_json::Value) {
                         &old.and_then(|o| o.get(field_name))
                             .map(|v| match v {
                                 serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string()
+                                other => other.to_string(),
                             })
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
                     );
                     let new_val = strip_ansi(
                         &el.get(field_name)
                             .map(|v| match v {
                                 serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string()
+                                other => other.to_string(),
                             })
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
                     );
 
                     let mut line = format!("{} {} ", crate::style::warn("~"), crate::style::info(&role));

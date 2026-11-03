@@ -1,12 +1,16 @@
-"""Local development tasks for the Hasgard workspace."""
+lazy from shutil import which
 
 from fabric import task
-from invoke import Context
+lazy from invoke import Context
 
 
 @task(aliases=["u"])
 def upgrade(c: Context) -> None:
-    """Upgrade every workspace's dependencies to the latest versions."""
-    c.run("bun update --latest --recursive", echo=True)
-    c.run("cargo upgrade --incompatible", echo=True)
-    c.run("cargo update", echo=True)
+    """升级"""
+    c.run("bun outdated --recursive")
+    c.run("bun update --recursive")
+    c.run("cargo update")
+    # 只报告超出声明范围的新版本，跨大版本手动决定
+    if not which("cargo-outdated"):
+        c.run("cargo install cargo-outdated")
+    c.run("cargo outdated --depth 1 --workspace", warn=True)

@@ -11,7 +11,7 @@ use tauri_runtime_wry::WebviewWryExt;
 /// does not prove that the application owns the keyboard.
 #[cfg(all(target_os = "macos", debug_assertions))]
 fn macos_window_is_focused<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>, activate: bool
+    window: &tauri::WebviewWindow<R>, activate: bool,
 ) -> Result<bool, String> {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSWindow};
@@ -42,7 +42,7 @@ fn macos_window_is_focused<R: tauri::Runtime>(
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) fn focus<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String>
 where
-    R::Handle: tauri_runtime_wry::AsWryHandle
+    R::Handle: tauri_runtime_wry::AsWryHandle,
 {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut activate = true;
@@ -69,7 +69,7 @@ where
                         let (native, view) = unsafe {
                             (
                                 &*native.cast::<objc2_app_kit::NSWindow>(),
-                                &*webview.inner().cast::<objc2_app_kit::NSView>()
+                                &*webview.inner().cast::<objc2_app_kit::NSView>(),
                             )
                         };
                         if !native.makeFirstResponder(Some(view)) {
@@ -110,7 +110,7 @@ fn remove_monitor(marker: i64) {
 }
 
 fn check_dispatch<R: tauri::Runtime>(
-    target: &tauri::WebviewWindow<R>, deadline: std::time::Instant
+    target: &tauri::WebviewWindow<R>, deadline: std::time::Instant,
 ) -> Result<(), String> {
     if std::time::Instant::now() >= deadline {
         return Err("key injection expired before reaching the main thread".to_owned());
@@ -122,7 +122,7 @@ fn check_dispatch<R: tauri::Runtime>(
         NSEventModifierFlags::Shift
             | NSEventModifierFlags::Control
             | NSEventModifierFlags::Option
-            | NSEventModifierFlags::Command
+            | NSEventModifierFlags::Command,
     );
     if !held.is_empty() {
         return Err(format!("modifiers remain held before key injection: 0x{:x}", held.bits()));
@@ -131,7 +131,7 @@ fn check_dispatch<R: tauri::Runtime>(
 }
 
 pub(crate) fn inject<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>, marker: i64, confirm_delivery: bool, task: crate::server::InjectionTask
+    window: &tauri::WebviewWindow<R>, marker: i64, confirm_delivery: bool, task: crate::server::InjectionTask,
 ) -> Result<(), crate::server::InjectionError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     // Pending -> started or cancelled is atomic: a timeout before dispatch
@@ -176,7 +176,7 @@ pub(crate) fn inject<R: tauri::Runtime>(
                             NSEventModifierFlags::Shift
                                 | NSEventModifierFlags::Control
                                 | NSEventModifierFlags::Option
-                                | NSEventModifierFlags::Command
+                                | NSEventModifierFlags::Command,
                         );
                         if let Ok(mut last) = observed.lock() {
                             *last = Some((value.windowNumber(), number, flags.bits()));
@@ -198,7 +198,7 @@ pub(crate) fn inject<R: tauri::Runtime>(
                 let monitor = unsafe {
                     NSEvent::addLocalMonitorForEventsMatchingMask_handler(
                         NSEventMask::KeyUp | NSEventMask::FlagsChanged,
-                        &callback
+                        &callback,
                     )
                 }
                 .ok_or("could not install native key delivery monitor")?;
@@ -212,7 +212,7 @@ pub(crate) fn inject<R: tauri::Runtime>(
         })
         .map_err(|e| crate::server::InjectionError {
             message: format!("could not reach the main thread: {e}"),
-            started: false
+            started: false,
         })?;
     let result = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).map_err(|e| {
         let evidence = match observation.lock() {
@@ -220,9 +220,9 @@ pub(crate) fn inject<R: tauri::Runtime>(
                 Some((actual, expected, flags)) => {
                     format!("last marked event window={actual}, expected={expected}, held modifiers=0x{flags:x}")
                 }
-                None => "no marked release event observed".to_owned()
+                None => "no marked release event observed".to_owned(),
             },
-            Err(error) => format!("event diagnostics unavailable: {error}")
+            Err(error) => format!("event diagnostics unavailable: {error}"),
         };
         format!("native key delivery was not acknowledged before its deadline: {e}; {evidence}")
     });
@@ -234,7 +234,7 @@ pub(crate) fn inject<R: tauri::Runtime>(
     match (result.and_then(|delivery| delivery), cleanup) {
         (Ok(()), cleanup) => cleanup,
         (Err(error), Ok(())) => Err(error),
-        (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}"))
+        (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
     }
     .map_err(|message| crate::server::InjectionError { message, started })
 }

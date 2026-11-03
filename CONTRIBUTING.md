@@ -38,7 +38,7 @@ cargo test --workspace --all-features --locked
 
 For protocol changes, update the shared definitions and run `bun run protocol:sync`, then check all public clients. Native behavior changes require the real E2E suite; bridge and transport unit tests alone are insufficient. Use `bun run test:e2e:stress` for native focus and keyboard changes.
 
-Formatting follows `alwith-desktop`: `bun fmt` and `cargo +nightly fmt` (install with `rustup toolchain install nightly --profile minimal --component rustfmt`). Nightly is needed for the shared rustfmt options; builds and tests still use stable Rust. HTML, Markdown, SVG, the root package manifest, and TOML are excluded from Bun formatting. Type checking uses `bun check`. TypeScript emits package declarations during `bun run build`.
+Formatting follows `alwith-desktop`: `bun fmt` and stable `cargo fmt`. The nightly-only options in the shared `rustfmt.toml` are ignored on stable; no nightly toolchain is needed. HTML, Markdown, SVG, the root package manifest, and TOML are excluded from Bun formatting. Type checking uses `bun check`. TypeScript emits package declarations during `bun run build`.
 
 ## Dependencies and releases
 
