@@ -30,8 +30,22 @@ jobs:
       - run: bun run test
       - run: bun scripts/test-rust.mjs
 
+  windows-rust:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows-rust
+      - run: bun scripts/test-rust.mjs
+
   cli:
-    needs: [native-e2e, validate]
+    needs: [native-e2e, validate, windows-rust]
     strategy:
       fail-fast: false
       matrix:
@@ -113,7 +127,7 @@ jobs:
           path: dist
 
   crates:
-    needs: [native-e2e, validate]
+    needs: [native-e2e, validate, windows-rust]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -146,7 +160,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
 
   npm:
-    needs: [native-e2e, validate]
+    needs: [native-e2e, validate, windows-rust]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
