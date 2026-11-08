@@ -48,3 +48,36 @@ jobs:
           name: playwright-report-${{ matrix.target }}
           path: examples/fixture-app/playwright-report
           if-no-files-found: ignore
+
+  cef-native-e2e:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      TAURI_HASGARD_DISPLAY: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cef-native-e2e
+      - run: bun install --frozen-lockfile
+      - name: Install screenshot pixel assertions
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cef-pixels"
+          "$RUNNER_TEMP/cef-pixels/bin/pip" install Pillow==11.3.0
+          echo "$RUNNER_TEMP/cef-pixels/bin" >> "$GITHUB_PATH"
+      - name: Build CEF native fixture
+        working-directory: examples/cef-fixture-app
+        run: ../fixture-app/node_modules/.bin/tauri build --debug --bundles app
+      - name: Run CEF native fixture
+        run: node scripts/test-cef.mjs
+      - name: Upload CEF native evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cef-native-evidence
+          path: test-results/cef
+          if-no-files-found: ignore

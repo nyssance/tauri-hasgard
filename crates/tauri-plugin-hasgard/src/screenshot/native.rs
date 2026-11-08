@@ -16,6 +16,7 @@ use super::ScreenshotError;
 /// `screenshot_native` response reports alongside it.
 pub(crate) struct WebviewSnapshot {
     pub(crate) png: Vec<u8>,
+    pub(crate) backend: &'static str,
     /// `NSWindow` number of the hosting window, when it could be read.
     pub(crate) window_id: Option<u32>,
     /// Backing scale of the hosting window, so callers can relate pixels to points.
@@ -95,7 +96,9 @@ where
         .map_err(|err| ScreenshotError::CaptureFailed { message: format!("webview handle unavailable: {err}") })?;
 
     match receiver.recv_timeout(SNAPSHOT_TIMEOUT) {
-        Ok(Ok((png, window_id, scale_factor))) => Ok(WebviewSnapshot { png, window_id, scale_factor }),
+        Ok(Ok((png, window_id, scale_factor))) => {
+            Ok(WebviewSnapshot { backend: "wkwebview", png, window_id, scale_factor })
+        }
         Ok(Err(message)) => Err(ScreenshotError::CaptureFailed { message }),
         Err(err) => {
             Err(ScreenshotError::CaptureFailed { message: format!("WKWebView snapshot did not complete: {err}") })

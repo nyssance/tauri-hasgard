@@ -340,6 +340,9 @@ export class HasgardApplication {
         url: expectString(window.url, `windows[${index}].url`),
         title: expectString(window.title, `windows[${index}].title`)
       }
+      if (window.window_label !== undefined) {
+        info.windowLabel = expectString(window.window_label, `windows[${index}].window_label`)
+      }
       if (window.native_id !== undefined) {
         info.nativeId = expectNumber(window.native_id, `windows[${index}].native_id`)
       }

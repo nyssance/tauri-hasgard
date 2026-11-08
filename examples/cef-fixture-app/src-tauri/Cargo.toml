@@ -1,0 +1,13 @@
+[package]
+name = "tauri-hasgard-cef-fixture"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "3.0.0-alpha.4", features = [] }
+
+[dependencies]
+tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
+tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"] }
+tauri-plugin-hasgard = { path = "../../../crates/tauri-plugin-hasgard", features = ["cef"] }

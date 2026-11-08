@@ -36,7 +36,10 @@ export interface SnapshotOptions {
 }
 
 export interface WindowInfo {
+  /** Routing label of the webview, including CEF child webviews. */
   label: string
+  /** Native host window label; multiple webviews can share one host. */
+  windowLabel?: string
   url: string
   title: string
   /** Operating-system window id. Present only where native capture exists. */
@@ -341,8 +344,8 @@ export interface NativeScreenshotOptions {
   /** Absolute path; the parent directory must already exist. */
   outputPath: string
   /**
-   * Operating-system window id. Resolved from the window's own label when
-   * omitted; pass it only to capture a window Hasgard does not own.
+   * Explicit OS window id captures the whole composited window, including native
+   * children. Omit to capture only this webview's rendered viewport.
    */
   windowId?: number
 }

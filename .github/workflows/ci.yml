@@ -22,7 +22,6 @@ jobs:
       - run: bun run test
       - run: bun test crates/tauri-plugin-hasgard/js/*.test.mjs
 
-
   rust:
     timeout-minutes: 20
     strategy:
@@ -32,9 +31,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features --locked
+      - run: bun scripts/test-rust.mjs
 
   native-e2e:
     uses: ./.github/workflows/native-e2e.yml

@@ -10,8 +10,8 @@ use tauri_runtime_wry::WebviewWryExt;
 /// Read actual `AppKit` focus on the main thread; a queued `set_focus` request alone
 /// does not prove that the application owns the keyboard.
 #[cfg(all(target_os = "macos", debug_assertions))]
-fn macos_window_is_focused<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>, activate: bool,
+pub(crate) fn macos_window_is_focused<R: tauri::Runtime>(
+    window: &tauri::Window<R>, activate: bool,
 ) -> Result<bool, String> {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSWindow};
@@ -54,7 +54,7 @@ where
                 let result = if std::time::Instant::now() >= deadline {
                     Err("focus request expired before reaching the main thread".to_owned())
                 } else {
-                    macos_window_is_focused(&target, activate).and_then(|focused| {
+                    macos_window_is_focused(&target.as_ref().window(), activate).and_then(|focused| {
                         if !focused {
                             return Ok(false);
                         }
@@ -109,9 +109,7 @@ fn remove_monitor(marker: i64) {
     });
 }
 
-fn check_dispatch<R: tauri::Runtime>(
-    target: &tauri::WebviewWindow<R>, deadline: std::time::Instant,
-) -> Result<(), String> {
+fn check_dispatch<R: tauri::Runtime>(target: &tauri::Window<R>, deadline: std::time::Instant) -> Result<(), String> {
     if std::time::Instant::now() >= deadline {
         return Err("key injection expired before reaching the main thread".to_owned());
     }
@@ -131,7 +129,7 @@ fn check_dispatch<R: tauri::Runtime>(
 }
 
 pub(crate) fn inject<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>, marker: i64, confirm_delivery: bool, task: crate::server::InjectionTask,
+    window: &tauri::Window<R>, marker: i64, confirm_delivery: bool, task: crate::server::InjectionTask,
 ) -> Result<(), crate::server::InjectionError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     // Pending -> started or cancelled is atomic: a timeout before dispatch

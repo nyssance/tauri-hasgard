@@ -7,7 +7,7 @@ use crate::recorder::Recorder;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
-/// A function that evaluates JS in the webview.
+/// Evaluates a raw JS expression. The backend owns result transport (IPC or CDP).
 /// The first argument is an optional window label (`None` means "use default window").
 pub(crate) type EvalFn = Arc<dyn Fn(Option<&str>, Option<u64>, String) -> Result<(), String> + Send + Sync>;
 

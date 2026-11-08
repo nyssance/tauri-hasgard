@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>CEF Guest</title>
+<style>body{font:18px system-ui;background:#12bc68;color:#000;margin:0;padding:20px;min-height:1800px}input{font-size:18px;padding:8px}</style>
+<h1>CEF GUEST</h1><input id="guest-input" aria-label="Guest input"><button id="increment">Increment</button><output id="count">0</output>
+<a id="navigate" href="guest-next.html">Next page</a><p>Remote page: no Tauri IPC permissions.</p>
+<script>document.querySelector('#increment').onclick=()=>{const c=document.querySelector('#count');c.textContent=Number(c.textContent)+1};</script>

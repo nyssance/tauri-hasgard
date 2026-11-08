@@ -119,6 +119,32 @@ pub(crate) async fn dispatch(
         }
     }
 
+    // Isolated CEF worlds cannot observe or monkey-patch the page's main-world
+    // console/fetch/dialog APIs. Fail explicitly instead of returning empty data.
+    if engine.cef.load(std::sync::atomic::Ordering::Relaxed)
+        && matches!(
+            method,
+            "ipc"
+                | "heap.snapshot"
+                | "console.getLogs"
+                | "console.clear"
+                | "network.getRequests"
+                | "network.clear"
+                | "dialog.list"
+                | "dialog.clear"
+                | "dialog.handle"
+                | "route.add"
+                | "route.list"
+                | "route.clear"
+        )
+    {
+        return Err(RpcError {
+            code: -32601,
+            message: format!("{method} is not implemented by the CEF backend"),
+            data: None,
+        });
+    }
+
     // Preserve original window scope in recordings.
     let original_params = params;
 
@@ -334,10 +360,9 @@ async fn handle_diff(
         message: msg,
         data: None,
     })?;
-    let (id, rx) = engine.register();
-    let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
+    let (id, rx) = engine.register_with_timeout(DEFAULT_TIMEOUT);
 
-    if let Err(e) = eval_fn(window, Some(id), wrapped) {
+    if let Err(e) = eval_fn(window, Some(id), script) {
         engine.resolve(id, Err(format!("Eval failed: {e}")));
         return Err(RpcError {
             code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
@@ -619,10 +644,9 @@ async fn handle_eval_method(
 
     let script =
         build_bridge_call(method, params).map_err(|msg| RpcError { code: -32602, message: msg, data: None })?;
-    let (id, rx) = engine.register();
-    let wrapped = EvalEngine::wrap_script(id, &script, &engine.nonce(id));
+    let (id, rx) = engine.register_with_timeout(timeout);
 
-    if let Err(e) = eval_fn(window, Some(id), wrapped) {
+    if let Err(e) = eval_fn(window, Some(id), script) {
         // Clean up pending entry on eval_fn failure
         engine.resolve(id, Err(format!("Eval failed: {e}")));
         return Err(RpcError {

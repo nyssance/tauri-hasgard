@@ -28,7 +28,7 @@ jobs:
       - run: bun run build
       - run: bun run typecheck
       - run: bun run test
-      - run: cargo test --workspace --all-features --locked
+      - run: bun scripts/test-rust.mjs
 
   cli:
     needs: [native-e2e, validate]

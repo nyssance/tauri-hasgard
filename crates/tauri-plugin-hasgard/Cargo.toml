@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Native automation and testing bridge for Tauri 3 Wry applications"
+description = "Native automation and testing bridge for Tauri 3 Wry and CEF applications"
 keywords = ["tauri", "plugin", "testing", "automation", "accessibility"]
 categories = ["development-tools::testing", "gui"]
 readme = "README.md"
@@ -25,6 +25,7 @@ default = ["press"]
 # release builds where the whole plugin is already no-op'd by
 # `cfg(debug_assertions)`.
 press = ["dep:enigo"]
+cef = ["dep:tauri-runtime-cef", "dep:base64"]
 
 [dependencies]
 serde.workspace = true
@@ -33,8 +34,10 @@ tokio = { workspace = true, features = ["net", "rt", "sync", "time", "io-util"] 
 tracing.workspace = true
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
-tauri = { version = "3.0.0-alpha.5", features = ["unstable"] }
-tauri-runtime-wry = "3.0.0-alpha.5"
+tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
+tauri-runtime-wry = "3.0.0-alpha.6"
+tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"], optional = true }
+base64 = { version = "0.22", optional = true }
 enigo = { version = "0.6", optional = true }
 
 [target.'cfg(unix)'.dependencies]

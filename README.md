@@ -2,7 +2,7 @@
 
 Automate a running Tauri application through its real native webviews. The CLI, MCP server, and Playwright Test fixture share one JSON-RPC plugin.
 
-This repository targets **Tauri 3 + Wry**; Tauri 2 projects use Hasgard 0.5.x. CLI binaries are published for macOS Apple Silicon, Windows x64, and Linux x64. CEF is not supported. The plugin is active only in debug builds.
+This repository supports **Tauri 3 + Wry** and an opt-in **CEF backend**. Tauri 2 projects use Hasgard 0.5.x. CLI binaries are published for macOS Apple Silicon, Windows x64, and Linux x64. The plugin is active only in debug builds. See [CEF setup and limits](docs/cef.md) for native child-webview automation.
 
 ## Choose a client
 
@@ -20,14 +20,14 @@ There is no `init` command or Hasgard project configuration file.
 
 ```sh
 cd src-tauri
-cargo add tauri-plugin-hasgard@0.6.4
+cargo add tauri-plugin-hasgard@0.6.5
 ```
 
 ```toml
 [dependencies]
 tauri = "3.0.0-alpha.5"
 tauri-runtime-wry = "3.0.0-alpha.5"
-tauri-plugin-hasgard = "0.6.4"
+tauri-plugin-hasgard = "0.6.5"
 ```
 
 ```rust

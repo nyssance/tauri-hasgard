@@ -436,7 +436,7 @@ fn capture_webview(label: Option<&str>, output_path: &Path) -> Result<Value, Rpc
         "height": metadata.height,
         "scale_factor": snapshot.scale_factor,
         "byte_size": metadata.byte_size,
-        "backend": "wkwebview",
+        "backend": snapshot.backend,
         "tcc_denied": false,
     }))
 }

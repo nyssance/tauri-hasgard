@@ -18,7 +18,7 @@
   "devDependencies": {
     "@nyssance/tauri-hasgard": "workspace:*",
     "@playwright/test": "^1.64.1",
-    "@tauri-apps/cli": "^3.0.0-alpha.5",
+    "@tauri-apps/cli": "^3.0.0-alpha.6",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"

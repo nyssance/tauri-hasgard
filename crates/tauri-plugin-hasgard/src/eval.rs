@@ -18,6 +18,8 @@ pub(crate) enum EvalError {
 
 struct Pending {
     nonce: String,
+    #[cfg_attr(not(feature = "cef"), allow(dead_code))]
+    deadline: std::time::Instant,
     sender: oneshot::Sender<Result<serde_json::Value, String>>,
     source: Option<(String, String)>,
 }
@@ -50,6 +52,7 @@ pub(crate) struct EvalEngine {
     #[cfg(target_os = "macos")]
     pub(crate) videos: Arc<crate::video::Videos>,
     next_id: Arc<AtomicU64>,
+    pub(crate) cef: Arc<std::sync::atomic::AtomicBool>,
     allowed: Arc<Mutex<HashMap<String, String>>>,
     handshakes: Arc<Mutex<HashMap<String, (String, String)>>>,
     last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>,
@@ -62,6 +65,7 @@ impl EvalEngine {
             #[cfg(target_os = "macos")]
             videos: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
+            cef: Arc::default(),
             allowed: Arc::new(Mutex::new(HashMap::new())),
             handshakes: Arc::default(),
             last_snapshot: Arc::new(Mutex::new(HashMap::new())),
@@ -83,13 +87,25 @@ impl EvalEngine {
     }
 
     /// Register a pending eval request. Returns the ID and a receiver.
+    #[cfg(test)]
     pub fn register(&self) -> (u64, oneshot::Receiver<Result<serde_json::Value, String>>) {
+        self.register_with_timeout(Duration::from_secs(10))
+    }
+
+    pub fn register_with_timeout(
+        &self, timeout: Duration,
+    ) -> (u64, oneshot::Receiver<Result<serde_json::Value, String>>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .expect("pending lock poisoned")
-            .insert(id, Pending { sender: tx, source: None, nonce: uuid::Uuid::new_v4().to_string() });
+        self.pending.lock().expect("pending lock poisoned").insert(
+            id,
+            Pending {
+                sender: tx,
+                source: None,
+                nonce: uuid::Uuid::new_v4().to_string(),
+                deadline: std::time::Instant::now() + timeout,
+            },
+        );
         (id, rx)
     }
 
@@ -170,6 +186,14 @@ impl EvalEngine {
         }
     }
 
+    #[cfg(feature = "cef")]
+    pub fn remaining(&self, id: u64) -> Result<Duration, String> {
+        let pending = self.pending.lock().expect("pending lock poisoned");
+        let request = pending.get(&id).ok_or("Eval request was cancelled")?;
+        let remaining = request.deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() { Err("Eval request expired".into()) } else { Ok(remaining) }
+    }
+
     pub fn pending_nonce(&self, id: u64) -> Result<String, String> {
         self.pending
             .lock()
@@ -179,6 +203,7 @@ impl EvalEngine {
             .ok_or_else(|| "Eval request was cancelled before execution".to_owned())
     }
 
+    #[cfg(test)]
     pub fn nonce(&self, id: u64) -> String {
         self.pending.lock().expect("pending lock poisoned").get(&id).expect("registered request").nonce.clone()
     }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5 — 2026-11-09
+
+- Add optional `WindowInfo.windowLabel` to distinguish a CEF child webview from its native host. Existing clients and Wry applications keep the same protocol.
+- Document viewport versus whole-window native screenshots.
+
 ## 0.6.4 — 2026-11-02
 
 - Add `window.heapSnapshot(outputPath)`: writes the webview's JavaScript heap snapshot and returns `{ outputPath, byteSize, format }` (`"jsc"` on macOS, `"v8"` on Windows).

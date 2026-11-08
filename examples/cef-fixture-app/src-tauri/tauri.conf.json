@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/3.0.0-alpha.5",
+  "productName": "Hasgard CEF Fixture",
+  "version": "0.1.0",
+  "identifier": "dev.nyssance.hasgard-cef-fixture",
+  "build": { "frontendDist": "../ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      { "label": "main", "title": "Hasgard CEF Fixture", "visible": false, "width": 800, "height": 700 },
+      { "label": "second", "title": "Hasgard CEF Second", "url": "second.html", "visible": false, "width": 560, "height": 480 }
+    ]
+  },
+  "bundle": { "active": true, "targets": ["app"] }
+}

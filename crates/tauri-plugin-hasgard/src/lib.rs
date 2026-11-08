@@ -1,3 +1,6 @@
+#[cfg(all(feature = "cef", any(unix, windows), debug_assertions))]
+mod cef;
+
 pub mod diff;
 #[cfg(all(any(unix, windows), debug_assertions))]
 mod display;
@@ -52,6 +55,51 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R>
 where
     R::Handle: tauri_runtime_wry::AsWryHandle,
 {
+    #[cfg(all(any(unix, windows), debug_assertions))]
+    {
+        build_plugin::<R>(true, |app, engine| {
+            use tauri_runtime_wry::AsWryHandle;
+            if app.runtime_handle().as_wry_handle().is_none() {
+                return Err(
+                    std::io::Error::other("Hasgard requires the Tauri 3 Wry runtime; use init_cef for CEF").into()
+                );
+            }
+            #[cfg(target_os = "macos")]
+            screenshot::register_snapshot_fn(make_snapshot_fn(app));
+            #[cfg(any(target_os = "macos", windows))]
+            heap::register_heap_snapshot_fn(make_heap_snapshot_fn(app));
+            Ok((make_eval_fn(app, engine), make_press_hooks(app)))
+        })
+    }
+    #[cfg(not(all(any(unix, windows), debug_assertions)))]
+    {
+        tauri::plugin::Builder::<R>::new("hasgard").build()
+    }
+}
+
+/// CEF automation through the in-process DevTools protocol. No debugging port or
+/// remote-page Tauri permissions are required. In release builds this is inert.
+#[cfg(feature = "cef")]
+#[must_use]
+pub fn init_cef() -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
+    #[cfg(all(any(unix, windows), debug_assertions))]
+    {
+        build_plugin(false, cef::hooks)
+    }
+    #[cfg(not(all(any(unix, windows), debug_assertions)))]
+    {
+        tauri::plugin::Builder::new("hasgard").build()
+    }
+}
+
+#[cfg(all(any(unix, windows), debug_assertions))]
+fn build_plugin<R: tauri::Runtime>(
+    ipc_bridge: bool,
+    hooks: impl Fn(&tauri::AppHandle<R>, EvalEngine) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>>
+    + Send
+    + Sync
+    + 'static,
+) -> tauri::plugin::TauriPlugin<R> {
     #[cfg(not(all(any(unix, windows), debug_assertions)))]
     {
         return tauri::plugin::Builder::<R>::new("hasgard").build();
@@ -61,12 +109,12 @@ where
     {
         let engine = EvalEngine::new();
         tauri::plugin::Builder::<R>::new("hasgard")
-            .initialization_script(BRIDGE_JS)
-            .on_page_load(|webview, payload| {
+            .initialization_script(if ipc_bridge { BRIDGE_JS } else { "" })
+            .on_page_load(move |webview, payload| {
                 let engine = webview.state::<EvalEngine>();
                 if payload.event() == tauri::webview::PageLoadEvent::Started {
                     engine.forget_window(webview.label());
-                } else {
+                } else if ipc_bridge {
                     let Ok(nonce) = engine.begin_handshake(webview.label(), payload.url()) else { return };
                     let nonce = serde_json::Value::String(nonce);
                     let Ok(expected) = crate::eval::origin(payload.url()) else { return };
@@ -77,10 +125,6 @@ where
             })
             .on_window_ready(|window| display::place(&window))
             .setup(move |app, _api| {
-                use tauri_runtime_wry::AsWryHandle;
-                if app.runtime_handle().as_wry_handle().is_none() {
-                    return Err(std::io::Error::other("Hasgard requires the Tauri 3 Wry runtime").into());
-                }
                 app.manage(engine.clone());
 
                 let identifier = sanitize_identifier(&app.config().identifier);
@@ -89,13 +133,8 @@ where
                     None => server::socket_path(&identifier),
                 };
 
-                let eval_fn = make_eval_fn(app, engine.clone());
-                let list_fn = make_list_fn(app);
-                let press_hooks = make_press_hooks(app);
-                #[cfg(target_os = "macos")]
-                screenshot::register_snapshot_fn(make_snapshot_fn(app));
-                #[cfg(any(target_os = "macos", windows))]
-                heap::register_heap_snapshot_fn(make_heap_snapshot_fn(app));
+                let (eval_fn, press_hooks) = hooks(app, engine.clone())?;
+                let list_fn = make_list_fn(app, !ipc_bridge);
 
                 let recorder = Recorder::new();
 
@@ -182,6 +221,10 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
         // Results come back via the `__callback` IPC command (see
         // EvalEngine::wrap_script). This eval is fire-and-forget; the IPC handler
         // resolves the pending request, not this closure.
+        let script = match id {
+            Some(id) => EvalEngine::wrap_script(id, &script, &engine.pending_nonce(id)?),
+            None => script,
+        };
         let url = target.url().map_err(|e| e.to_string())?;
         if url.as_str() == "about:blank" {
             return Err("AUTOMATION_NOT_READY: initial document is loading".into());
@@ -296,7 +339,7 @@ where
                 message: format!("Window '{label}' not found"),
                 started: false,
             })?;
-            macos_keyboard::inject(&target, marker, confirm, task)
+            macos_keyboard::inject(&target.as_ref().window(), marker, confirm, task)
         }),
         // Windows' `SendInput` and the Linux X11/libei backends inject from any
         // thread, so the hop would buy nothing and cost something: it would
@@ -330,7 +373,7 @@ where
 /// relying on. `WebviewWindow::title` already blocks on the main thread the same
 /// way, so this adds no new hazard to the listing path.
 #[cfg(all(target_os = "macos", debug_assertions))]
-fn native_window_id<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Option<u32> {
+fn native_window_id<R: tauri::Runtime>(window: &tauri::Window<R>) -> Option<u32> {
     use objc2_app_kit::NSWindow;
 
     let target = window.clone();
@@ -357,32 +400,39 @@ fn native_window_id<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Opti
 }
 
 #[cfg(all(any(unix, windows), debug_assertions, not(target_os = "macos")))]
-fn native_window_id<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) -> Option<u32> {
+fn native_window_id<R: tauri::Runtime>(_window: &tauri::Window<R>) -> Option<u32> {
     None
 }
 
 /// Create a list function that enumerates all available webview windows.
 #[cfg(all(any(unix, windows), debug_assertions))]
-fn make_list_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ListWindowsFn {
+fn make_list_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, include_children: bool) -> ListWindowsFn {
     let handle = app.clone();
     Arc::new(move || {
-        let windows = handle.webview_windows();
-        // BTreeMap iterates in sorted key order — no explicit sort needed
+        let windows: std::collections::BTreeMap<_, _> = handle
+            .webviews()
+            .into_iter()
+            .filter(|(label, _)| include_children || handle.get_webview_window(label).is_some())
+            .collect();
+        // Keep stable ordering for clients and snapshots.
         let list: Result<Vec<serde_json::Value>, String> = windows
             .iter()
             .map(|(label, wv)| {
                 let url = wv.url().map_err(|error| format!("Failed to read URL for window '{label}': {error}"))?;
-                let title =
-                    wv.title().map_err(|error| format!("Failed to read title for window '{label}': {error}"))?;
+                let title = wv
+                    .window()
+                    .title()
+                    .map_err(|error| format!("Failed to read title for window '{label}': {error}"))?;
                 let mut entry = serde_json::json!({
                     "label": label,
+                    "window_label": wv.window().label(),
                     "url": url.to_string(),
                     "title": title,
                 });
                 // Present only where native capture exists, so a client can tell
                 // "this platform cannot capture natively" from "this window has
                 // no id" without a second probe.
-                if let Some(native_id) = native_window_id(wv) {
+                if let Some(native_id) = native_window_id(&wv.window()) {
                     entry["native_id"] = serde_json::json!(native_id);
                 }
                 Ok(entry)

@@ -1,3 +1,9 @@
+# 0.6.5 (2026-11-09)
+
+- Add opt-in CEF automation with `init_cef()`: route native child webviews, evaluate DOM operations through an isolated CDP world, deliver native keys, and capture CEF viewport pixels. Keep the existing CLI/MCP protocol.
+- Include `window_label` in webview listings to distinguish the page routing identity from its native host. Whole-window screenshots remain separate from viewport screenshots.
+- Add a native CEF fixture covering multiple windows, remote pages without IPC grants, navigation, child recreation, keyboard input and modal occlusion.
+
 # 0.6.4 (2026-11-02)
 
 - Add `heap.snapshot` (CLI `heap-snapshot --output`, MCP `heap_snapshot`, Playwright `window.heapSnapshot(path)`): writes a JavaScript heap snapshot of the target webview after a full collection, and reports its `format`. macOS connects WebKit's in-process inspector (`_WKInspector`, no window) and asks its heap agent, giving JavaScriptCore's inspector JSON (`jsc`); the inspector is detached again afterwards. Windows uses WebView2's DevTools protocol `HeapProfiler.takeHeapSnapshot`, giving a V8 `.heapsnapshot` (`v8`). Debug builds only, like the rest of the plugin.

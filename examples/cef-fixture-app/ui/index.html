@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>CEF Host</title>
+<style>body{font:16px system-ui;margin:16px}header{display:flex;gap:12px;align-items:center;white-space:nowrap}dialog{position:fixed;top:210px;width:360px;margin:0 auto;padding:20px;border:1px solid #666;background:#ff48cf;color:#000;z-index:2147483647}dialog::backdrop{background:#0009}input{padding:8px}</style>
+<header><button id="modal">Open modal</button><button id="close">Close guest</button><button id="recreate">Recreate guest</button><input id="host-input" aria-label="Host input"></header>
+<dialog id="dialog"><h2>HOST MODAL</h2><input aria-label="Modal input"><button id="dismiss">Dismiss</button></dialog>
+<script>
+document.querySelector('#modal').onclick=()=>document.querySelector('#dialog').showModal();
+document.querySelector('#dismiss').onclick=()=>document.querySelector('#dialog').close();
+for(const [id,command] of [['close','close_guest'],['recreate','recreate_guest']])document.querySelector('#'+id).onclick=async()=>{try{await window.__TAURI__.core.invoke(command);document.querySelector('#'+id).title='Done'}catch(e){document.querySelector('#'+id).title='ERROR: '+e;console.error(e)}};
+</script>
