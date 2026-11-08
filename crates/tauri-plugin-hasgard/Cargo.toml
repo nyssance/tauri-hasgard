@@ -37,7 +37,7 @@ uuid = { version = "1", features = ["v4"] }
 tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
 tauri-runtime-wry = "3.0.0-alpha.6"
 tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"], optional = true }
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 enigo = { version = "0.6", optional = true }
 
 [target.'cfg(unix)'.dependencies]
