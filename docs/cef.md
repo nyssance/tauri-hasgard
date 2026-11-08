@@ -8,7 +8,7 @@ Tauri's default `DynRuntime` and CEF.
 [dependencies]
 tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
 tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"] }
-tauri-plugin-hasgard = { version = "0.6.5", features = ["cef"] }
+tauri-plugin-hasgard = { version = "0.6.6", features = ["cef"] }
 ```
 
 ```rust

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6 — 2026-11-09
+
+- Align package versions with the completed CEF backend release. The client API is unchanged from 0.6.5.
+
 ## 0.6.5 — 2026-11-09
 
 - Add optional `WindowInfo.windowLabel` to distinguish a CEF child webview from its native host. Existing clients and Wry applications keep the same protocol.

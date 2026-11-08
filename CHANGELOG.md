@@ -1,3 +1,8 @@
+# 0.6.6 (2026-11-09)
+
+- Include the Windows icon required to compile the CEF fixture. Gate publication on Windows all-features Rust validation in addition to the existing native and macOS checks.
+- Complete the CEF release across distribution channels after the interrupted 0.6.5 publication.
+
 # 0.6.5 (2026-11-09)
 
 - Add opt-in CEF automation with `init_cef()`: route native child webviews, evaluate DOM operations through an isolated CDP world, deliver native keys, and capture CEF viewport pixels. Keep the existing CLI/MCP protocol.
