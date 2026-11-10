@@ -9,17 +9,24 @@ use tauri::{DynRuntime, Manager};
 use tauri_runtime_cef::{DevToolsProtocol, WebviewCefExt, allocate_devtools_message_id};
 
 use crate::eval::EvalEngine;
-use crate::server::{EvalFn, PressHooks, PressHooksRef};
+use crate::server::{EvalFn, EvalScript, EvalWorld, PressHooks, PressHooksRef};
 
 type View = tauri::Webview<DynRuntime>;
 type Reply = mpsc::SyncSender<Result<Value, String>>;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const WORLD: &str = "tauri-hasgard";
 
+#[derive(Clone)]
+struct ExecutionContext {
+    unique_id: String,
+    frame_id: Option<String>,
+    is_default: bool,
+}
+
 #[derive(Default)]
 struct Client {
     pending: Mutex<HashMap<i32, Reply>>,
-    contexts: Mutex<HashMap<i64, String>>,
+    contexts: Mutex<HashMap<i64, ExecutionContext>>,
 }
 
 impl Client {
@@ -39,7 +46,14 @@ impl Client {
                         && let (Some(id), Some(unique)) =
                             (value["context"]["id"].as_i64(), value["context"]["uniqueId"].as_str())
                     {
-                        self.contexts.lock().expect("CDP contexts lock").insert(id, unique.to_owned());
+                        self.contexts.lock().expect("CDP contexts lock").insert(
+                            id,
+                            ExecutionContext {
+                                unique_id: unique.to_owned(),
+                                frame_id: value["context"]["auxData"]["frameId"].as_str().map(str::to_owned),
+                                is_default: value["context"]["auxData"]["isDefault"] == true,
+                            },
+                        );
                     }
                 } else if method == "Runtime.executionContextDestroyed" {
                     if let Ok(value) = serde_json::from_slice::<Value>(&params)
@@ -52,7 +66,7 @@ impl Client {
                     self.cancel("CEF document navigated or debugger detached");
                 }
             }
-            _ => (),
+            DevToolsProtocol::Message(_) => (),
         }
     }
 
@@ -62,11 +76,11 @@ impl Client {
         }
     }
 
-    fn call(&self, view: &View, method: &str, params: Value) -> Result<Value, String> {
+    fn call(&self, view: &View, method: &str, params: &Value) -> Result<Value, String> {
         self.call_with_timeout(view, method, params, TIMEOUT)
     }
 
-    fn call_with_timeout(&self, view: &View, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    fn call_with_timeout(&self, view: &View, method: &str, params: &Value, timeout: Duration) -> Result<Value, String> {
         let id = allocate_devtools_message_id().map_err(|e| e.to_string())?;
         let (tx, rx) = mpsc::sync_channel(1);
         self.pending.lock().expect("CDP pending lock").insert(id, tx);
@@ -83,41 +97,64 @@ impl Client {
         result
     }
 
+    fn main_world(&self, frame: &str) -> Result<String, String> {
+        let contexts = self.contexts.lock().expect("CDP contexts lock");
+        let mut matching =
+            contexts.values().filter(|context| context.is_default && context.frame_id.as_deref() == Some(frame));
+        let context = matching.next().ok_or("AUTOMATION_NOT_READY: CEF main-world context is not available")?;
+        if matching.next().is_some() {
+            return Err("CEF main-world context is ambiguous".into());
+        }
+        Ok(context.unique_id.clone())
+    }
+
     fn evaluate(
-        &self, view: &View, script: &str, remaining: impl FnOnce() -> Result<Duration, String>,
+        &self, view: &View, script: &EvalScript, remaining: impl FnOnce() -> Result<Duration, String>,
     ) -> Result<Value, String> {
-        let tree = self.call(view, "Page.getFrameTree", json!({}))?;
+        let tree = self.call(view, "Page.getFrameTree", &json!({}))?;
         let frame = tree["frameTree"]["frame"]["id"].as_str().ok_or("CDP returned no main frame")?;
-        let world = self.call(view, "Page.createIsolatedWorld", json!({"frameId": frame, "worldName": WORLD}))?;
-        let context = world["executionContextId"].as_i64().ok_or("CDP returned no execution context")?;
-        // Unique context IDs cannot be accidentally reused by a renderer after
-        // navigation. Never fall back to evaluating in the current document.
-        let unique = self
-            .contexts
-            .lock()
-            .expect("CDP contexts lock")
-            .get(&context)
-            .cloned()
-            .ok_or("AUTOMATION_NOT_READY: CEF execution context is not available")?;
+        let unique = match script.world {
+            EvalWorld::Main => self.main_world(frame)?,
+            EvalWorld::Automation => {
+                let world =
+                    self.call(view, "Page.createIsolatedWorld", &json!({"frameId": frame, "worldName": WORLD}))?;
+                let context = world["executionContextId"].as_i64().ok_or("CDP returned no execution context")?;
+                self.contexts
+                    .lock()
+                    .expect("CDP contexts lock")
+                    .get(&context)
+                    .map(|context| context.unique_id.clone())
+                    .ok_or("AUTOMATION_NOT_READY: CEF execution context is not available")?
+            }
+        };
+        // Bind to a unique context: navigation must fail, never execute in a
+        // replacement renderer. Main-world IPC uses the page's real Tauri bridge
+        // and its existing capability checks; no native command bypass exists.
+        let prelude = match script.world {
+            EvalWorld::Automation => crate::BRIDGE_JS,
+            EvalWorld::Main => {
+                "if(typeof window.__TAURI_INTERNALS__?.invoke!=='function')throw new Error('Tauri IPC is unavailable in this document');"
+            }
+        };
         let expression = format!(
-            "(async()=>{{{}\nconst value=await({script});return value===undefined?null:value;}})()",
-            crate::BRIDGE_JS
+            "(async()=>{{{prelude}\nconst value=await({});return value===undefined?null:value;}})()",
+            script.code
         );
         let timeout = remaining()?;
         let result = self.call_with_timeout(
             view,
             "Runtime.evaluate",
-            json!({
+            &json!({
                 "expression": expression, "uniqueContextId": unique,
                 "awaitPromise": true, "returnByValue": true, "userGesture": true,
             }),
             timeout,
         )?;
-        evaluation_result(result)
+        evaluation_result(&result)
     }
 }
 
-fn evaluation_result(result: Value) -> Result<Value, String> {
+fn evaluation_result(result: &Value) -> Result<Value, String> {
     if let Some(error) = result.get("exceptionDetails") {
         return Err(format!("CEF JavaScript exception: {error}"));
     }
@@ -160,7 +197,7 @@ impl Clients {
             }
         })
         .map_err(|e| e.to_string())?;
-        client.call(view, "Runtime.enable", json!({}))?;
+        client.call(view, "Runtime.enable", &json!({}))?;
         clients.insert(view.label().to_owned(), (browser_id, client.clone()));
         Ok(client)
     }
@@ -171,17 +208,9 @@ fn target(app: &tauri::AppHandle, label: Option<&str>) -> Result<View, String> {
     app.get_webview(label).ok_or_else(|| format!("Webview '{label}' not found"))
 }
 
-pub(crate) fn hooks(
-    app: &tauri::AppHandle, engine: EvalEngine,
-) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>> {
-    // Validate even if the application currently has no windows.
-    if app.runtime_handle().downcast_ref::<tauri_runtime_cef::CefRuntimeHandle<tauri::EventLoopMessage>>().is_none() {
-        return Err(std::io::Error::other("init_cef requires the CEF runtime").into());
-    }
-    engine.cef.store(true, std::sync::atomic::Ordering::Relaxed);
-    let clients = Arc::new(Clients::default());
+fn eval_hook(app: &tauri::AppHandle, engine: EvalEngine, clients: Arc<Clients>) -> EvalFn {
     let eval_app = app.clone();
-    let eval_clients = clients.clone();
+    let eval_clients = clients;
     let eval: EvalFn = Arc::new(move |label, id, script| {
         let view = target(&eval_app, label)?;
         let engine = engine.clone();
@@ -205,6 +234,19 @@ pub(crate) fn hooks(
         });
         Ok(())
     });
+    eval
+}
+
+pub(crate) fn hooks(
+    app: &tauri::AppHandle, engine: EvalEngine,
+) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>> {
+    // Validate even if the application currently has no windows.
+    if app.runtime_handle().downcast_ref::<tauri_runtime_cef::CefRuntimeHandle<tauri::EventLoopMessage>>().is_none() {
+        return Err(std::io::Error::other("init_cef requires the CEF runtime").into());
+    }
+    engine.cef.store(true, std::sync::atomic::Ordering::Relaxed);
+    let clients = Arc::new(Clients::default());
+    let eval = eval_hook(app, engine, clients.clone());
 
     #[cfg(target_os = "macos")]
     {
@@ -213,8 +255,11 @@ pub(crate) fn hooks(
         crate::screenshot::register_snapshot_fn(Arc::new(move |label| {
             let view = target(&capture_app, label)?;
             let client = clients.get(&view)?;
-            let result =
-                client.call(&view, "Page.captureScreenshot", json!({"format":"png", "captureBeyondViewport":false}))?;
+            let result = client.call(
+                &view,
+                "Page.captureScreenshot",
+                &json!({"format":"png", "captureBeyondViewport":false}),
+            )?;
             let data = result["data"].as_str().ok_or("CEF screenshot has no data")?;
             Ok(crate::screenshot::WebviewSnapshot {
                 png: base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?,
@@ -299,7 +344,7 @@ mod tests {
     fn cdp_results_route_only_to_the_allocated_request() {
         let client = Client::default();
         let (tx, rx) = mpsc::sync_channel(1);
-        client.pending.lock().unwrap().insert(41, tx);
+        client.pending.lock().expect("test lock").insert(41, tx);
         client.receive(DevToolsProtocol::MethodResult { message_id: 42, success: true, result: b"{}".to_vec() });
         assert!(rx.try_recv().is_err());
         client.receive(DevToolsProtocol::MethodResult {
@@ -307,26 +352,54 @@ mod tests {
             success: false,
             result: br#"{"message":"bad method"}"#.to_vec(),
         });
-        assert!(rx.recv().unwrap().unwrap_err().contains("bad method"));
+        assert!(rx.recv().expect("test response").expect_err("CDP error").contains("bad method"));
     }
     #[test]
     fn navigation_cancels_pending_work_and_discards_contexts() {
         let client = Client::default();
         let (tx, rx) = mpsc::sync_channel(1);
-        client.pending.lock().unwrap().insert(1, tx);
-        client.contexts.lock().unwrap().insert(1, "old-process".into());
+        client.pending.lock().expect("test lock").insert(1, tx);
+        client.contexts.lock().expect("test lock").insert(
+            1,
+            ExecutionContext { unique_id: "old-process".into(), frame_id: Some("main".into()), is_default: true },
+        );
         client.receive(DevToolsProtocol::Event {
             method: "Runtime.executionContextsCleared".into(),
             params: b"{}".to_vec(),
         });
-        assert!(rx.recv().unwrap().is_err());
-        assert!(client.contexts.lock().unwrap().is_empty());
-        assert!(client.pending.lock().unwrap().is_empty());
+        assert!(rx.recv().expect("test response").is_err());
+        assert!(client.contexts.lock().expect("test lock").is_empty());
+        assert!(client.pending.lock().expect("test lock").is_empty());
     }
     #[test]
+    fn ipc_selects_only_the_top_frame_default_world_and_never_reuses_destroyed_ids() {
+        let client = Client::default();
+        for (id, unique, frame, is_default) in
+            [(1, "isolated", "top", false), (2, "child-world", "child", true), (3, "main-world", "top", true)]
+        {
+            client.receive(DevToolsProtocol::Event {
+                method: "Runtime.executionContextCreated".into(),
+                params: serde_json::to_vec(&json!({"context": {"id": id, "uniqueId": unique, "auxData": {"frameId": frame, "isDefault": is_default}}})).expect("valid test value"),
+            });
+        }
+        assert_eq!(client.main_world("top").expect("valid test value"), "main-world");
+        client.receive(DevToolsProtocol::Event {
+            method: "Runtime.executionContextDestroyed".into(),
+            params: br#"{"executionContextId":3}"#.to_vec(),
+        });
+        assert!(client.main_world("top").is_err());
+        client.receive(DevToolsProtocol::Event {
+            method: "Runtime.executionContextCreated".into(),
+            params: br#"{"context":{"id":3,"uniqueId":"replacement","auxData":{"frameId":"top","isDefault":true}}}"#
+                .to_vec(),
+        });
+        assert_eq!(client.main_world("top").expect("valid test value"), "replacement");
+    }
+
+    #[test]
     fn exceptions_and_unserializable_results_are_not_successes() {
-        assert!(evaluation_result(json!({"exceptionDetails":{"text":"throw"}})).is_err());
-        assert!(evaluation_result(json!({"result":{"type":"function"}})).is_err());
-        assert_eq!(evaluation_result(json!({"result":{"value":null}})).unwrap(), Value::Null);
+        assert!(evaluation_result(&json!({"exceptionDetails":{"text":"throw"}})).is_err());
+        assert!(evaluation_result(&json!({"result":{"type":"function"}})).is_err());
+        assert_eq!(evaluation_result(&json!({"result":{"value":null}})).expect("valid test value"), Value::Null);
     }
 }

@@ -25,20 +25,39 @@ fn recreate_guest(app: tauri::AppHandle) -> Result<(), String> {
 fn close_guest(app: tauri::AppHandle) -> Result<(), String> {
     app.get_webview("guest").ok_or("guest missing")?.close().map_err(|e| e.to_string())
 }
+#[tauri::command]
+fn ipc_echo(webview: tauri::Webview, value: String) -> Result<String, String> {
+    if value == "reject" {
+        return Err("fixture rejection".into());
+    }
+    Ok(format!("{}:{value}", webview.label()))
+}
+#[tauri::command]
+fn set_floating(window: tauri::Window, enabled: bool) -> Result<(), String> {
+    window.set_always_on_top(enabled).map_err(|error| error.to_string())
+}
+#[tauri::command]
+fn quit_fixture(app: tauri::AppHandle) {
+    app.exit(0);
+}
 #[tauri_runtime_cef::cef_entry_point]
 fn main() {
     let wanted =
         std::env::var("TAURI_HASGARD_DISPLAY").expect("Set TAURI_HASGARD_DISPLAY=secondary (CI may explicitly use 0)");
     let profile = std::env::var("HASGARD_CEF_PROFILE").expect("HASGARD_CEF_PROFILE is required for isolated test runs");
+    let runtime = tauri_runtime_cef::Cef::default()
+        // The alpha bundler does not package Chromium's Aperitif helper.
+        .disable_features(["AperitifHelpers"])
+        .root_cache_path(profile)
+        .secret_storage(tauri_runtime_cef::SecretStorage::Mock);
+    // Custom SDK validation must explicitly select its matching API version.
+    let runtime = match std::env::var("HASGARD_CEF_API_VERSION") {
+        Ok(value) => runtime.cef_api_version(value.parse().expect("Invalid HASGARD_CEF_API_VERSION")),
+        Err(std::env::VarError::NotPresent) => runtime,
+        Err(error) => panic!("Invalid HASGARD_CEF_API_VERSION: {error}"),
+    };
     tauri::Builder::default()
-        .runtime(
-            tauri_runtime_cef::Cef::default()
-                .root_cache_path(profile)
-                // This fixture only visits local test pages and deletes its profile.
-                // `tauri build --debug` uses custom-protocol, so Auto would ask
-                // the system keychain even though debug assertions are enabled.
-                .secret_storage(tauri_runtime_cef::SecretStorage::Mock),
-        )
+        .runtime(runtime)
         .setup(move |app| {
             let primary = app.primary_monitor()?.ok_or("Primary monitor missing")?;
             let monitors = app.available_monitors()?;
@@ -55,7 +74,7 @@ fn main() {
             Ok(())
         })
         .plugin(tauri_plugin_hasgard::init_cef())
-        .invoke_handler(tauri::generate_handler![recreate_guest, close_guest])
+        .invoke_handler(tauri::generate_handler![recreate_guest, close_guest, ipc_echo, set_floating, quit_fixture])
         .run(tauri::generate_context!())
         .expect("CEF fixture failed");
 }

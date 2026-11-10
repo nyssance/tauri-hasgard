@@ -39,7 +39,10 @@ function rpc(method, params = {}, window) {
       )
     )
     socket.on("error", reject)
-    socket.on("close", () => clearTimeout(timer))
+    socket.on("close", () => {
+      clearTimeout(timer)
+      if (!buffer.includes("\n")) reject(new Error("RPC connection closed before reply"))
+    })
     socket.on("data", (chunk) => {
       buffer += chunk
       if (!buffer.includes("\n")) return
@@ -119,7 +122,26 @@ try {
   assert.equal(await evaluate("second", "document.body.scrollHeight < 1500"), true)
   pass("remote guest requires no Tauri IPC; unequal document heights")
   await assert.rejects(rpc("console.getLogs", {}, "guest"), /not implemented/)
-  await assert.rejects(rpc("ipc", { command: "close_guest" }, "guest"), /not implemented/)
+  await assert.rejects(rpc("ipc", { command: "close_guest" }, "guest"), /unavailable|not allowed|denied/i)
+  const escaped = '\";throw new Error("injected");//\n中文'
+  assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: escaped } }, "main"), `main:${escaped}`)
+  assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: "second" } }, "second"), "second:second")
+  await assert.rejects(rpc("ipc", { command: "ipc_echo", args: { value: "reject" } }, "main"), /fixture rejection/)
+  await assert.rejects(rpc("ipc", { command: "not_a_command" }, "main"), /not found/i)
+  await assert.rejects(
+    rpc("ipc", { command: "plugin:window|set_title", args: { label: "second", title: "forbidden" } }, "main"),
+    /not allowed|denied/i
+  )
+  pass("CEF IPC: real command results, window routing, escaped arguments, rejection and capability enforcement")
+  await rpc("ipc", { command: "set_floating", args: { enabled: true } }, "second")
+  const floating = await rpc(
+    "screenshot_native",
+    { window_id: windows.find((w) => w.label === "second").native_id, output_path: join(artifacts, "floating.png") },
+    "second"
+  )
+  assert.ok(floating.width > 0 && floating.height > 0)
+  await rpc("ipc", { command: "set_floating", args: { enabled: false } }, "second")
+  pass("explicit native screenshot captures an always-on-top window")
   pass("unimplemented main-world operations fail explicitly")
   await rpc("fill", { selector: "#guest-input", value: "guest text" }, "guest")
   await rpc("click", { selector: "#increment" }, "guest")
@@ -185,9 +207,20 @@ print(json.dumps(out))`,
   )
   pass("single-page vs whole-window screenshots reproduce native modal occlusion")
   await rpc("click", { selector: "#dismiss" }, "main")
+  // Exiting can destroy the initiating document before its IPC response arrives.
+  // The process result, rather than transport delivery, establishes clean shutdown.
+  let shutdownResponse = null
+  await rpc("ipc", { command: "quit_fixture" }, "main").catch((error) => {
+    shutdownResponse = String(error)
+  })
+  await until(() => app.exitCode !== null || app.signalCode !== null, "Graceful exit", 10000)
+  assert.equal(app.exitCode, 0, `Unexpected shutdown: ${app.signalCode}: ${shutdownResponse}`)
+  assert.equal(app.signalCode, null)
+  assert.doesNotMatch(log, /FATAL:|panicked at/)
+  pass("graceful IPC shutdown exits 0 without panic or fatal error")
   writeFileSync(
     join(artifacts, "report.json"),
-    JSON.stringify({ checks, windows, host, guest, whole, colors }, null, 2)
+    JSON.stringify({ checks, windows, host, guest, whole, colors, exitCode: app.exitCode, shutdownResponse }, null, 2)
   )
 } catch (error) {
   writeFileSync(
@@ -204,7 +237,8 @@ print(json.dumps(out))`,
   throw error
 } finally {
   if (app.exitCode === null && app.signalCode === null) process.kill(-app.pid, "SIGTERM")
-  await Promise.race([new Promise((resolve) => app.once("exit", resolve)), sleep(5000)])
+  if (app.exitCode === null && app.signalCode === null)
+    await Promise.race([new Promise((resolve) => app.once("exit", resolve)), sleep(5000)])
   if (app.exitCode === null && app.signalCode === null) {
     process.kill(-app.pid, "SIGKILL")
     await sleep(300)
@@ -218,3 +252,13 @@ assert.ok(app.exitCode !== null || app.signalCode !== null, "fixture process mus
 rmSync(temp, { recursive: true, force: true })
 assert.equal(existsSync(socketPath), false)
 pass("process and socket cleanup")
+
+const finalReport = JSON.parse(readFileSync(join(artifacts, "report.json"), "utf8"))
+writeFileSync(
+  join(artifacts, "report.json"),
+  JSON.stringify(
+    { ...finalReport, status: "passed", checks, exitCode: app.exitCode, signalCode: app.signalCode },
+    null,
+    2
+  )
+)

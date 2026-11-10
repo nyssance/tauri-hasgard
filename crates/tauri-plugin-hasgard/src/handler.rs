@@ -5,7 +5,7 @@ use crate::key;
 use crate::protocol::{RPC_INTERNAL_ERROR, RpcError};
 use crate::recorder::{RecordEntry, Recorder};
 use crate::screenshot;
-use crate::server::{EvalFn, ListWindowsFn, PressHooksRef};
+use crate::server::{EvalFn, EvalScript, EvalWorld, ListWindowsFn, PressHooksRef};
 
 use std::time::Duration;
 #[cfg(feature = "press")]
@@ -124,8 +124,7 @@ pub(crate) async fn dispatch(
     if engine.cef.load(std::sync::atomic::Ordering::Relaxed)
         && matches!(
             method,
-            "ipc"
-                | "heap.snapshot"
+            "heap.snapshot"
                 | "console.getLogs"
                 | "console.clear"
                 | "network.getRequests"
@@ -362,7 +361,7 @@ async fn handle_diff(
     })?;
     let (id, rx) = engine.register_with_timeout(DEFAULT_TIMEOUT);
 
-    if let Err(e) = eval_fn(window, Some(id), script) {
+    if let Err(e) = eval_fn(window, Some(id), script.into()) {
         engine.resolve(id, Err(format!("Eval failed: {e}")));
         return Err(RpcError {
             code: if e.starts_with("AUTOMATION_NOT_READY:") { -32002 } else { -32603 },
@@ -586,7 +585,7 @@ async fn handle_press(
         // The bridge also expires observers itself, so navigation or a dead
         // eval channel cannot leave a permanent listener behind.
         if let Some(eval_fn) = eval_fn {
-            let _ = eval_fn(window, None, format!("window.__HASGARD__._cancelPress({completion_params})"));
+            let _ = eval_fn(window, None, format!("window.__HASGARD__._cancelPress({completion_params})").into());
         }
     }
     completed.map_err(|mut error| {
@@ -646,7 +645,11 @@ async fn handle_eval_method(
         build_bridge_call(method, params).map_err(|msg| RpcError { code: -32602, message: msg, data: None })?;
     let (id, rx) = engine.register_with_timeout(timeout);
 
-    if let Err(e) = eval_fn(window, Some(id), script) {
+    if let Err(e) = eval_fn(
+        window,
+        Some(id),
+        EvalScript { code: script, world: if method == "ipc" { EvalWorld::Main } else { EvalWorld::Automation } },
+    ) {
         // Clean up pending entry on eval_fn failure
         engine.resolve(id, Err(format!("Eval failed: {e}")));
         return Err(RpcError {
@@ -969,7 +972,7 @@ mod tests {
         // Actually the reference check happens BEFORE the eval call, so we can check:
         // eval_fn present + no reference in params + no last_snapshot → -32602
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: EvalScript| Ok(()));
         let result = dispatch("diff", None, &engine, Some(&eval_fn), None, None, &Recorder::new()).await;
         let err = result.expect_err("dispatch returns Err");
         assert_eq!(err.code, -32602);
@@ -988,6 +991,49 @@ mod tests {
     fn test_build_bridge_call_no_params() {
         let script = build_bridge_call("snapshot", None).expect("build_bridge_call");
         assert_eq!(script, "window.__HASGARD__.snapshot({})");
+    }
+
+    #[tokio::test]
+    async fn cef_ipc_uses_main_world_but_other_automation_stays_isolated() {
+        let engine = EvalEngine::new();
+        engine.cef.store(true, std::sync::atomic::Ordering::Relaxed);
+        let callback_engine = engine.clone();
+        let eval_fn: EvalFn = std::sync::Arc::new(move |window, id, script| {
+            assert_eq!(window, Some("second"));
+            callback_engine.resolve(
+                id.expect("request id"),
+                Ok(json!({
+                    "main": script.world == EvalWorld::Main,
+                    "script": script.code,
+                })),
+            );
+            Ok(())
+        });
+        let value = dispatch(
+            "ipc",
+            Some(&json!({"window":"second","command":"echo","args":{"text":"\";throw 1;//"}})),
+            &engine,
+            Some(&eval_fn),
+            None,
+            None,
+            &Recorder::new(),
+        )
+        .await
+        .expect("IPC dispatch");
+        assert_eq!(value["main"], true);
+        assert!(value["script"].as_str().expect("script").starts_with("window.__TAURI_INTERNALS__.invoke("));
+        let value = dispatch(
+            "eval",
+            Some(&json!({"window":"second","script":"document.title"})),
+            &engine,
+            Some(&eval_fn),
+            None,
+            None,
+            &Recorder::new(),
+        )
+        .await
+        .expect("eval dispatch");
+        assert_eq!(value["main"], false);
     }
 
     #[test]
@@ -1286,8 +1332,8 @@ mod tests {
         let captured_clone = captured.clone();
         let engine_clone = engine.clone();
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, script: String| {
-                *captured_clone.lock().expect("captured mutex") = script;
+            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, script: EvalScript| {
+                *captured_clone.lock().expect("captured mutex") = script.code;
                 // Resolve the callback immediately to avoid blocking for the default 10s timeout.
                 // ID 1 is the first registered callback on a fresh EvalEngine.
                 engine_clone.resolve(1, Ok(serde_json::json!({"ok": true})));
@@ -1457,7 +1503,7 @@ mod tests {
         // eval_fn that accepts the script but never resolves the callback —
         // the timeout decides who wins.
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: EvalScript| Ok(()));
 
         let params = json!({
             "selector": "[data-testid=\"never-exists\"]",
@@ -1486,7 +1532,7 @@ mod tests {
         // bridge gets to surface its own `Timeout waiting for …` rejection.
         let engine = EvalEngine::new();
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: EvalScript| Ok(()));
 
         let start = tokio::time::Instant::now();
         let _err = dispatch(
@@ -1511,7 +1557,7 @@ mod tests {
         // existing `watch` behavior must remain intact.
         let engine = EvalEngine::new();
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: String| Ok(()));
+            std::sync::Arc::new(|_w: Option<&str>, _id: Option<u64>, _script: EvalScript| Ok(()));
 
         let start = tokio::time::Instant::now();
         let _err = dispatch(
@@ -1538,7 +1584,7 @@ mod tests {
         let engine = EvalEngine::new();
         let engine_clone = engine.clone();
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, _script: String| {
+            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, _script: EvalScript| {
                 // The first registered callback on a fresh engine has id == 1
                 // (see EvalEngine::register / next_id init in eval.rs).
                 engine_clone.resolve(1, Ok(json!({"found": true})));
@@ -1567,7 +1613,7 @@ mod tests {
         let engine = EvalEngine::new();
         let engine_clone = engine.clone();
         let eval_fn: crate::server::EvalFn =
-            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, _script: String| {
+            std::sync::Arc::new(move |_w: Option<&str>, _id: Option<u64>, _script: EvalScript| {
                 // First register on a fresh engine has id == 1 (see eval.rs).
                 engine_clone.resolve(1, Ok(json!({"url": "http://localhost/", "title": "App", "ready": true})));
                 Ok(())

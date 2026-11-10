@@ -44,7 +44,13 @@ an already submitted evaluation into another renderer context. A new request can
 attach to the next document. Recreating a view with the same label creates a fresh
 CDP session. A request to a closed label fails explicitly.
 
-This initial backend explicitly rejects `ipc`, heap snapshots, console/network
+`ipc` executes in the selected webview's top-level main world and calls its
+existing Tauri invoke bridge. It preserves command results, rejections and Tauri
+capability enforcement. Pages without that bridge fail explicitly; Hasgard does
+not grant remote guests native command access. IPC never installs the automation
+bridge in the main world or falls back to another window after navigation.
+
+This backend explicitly rejects heap snapshots, console/network
 observation, network routing and JavaScript dialog interception. Those operations
 need additional main-world/CDP integration; returning isolated-world empty logs
 would be misleading. HTML dialogs are ordinary DOM and can be inspected.
@@ -54,7 +60,8 @@ CEF-owned popups without Tauri webview labels are not currently routed.
 
 On macOS, `screenshot-native` without `--window-id` captures the selected CEF
 viewport via `Page.captureScreenshot` and reports `backend: "cef-cdp"`. Supply
-an OS window ID from `windows` to capture the entire native window instead.
+an OS window ID from `windows` to capture the entire native window instead,
+including an always-on-top or floating window.
 
 A viewport screenshot is **not evidence of visibility on screen**. A host HTML
 modal can appear in its page screenshot while a native child covers it in the
@@ -91,7 +98,12 @@ argument selects the built executable; `HASGARD_CEF_OUTPUT` selects the artifact
 directory. It starts its own local HTTP server for a remote guest with no Tauri
 permissions and uses a fresh CEF profile for each run. It starts hidden windows
 on the secondary display, waits for the host before creating the child, tests routing,
-unequal document heights, DOM operations, native keys, navigation and child
+unequal document heights, real IPC and permission rejection, DOM operations, native keys, navigation and child
 recreation, then compares host/guest/whole-window screenshots. It stops its process
 group and removes its own temporary socket and profile directory on completion. CI may
 explicitly select display `0`; local runs must not silently use the primary.
+
+When validating a custom SDK, `HASGARD_CEF_API_VERSION` explicitly selects its
+matching API version in the fixture. Leave it unset for the standard bindings.
+The native suite also requires a graceful exit with code 0; forced process cleanup
+is only a failure-path safeguard.

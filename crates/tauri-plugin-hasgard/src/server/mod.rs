@@ -9,7 +9,25 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 /// Evaluates a raw JS expression. The backend owns result transport (IPC or CDP).
 /// The first argument is an optional window label (`None` means "use default window").
-pub(crate) type EvalFn = Arc<dyn Fn(Option<&str>, Option<u64>, String) -> Result<(), String> + Send + Sync>;
+/// IPC alone must execute in the application's main world, where Tauri owns
+/// its invoke bridge. Ordinary automation stays in its isolated CEF world.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EvalWorld {
+    Automation,
+    Main,
+}
+
+pub(crate) struct EvalScript {
+    pub code: String,
+    pub world: EvalWorld,
+}
+impl From<String> for EvalScript {
+    fn from(code: String) -> Self {
+        Self { code, world: EvalWorld::Automation }
+    }
+}
+
+pub(crate) type EvalFn = Arc<dyn Fn(Option<&str>, Option<u64>, EvalScript) -> Result<(), String> + Send + Sync>;
 
 /// A function that lists all available webview windows and returns their metadata.
 pub(crate) type ListWindowsFn = Arc<dyn Fn() -> Result<serde_json::Value, String> + Send + Sync>;

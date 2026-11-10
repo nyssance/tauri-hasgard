@@ -77,7 +77,7 @@ where
     }
 }
 
-/// CEF automation through the in-process DevTools protocol. No debugging port or
+/// CEF automation through the in-process `DevTools` protocol. No debugging port or
 /// remote-page Tauri permissions are required. In release builds this is inert.
 #[cfg(feature = "cef")]
 #[must_use]
@@ -212,7 +212,7 @@ fn sanitize_identifier(raw: &str) -> String {
 #[cfg(all(any(unix, windows), debug_assertions))]
 fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine) -> EvalFn {
     let handle = app.clone();
-    Arc::new(move |window: Option<&str>, id: Option<u64>, script: String| {
+    Arc::new(move |window: Option<&str>, id: Option<u64>, script: server::EvalScript| {
         let target = if let Some(label) = window {
             handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?
         } else {
@@ -221,6 +221,7 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
         // Results come back via the `__callback` IPC command (see
         // EvalEngine::wrap_script). This eval is fire-and-forget; the IPC handler
         // resolves the pending request, not this closure.
+        let script = script.code;
         let script = match id {
             Some(id) => EvalEngine::wrap_script(id, &script, &engine.pending_nonce(id)?),
             None => script,

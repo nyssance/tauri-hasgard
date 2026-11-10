@@ -21,7 +21,7 @@ pub(crate) struct WindowBounds {
 
 /// Result of a single-pass walk over the on-screen window list. Bundles the
 /// truncated `available_windows` payload that powers `WINDOW_NOT_FOUND` errors
-/// with the bounds of the requested target (when it is a layer-0 window).
+/// with the bounds of the requested target (including an explicitly requested floating window).
 pub(crate) struct EnumeratedLayerZeroWindows {
     pub(crate) available: Vec<DiscoveredWindow>,
     pub(crate) target_bounds: Option<WindowBounds>,
@@ -35,7 +35,7 @@ pub(crate) const AVAILABLE_WINDOWS_CAP: usize = 20;
 
 /// Walk the on-screen window list once and collect both the layer-0 windows
 /// available for capture (capped at [`AVAILABLE_WINDOWS_CAP`]) and the bounds
-/// of `target` when it is itself a layer-0 window.
+/// of `target` even when it is a floating window.
 ///
 /// Doing this in one pass — instead of separate `list_layer_zero_windows` +
 /// `get_window_bounds` calls — avoids a second `CGWindowListCopyWindowInfo`
@@ -94,14 +94,14 @@ pub(crate) fn enumerate_layer_zero_windows(target: u32) -> Result<EnumeratedLaye
 
     for dict in windows.iter() {
         let layer = dict.find(&layer_key).and_then(|v| v.downcast::<CFNumber>()).and_then(|v| v.to_i32()).unwrap_or(-1);
-        if layer != 0 {
-            continue;
-        }
         let number_i64 =
             dict.find(&number_key).and_then(|v| v.downcast::<CFNumber>()).and_then(|v| v.to_i64()).unwrap_or(0);
         let Ok(window_id) = u32::try_from(number_i64) else {
             continue;
         };
+        if layer != 0 && window_id != target {
+            continue;
+        }
         if window_id == 0 {
             continue;
         }

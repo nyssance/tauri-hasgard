@@ -25,5 +25,7 @@ For CEF, enable the `cef` Cargo feature and register
 `tauri_runtime_cef::Cef`. This backend uses in-process CDP in an isolated world;
 remote pages do not need `hasgard:default` or Tauri IPC access. It supports DOM
 operations, navigation, native keyboard input, and macOS viewport screenshots.
+`ipc` uses the selected page's real Tauri bridge in its main world and preserves
+application capability checks; remote pages gain no IPC permissions.
 Console/network observation, routing and JavaScript dialog interception are not
 implemented and return explicit errors. See [CEF setup and limits](../../docs/cef.md).
