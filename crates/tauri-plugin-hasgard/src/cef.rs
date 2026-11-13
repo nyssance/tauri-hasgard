@@ -234,6 +234,14 @@ pub(crate) fn hooks(
             let view = target(&focus_app, label)?;
             #[cfg(target_os = "macos")]
             {
+                // Window delivery relies on the WKWebView being the window's first responder and
+                // has only been validated there; refuse it here instead of dropping keys.
+                if crate::macos_keyboard::delivery()? == crate::macos_keyboard::Delivery::Window {
+                    return Err(format!(
+                        "{}=window is supported for Wry webviews only",
+                        crate::macos_keyboard::DELIVERY_ENV
+                    ));
+                }
                 let window = view.window();
                 let deadline = std::time::Instant::now() + Duration::from_secs(2);
                 let mut activate = true;

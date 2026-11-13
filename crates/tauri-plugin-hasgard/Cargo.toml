@@ -61,8 +61,8 @@ enigo = { version = "0.6", features = ["wayland"], optional = true }
 tempfile = "3"
 objc2 = "0.6"
 block2 = "0.6"
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEvent", "CGEventTypes"] }
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEvent", "CGEventTypes", "CGRemoteOperation", "CGEventSource"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSMenu", "NSView", "NSTextInputContext", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
 objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError", "NSString", "NSObject"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "WKContentWorld", "WKFrameInfo", "WKPreferences", "WKWebViewConfiguration", "block2"] }
 core-foundation = "0.10"

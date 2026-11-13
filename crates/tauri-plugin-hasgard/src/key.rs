@@ -316,6 +316,10 @@ pub fn simulate_press(combo: &str, marker: i64) -> Result<(), KeyError> {
         return Err(KeyError::EnigoInput("macOS key injection must run on the main thread".to_owned()));
     }
     let _guard = PRESS_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    if let Some(result) = crate::macos_keyboard::deliver(&parsed.modifiers, parsed.key, marker) {
+        return result.map_err(KeyError::EnigoInput);
+    }
 
     let mut enigo =
         Enigo::new(&Settings { event_source_user_data: Some(marker), ..Settings::default() }).map_err(|e| {

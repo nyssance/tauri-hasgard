@@ -129,6 +129,13 @@ test("explicit native completion drives an actual registered global shortcut", a
   await window.invoke("fixture_shortcut", { action: "register" })
   try {
     await window.press("Control+Alt+Shift+F12", { completion: "native" })
+    if (process.env.TAURI_HASGARD_PRESS === "window") {
+      // Window delivery hands the events to the window; a system-wide shortcut is registered below AppKit
+      // and must not fire. Give a wrongly delivered one time to arrive before asserting its absence.
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await expect(window.invoke<number>("fixture_shortcut", { action: "count" })).resolves.toBe(0)
+      return
+    }
     await expect.poll(() => window.invoke<number>("fixture_shortcut", { action: "count" })).toBe(1)
   } finally {
     await window.invoke("fixture_shortcut", { action: "unregister" })

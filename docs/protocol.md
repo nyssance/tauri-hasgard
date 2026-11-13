@@ -45,6 +45,7 @@ data rejects the eval instead of becoming a successful null or raw string.
 
 - macOS/Linux: private Unix socket. A managed test supplies `TAURI_HASGARD_SOCKET`; otherwise the plugin derives a path from the Tauri application identifier.
 - `TAURI_HASGARD_DISPLAY` (`secondary`, a display index from 0, or a display name) moves each new window onto that display, fitted and then shown, so a run does not cover the developer's main screen; unset leaves windows where the application put them.
+- `TAURI_HASGARD_PRESS` (macOS, Wry) chooses where `press` sends its key events: `system` (the default) or `window`; any other value fails the press. See [Native keyboard completion](#native-keyboard-completion).
 - Windows: named pipe. A managed test supplies the full named-pipe path through the same environment variable.
 
 ## Window routing
@@ -64,6 +65,22 @@ OS keyboard events. Focus failure stops the operation before injection.
 Each modifier may occur only once, including aliases such as `Ctrl`/`Control`.
 Duplicate modifiers are invalid parameters, preventing an unbounded sequence of
 OS events from a single malformed gesture.
+
+With `TAURI_HASGARD_PRESS=window` the macOS Wry backend does not post to the
+system input layer. It builds the same key events and hands them to the target
+window on the main thread, in the order `NSApplication` uses: a Command or
+Control key-down is offered to the window's key equivalents, then to the main
+menu, and is sent to the first responder only when neither takes it. Modifier
+presses and releases are delivered as flag changes around the main key. The
+application is never activated; the target window is made key among the
+application's own windows and its text input context is made current, so typed
+text lands in that window. A run in this mode does not take keyboard focus
+from, or lose it to, whoever is using the machine. Keys are looked up on the
+current keyboard layout, and a character the layout cannot type is an error.
+System-wide shortcuts (`tauri-plugin-global-shortcut`) are registered below
+`AppKit` and are not triggered by window delivery; the held-modifier rejection
+below does not apply, since the events carry their own flags. CEF rejects
+`window`.
 
 The default `completion: "webview"` observes a trusted `keyup` in the target
 document or its accessible same-origin frames. The plugin serializes native

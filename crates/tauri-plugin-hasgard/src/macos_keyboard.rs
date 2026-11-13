@@ -24,6 +24,15 @@ pub(crate) fn macos_window_is_focused<R: tauri::Runtime>(
     // SAFETY: Tauri owns the NSWindow and we hold its WebviewWindow handle;
     // all AppKit access occurs on the verified main thread.
     let native = unsafe { &*native.cast::<NSWindow>() };
+    if delivery()? == Delivery::Window {
+        // Window delivery hands events to this window itself and never activates the
+        // application, so the developer's own focus is left alone. The window is still made
+        // key among the application's own windows: text input follows the key window.
+        if activate && !native.isKeyWindow() {
+            native.makeKeyWindow();
+        }
+        return Ok(true);
+    }
     if activate {
         if native.isMiniaturized() {
             native.deminiaturize(None);
@@ -116,6 +125,10 @@ fn check_dispatch<R: tauri::Runtime>(target: &tauri::Window<R>, deadline: std::t
     if !macos_window_is_focused(target, false)? {
         return Err("target window lost focus before key injection".to_owned());
     }
+    if delivery()? == Delivery::Window {
+        // The events carry their own modifier flags; keys the developer is holding are not part of them.
+        return Ok(());
+    }
     let held = NSEvent::modifierFlags_class().intersection(
         NSEventModifierFlags::Shift
             | NSEventModifierFlags::Control
@@ -152,6 +165,10 @@ pub(crate) fn inject<R: tauri::Runtime>(
         .run_on_main_thread(move || {
             let start = (|| -> Result<(), String> {
                 check_dispatch(&target, deadline)?;
+                if delivery()? == Delivery::Window {
+                    let _ = tx.send(run_in_window(&target, task)?);
+                    return Ok(());
+                }
                 if !confirm_delivery {
                     let result = task();
                     let _ = tx.send(result);
@@ -235,4 +252,240 @@ pub(crate) fn inject<R: tauri::Runtime>(
         (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
     }
     .map_err(|message| crate::server::InjectionError { message, started })
+}
+
+/// Run a press task with `window` as the target of [`deliver`].
+///
+/// Delivery is synchronous: the window has processed the events when the task returns, so there is no
+/// asynchronous arrival to confirm with an event monitor.
+fn run_in_window<R: tauri::Runtime>(
+    window: &tauri::Window<R>, task: impl FnOnce() -> Result<(), String>,
+) -> Result<Result<(), String>, String> {
+    let native = window.ns_window().map_err(|e| e.to_string())?;
+    if native.is_null() {
+        return Err("native window pointer is null".to_owned());
+    }
+    DIRECT_TARGET.with(|slot| slot.set(native.cast::<objc2_app_kit::NSWindow>()));
+    let result = task();
+    DIRECT_TARGET.with(|slot| slot.set(std::ptr::null_mut()));
+    Ok(result)
+}
+
+/// Where `press` sends its key events on macOS, chosen by `TAURI_HASGARD_PRESS`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Delivery {
+    /// The system input layer (the default): the events take the same path as a physical keyboard, so the
+    /// application has to be frontmost and the target window key.
+    System,
+    /// `TAURI_HASGARD_PRESS=window`: the events are handed to the target window on the main thread, through the
+    /// same key-equivalent and responder dispatch `NSApplication` performs. Nothing is activated, so a run does
+    /// not compete with whoever is using the machine. System-wide shortcuts are registered below `AppKit` and do
+    /// not see these events.
+    Window,
+}
+
+pub(crate) const DELIVERY_ENV: &str = "TAURI_HASGARD_PRESS";
+
+pub(crate) fn parse_delivery(value: Option<&str>) -> Result<Delivery, String> {
+    match value {
+        None | Some("system") => Ok(Delivery::System),
+        Some("window") => Ok(Delivery::Window),
+        Some(other) => Err(format!("{DELIVERY_ENV} must be `system` or `window`, got `{other}`")),
+    }
+}
+
+pub(crate) fn delivery() -> Result<Delivery, String> {
+    match std::env::var(DELIVERY_ENV) {
+        Ok(value) => parse_delivery(Some(&value)),
+        Err(std::env::VarError::NotPresent) => parse_delivery(None),
+        Err(error) => Err(format!("{DELIVERY_ENV}: {error}")),
+    }
+}
+
+thread_local! {
+    /// The window of the press being delivered; set by `inject` around its task, on the main thread.
+    static DIRECT_TARGET: std::cell::Cell<*mut objc2_app_kit::NSWindow> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+const MODIFIER_FLAGS: [(enigo::Key, objc2_core_graphics::CGEventFlags, u16); 4] = [
+    (enigo::Key::Shift, objc2_core_graphics::CGEventFlags::MaskShift, 56),
+    (enigo::Key::Control, objc2_core_graphics::CGEventFlags::MaskControl, 59),
+    (enigo::Key::Alt, objc2_core_graphics::CGEventFlags::MaskAlternate, 58),
+    (enigo::Key::Meta, objc2_core_graphics::CGEventFlags::MaskCommand, 55),
+];
+
+fn modifier(key: enigo::Key) -> Option<(objc2_core_graphics::CGEventFlags, u16)> {
+    MODIFIER_FLAGS.iter().find(|(candidate, ..)| *candidate == key).map(|(_, flags, code)| (*flags, *code))
+}
+
+/// Virtual keycode and implied flags of a key that is the same on every layout.
+fn fixed_key(key: enigo::Key) -> Option<(u16, objc2_core_graphics::CGEventFlags)> {
+    use enigo::Key;
+    use objc2_core_graphics::CGEventFlags;
+    let function = CGEventFlags::MaskSecondaryFn;
+    let arrow = CGEventFlags::MaskSecondaryFn | CGEventFlags::MaskNumericPad;
+    Some(match key {
+        Key::Return => (36, CGEventFlags::empty()),
+        Key::Tab => (48, CGEventFlags::empty()),
+        Key::Space => (49, CGEventFlags::empty()),
+        Key::Backspace => (51, CGEventFlags::empty()),
+        Key::Escape => (53, CGEventFlags::empty()),
+        Key::Delete => (117, function),
+        Key::Home => (115, function),
+        Key::End => (119, function),
+        Key::PageUp => (116, function),
+        Key::PageDown => (121, function),
+        Key::LeftArrow => (123, arrow),
+        Key::RightArrow => (124, arrow),
+        Key::DownArrow => (125, arrow),
+        Key::UpArrow => (126, arrow),
+        Key::F1 => (122, function),
+        Key::F2 => (120, function),
+        Key::F3 => (99, function),
+        Key::F4 => (118, function),
+        Key::F5 => (96, function),
+        Key::F6 => (97, function),
+        Key::F7 => (98, function),
+        Key::F8 => (100, function),
+        Key::F9 => (101, function),
+        Key::F10 => (109, function),
+        Key::F11 => (103, function),
+        Key::F12 => (111, function),
+        _ => return None,
+    })
+}
+
+fn key_event(
+    code: u16, down: bool, flags: objc2_core_graphics::CGEventFlags, marker: i64, flags_changed: bool,
+) -> Result<Retained<NSEvent>, String> {
+    let event = CGEvent::new_keyboard_event(None, code, down).ok_or("could not create a key event")?;
+    if flags_changed {
+        CGEvent::set_type(Some(&event), objc2_core_graphics::CGEventType::FlagsChanged);
+    }
+    CGEvent::set_flags(Some(&event), flags);
+    CGEvent::set_integer_value_field(Some(&event), CGEventField::EventSourceUserData, marker);
+    NSEvent::eventWithCGEvent(&event).ok_or_else(|| "could not convert the key event for AppKit".to_owned())
+}
+
+/// The key that types `ch` on the current keyboard layout, and whether it needs Shift.
+///
+/// `AppKit` translates a keycode through the active layout when it builds an event, so the lookup asks it
+/// directly: the letter keys sit at other keycodes on Dvorak or AZERTY, and a fixed table would press the wrong
+/// one — and with it the wrong menu shortcut.
+fn character_key(ch: char, marker: i64) -> Result<(u16, bool), String> {
+    use objc2_core_graphics::CGEventFlags;
+    let wanted = ch.to_string();
+    for (flags, shifted) in [(CGEventFlags::empty(), false), (CGEventFlags::MaskShift, true)] {
+        // 0..=50 are the character keys of the main block; the keypad repeats digits and is not wanted here.
+        for code in 0..=50u16 {
+            if fixed_key_codes().contains(&code) {
+                continue;
+            }
+            if key_event(code, true, flags, marker, false)?
+                .characters()
+                .is_some_and(|typed| typed.to_string() == wanted)
+            {
+                return Ok((code, shifted));
+            }
+        }
+    }
+    Err(format!("the current keyboard layout has no key for {ch:?}"))
+}
+
+fn fixed_key_codes() -> [u16; 3] {
+    [36, 48, 49]
+}
+
+/// Deliver one combo to the window `inject` selected, or `None` when this press goes through the system.
+pub(crate) fn deliver(modifiers: &[enigo::Key], key: enigo::Key, marker: i64) -> Option<Result<(), String>> {
+    use objc2_core_graphics::CGEventFlags;
+    let window = DIRECT_TARGET.with(std::cell::Cell::get);
+    if window.is_null() {
+        return None;
+    }
+    Some((|| {
+        let main = objc2::MainThreadMarker::new().ok_or("key delivery must run on the main thread")?;
+        // SAFETY: `inject` stores a window Tauri retains, on this thread, for the duration of this call.
+        let window = unsafe { &*window };
+        // Typed characters reach the view through its text input context, and `AppKit` only keeps
+        // the context of the active application's key view current. Make this one current, or the
+        // text would land in whichever view was typed into last.
+        if let Some(view) =
+            window.firstResponder().and_then(|responder| responder.downcast::<objc2_app_kit::NSView>().ok())
+            && let Some(context) = view.inputContext()
+        {
+            context.activate();
+        }
+        let mut held = CGEventFlags::empty();
+        let mut pressed = Vec::with_capacity(modifiers.len());
+        for candidate in modifiers {
+            let (flag, code) = modifier(*candidate).ok_or_else(|| format!("{candidate:?} is not a modifier"))?;
+            held |= flag;
+            window.sendEvent(&*key_event(code, true, held, marker, true)?);
+            pressed.push((flag, code));
+        }
+        let outcome = (|| -> Result<(), String> {
+            if let Some((flag, code)) = modifier(key) {
+                window.sendEvent(&*key_event(code, true, held | flag, marker, true)?);
+                window.sendEvent(&*key_event(code, false, held, marker, true)?);
+                return Ok(());
+            }
+            let (code, flags) = match (key, fixed_key(key)) {
+                (_, Some((code, extra))) => (code, held | extra),
+                (enigo::Key::Unicode(ch), None) => {
+                    let (code, shifted) = character_key(ch, marker)?;
+                    // A bare `press "P"` types the capital; with modifiers the combo names the key, not the case.
+                    (code, if shifted && modifiers.is_empty() { held | CGEventFlags::MaskShift } else { held })
+                }
+                (other, None) => return Err(format!("{other:?} cannot be delivered to a window")),
+            };
+            let down = key_event(code, true, flags, marker, false)?;
+            // NSApplication offers a Command or Control key-down to the window's key equivalents, then to the
+            // main menu, and only sends it down the responder chain when neither takes it.
+            let handled = flags.intersects(CGEventFlags::MaskCommand | CGEventFlags::MaskControl)
+                && (window.performKeyEquivalent(&down)
+                    || objc2_app_kit::NSApplication::sharedApplication(main)
+                        .mainMenu()
+                        .is_some_and(|menu| menu.performKeyEquivalent(&down)));
+            if !handled {
+                window.sendEvent(&down);
+            }
+            window.sendEvent(&*key_event(code, false, flags, marker, false)?);
+            Ok(())
+        })();
+        // Release what was pressed even when the key itself failed, so the page never keeps a modifier down.
+        let mut release = Ok(());
+        for (flag, code) in pressed.into_iter().rev() {
+            held.remove(flag);
+            match key_event(code, false, held, marker, true) {
+                Ok(event) => window.sendEvent(&event),
+                Err(error) if release.is_ok() => release = Err(error),
+                Err(_) => {}
+            }
+        }
+        outcome.and(release)
+    })())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn press_delivery_defaults_to_the_system_and_rejects_unknown_values() {
+        assert_eq!(parse_delivery(None), Ok(Delivery::System));
+        assert_eq!(parse_delivery(Some("system")), Ok(Delivery::System));
+        assert_eq!(parse_delivery(Some("window")), Ok(Delivery::Window));
+        assert!(parse_delivery(Some("")).is_err());
+        assert!(parse_delivery(Some("Window")).is_err());
+    }
+
+    #[test]
+    fn fixed_keys_and_modifiers_do_not_overlap() {
+        for (key, ..) in MODIFIER_FLAGS {
+            assert!(fixed_key(key).is_none());
+        }
+        assert_eq!(fixed_key(enigo::Key::Escape).map(|(code, _)| code), Some(53));
+        assert!(fixed_key(enigo::Key::Unicode('a')).is_none());
+    }
 }
