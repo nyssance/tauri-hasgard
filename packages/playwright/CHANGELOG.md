@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.7 — 2026-11-13
+
+- Align package versions with the plugin's `TAURI_HASGARD_PRESS=window` release. The client API is unchanged from 0.6.6; type-check against `@playwright/test` 1.65.0.
+
 ## 0.6.6 — 2026-11-09
 
 - Align package versions with the completed CEF backend release. The client API is unchanged from 0.6.5.

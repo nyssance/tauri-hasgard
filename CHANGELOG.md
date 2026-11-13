@@ -1,4 +1,4 @@
-# Unreleased
+# 0.6.7 (2026-11-13)
 
 - Add `TAURI_HASGARD_PRESS=window` for macOS Wry: `press` hands its key events to the target window through `AppKit`'s own key-equivalent and responder dispatch instead of posting them to the system input layer. The application is not activated, so a native run neither steals keyboard focus from the developer nor fails with `failed to focus target window` when another application takes the foreground. Menu shortcuts, trusted DOM key events, modifier pairs and text input into the requested window keep working; system-wide shortcuts are not triggered in this mode. The default (`system`) is unchanged, an unknown value is an error, and CEF rejects `window`.
 
