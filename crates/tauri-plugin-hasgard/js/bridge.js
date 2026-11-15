@@ -1964,7 +1964,9 @@
     if (typeof htmlToImage === "undefined" || !htmlToImage.toPng) {
       throw new Error("html-to-image library not loaded. Bundle it into bridge.js for screenshot support.")
     }
-    const renderOptions = { pixelRatio: 1 }
+    // An image the page cannot read back (another origin without CORS) is
+    // drawn empty; without a handler one such image fails the whole capture.
+    const renderOptions = { pixelRatio: 1, onImageErrorHandler() {} }
     if (!selector) {
       // html-to-image sizes the capture from clientWidth/clientHeight, which
       // for documentElement is the viewport — the render always starts at the

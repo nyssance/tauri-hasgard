@@ -113,3 +113,14 @@ test("screenshot with unmatched selector throws element not found", async () => 
 
   await assert.rejects(() => hasgard.screenshot({ selector: "#missing" }), /Element not found: #missing/)
 })
+
+test("screenshot survives an image that cannot be embedded", async () => {
+  // html-to-image rejects the whole capture on the first image that fails to
+  // load unless it is given a handler for it.
+  const { hasgard, calls } = loadBridge({ queryResult: {} })
+
+  await hasgard.screenshot({ selector: "#with-foreign-image" })
+
+  assert.equal(typeof calls[0].options.onImageErrorHandler, "function")
+  assert.doesNotThrow(() => calls[0].options.onImageErrorHandler(new Event("error")))
+})
