@@ -29,7 +29,10 @@ jobs:
       - run: bun run build
       - run: bun run typecheck
       - run: bun run test
+      # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
       - run: bun scripts/test-rust.mjs
+        env:
+          CEF_PATH: ${{ runner.temp }}/cef-cache
 
   windows-rust:
     runs-on: windows-2025
@@ -43,7 +46,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-windows-rust
+      # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
       - run: bun scripts/test-rust.mjs
+        env:
+          CEF_PATH: ${{ runner.temp }}/cef-cache
 
   cli:
     needs: [native-e2e, validate, windows-rust]
