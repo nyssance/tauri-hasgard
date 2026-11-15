@@ -1,12 +1,10 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "@nyssance/tsconfig",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM"],
     "types": ["node"],
     "rootDir": "src",
     "outDir": "dist",
-    "declaration": true,
-    "noEmit": true
+    "declaration": true
   },
   "include": ["src"]
 }

@@ -1,7 +1,6 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "@nyssance/tsconfig",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM"],
     "types": ["node"],
     "paths": {
       "@nyssance/tauri-hasgard": ["../../packages/playwright/src/index.ts"]
