@@ -48,3 +48,23 @@ pub(crate) fn register_snapshot_fn(capture: SnapshotFn) {
 pub(crate) fn snapshot_fn() -> Option<SnapshotFn> {
     SNAPSHOT_FN.read().ok()?.clone()
 }
+
+/// Takes the pixels of an area of a webview's document (`x`, `y`, `width`,
+/// `height` in CSS pixels from the document's origin) as they are composited,
+/// and returns the PNG in base64. Installed by a runtime that can; without one
+/// the `screenshot` method redraws the document in the page.
+pub(crate) type PageCaptureFn = std::sync::Arc<dyn Fn(Option<&str>, [f64; 4]) -> Result<String, String> + Send + Sync>;
+
+static PAGE_CAPTURE_FN: std::sync::RwLock<Option<PageCaptureFn>> = std::sync::RwLock::new(None);
+
+/// Install the composited page capture for this process.
+pub(crate) fn register_page_capture_fn(capture: PageCaptureFn) {
+    if let Ok(mut slot) = PAGE_CAPTURE_FN.write() {
+        *slot = Some(capture);
+    }
+}
+
+/// The installed composited page capture, if a runtime has registered one.
+pub(crate) fn page_capture_fn() -> Option<PageCaptureFn> {
+    PAGE_CAPTURE_FN.read().ok()?.clone()
+}

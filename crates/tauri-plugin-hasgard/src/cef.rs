@@ -248,6 +248,23 @@ pub(crate) fn hooks(
     let clients = Arc::new(Clients::default());
     let eval = eval_hook(app, engine, clients.clone());
 
+    {
+        let capture_app = app.clone();
+        let capture_clients = clients.clone();
+        crate::screenshot::register_page_capture_fn(Arc::new(move |label, [x, y, width, height]| {
+            let view = target(&capture_app, label)?;
+            let client = capture_clients.get(&view)?;
+            let result = client.call(
+                &view,
+                "Page.captureScreenshot",
+                &json!({
+                    "format": "png", "captureBeyondViewport": true,
+                    "clip": {"x": x, "y": y, "width": width, "height": height, "scale": 1},
+                }),
+            )?;
+            result["data"].as_str().map(str::to_owned).ok_or_else(|| "CEF screenshot has no data".to_owned())
+        }));
+    }
     #[cfg(target_os = "macos")]
     {
         use base64::Engine;

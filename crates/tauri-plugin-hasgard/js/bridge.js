@@ -1980,6 +1980,26 @@
     return dataUrl
   }
 
+  // Where `screenshot` would capture, in CSS pixels from the document's
+  // origin: a backend that takes the pixels itself asks only for this.
+  function screenshotArea(options) {
+    const selector = options?.selector
+    if (!selector) {
+      const el = document.documentElement
+      const body = document.body
+      return {
+        x: 0,
+        y: 0,
+        width: Math.max(el.scrollWidth || 0, body ? body.scrollWidth || 0 : 0),
+        height: Math.max(el.scrollHeight || 0, body ? body.scrollHeight || 0 : 0)
+      }
+    }
+    const el = document.querySelector(selector)
+    if (!el) throw new Error(`Element not found: ${selector}`)
+    const rect = el.getBoundingClientRect()
+    return { x: rect.x + window.scrollX, y: rect.y + window.scrollY, width: rect.width, height: rect.height }
+  }
+
   function storageGet(params) {
     if (typeof params.key !== "string") {
       throw new Error("storageGet requires a string key")
@@ -2222,6 +2242,7 @@
     eval: evalScript,
     wait: waitFor,
     screenshot,
+    screenshotArea,
     consoleLogs,
     clearLogs,
     networkRequests,

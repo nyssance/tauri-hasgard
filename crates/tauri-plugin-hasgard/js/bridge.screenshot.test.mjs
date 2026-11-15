@@ -124,3 +124,19 @@ test("screenshot survives an image that cannot be embedded", async () => {
   assert.equal(typeof calls[0].options.onImageErrorHandler, "function")
   assert.doesNotThrow(() => calls[0].options.onImageErrorHandler(new Event("error")))
 })
+
+test("screenshotArea gives an element's place in the document", () => {
+  const element = { getBoundingClientRect: () => ({ x: 10, y: 20, width: 300, height: 40 }) }
+  const { hasgard } = loadBridge({ queryResult: element })
+  globalThis.window.scrollX = 5
+  globalThis.window.scrollY = 700
+
+  assert.deepEqual(hasgard.screenshotArea({ selector: "#row" }), { x: 15, y: 720, width: 300, height: 40 })
+})
+
+test("screenshotArea without selector is the whole document", () => {
+  const documentElement = { scrollWidth: 800, scrollHeight: 2400 }
+  const { hasgard } = loadBridge({ documentElement, body: { scrollWidth: 820, scrollHeight: 2500 } })
+
+  assert.deepEqual(hasgard.screenshotArea({}), { x: 0, y: 0, width: 820, height: 2500 })
+})

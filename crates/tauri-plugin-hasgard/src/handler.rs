@@ -209,12 +209,37 @@ pub(crate) async fn dispatch(
         // channel timeout must outlive that so the bridge can surface its own
         // rejection (issue #91).
         "wait" | "watch" => handle_eval_method(method, params, engine, eval_fn, win, bridge_eval_timeout(params)).await,
-        // The bare `screenshot` JSON-RPC method is the bridge-side
-        // html-to-image path (returns a base64 PNG data URL); native window
+        // The bare `screenshot` JSON-RPC method returns a base64 PNG data URL
+        // of the document or of one element; native window
         // capture ships under the distinct `screenshot_native` method so the
         // two surfaces can't be confused by callers or accidentally folded
         // together by a future refactor.
-        "screenshot" => handle_eval_method(method, params, engine, eval_fn, win, SCREENSHOT_TIMEOUT).await,
+        "screenshot" => match screenshot::page_capture_fn() {
+            // A runtime that can take the composited pixels does: the page is
+            // asked only where the area is, so images from other origins,
+            // embedded content and effects appear as they are on screen.
+            Some(capture) if eval_fn.is_some() => {
+                let area =
+                    handle_eval_method("screenshotArea", params, engine, eval_fn, win, SCREENSHOT_TIMEOUT).await?;
+                let side = |name: &str| area[name].as_f64().unwrap_or(0.0);
+                let area = [side("x"), side("y"), side("width"), side("height")];
+                if area[2] < 1.0 || area[3] < 1.0 {
+                    return Err(RpcError {
+                        code: -32603,
+                        message: "Nothing to capture: the area is empty".to_owned(),
+                        data: None,
+                    });
+                }
+                let label = win.map(str::to_owned);
+                let png = tauri::async_runtime::spawn_blocking(move || capture(label.as_deref(), area))
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(std::convert::identity)
+                    .map_err(|e| RpcError { code: -32603, message: format!("Screenshot failed: {e}"), data: None })?;
+                Ok(serde_json::Value::String(format!("data:image/png;base64,{png}")))
+            }
+            _ => handle_eval_method(method, params, engine, eval_fn, win, SCREENSHOT_TIMEOUT).await,
+        },
         // Native capture resolves its own target; keep the window label that
         // is stripped from parameters sent to the JavaScript bridge.
         "screenshot_native" => screenshot::handle_screenshot(original_params).await,
