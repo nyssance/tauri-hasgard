@@ -5165,7 +5165,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-hasgard-cli"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -5245,7 +5245,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-hasgard"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "base64 0.23.1",
  "block2",

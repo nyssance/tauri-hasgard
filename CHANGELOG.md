@@ -1,3 +1,10 @@
+# 0.6.8 (2026-11-15)
+
+- CEF: `ipc` runs through the page's own Tauri bridge in the top frame's main world and returns real command results; other automation stays in the isolated world.
+- CEF: `screenshot` takes its pixels from the compositor through `Page.captureScreenshot`, so cross-origin images, embedded content and effects appear as on screen, for the document and for one element alike. Other runtimes keep redrawing the document in the page.
+- Capture a page that holds an image it cannot read back, such as a cross-origin image without CORS; the image is drawn empty instead of failing the whole capture.
+- Update `download-cef` to 3.0.1; 3.0.0 fails to build because the CEF index exceeds its response limit.
+
 # 0.6.7 (2026-11-13)
 
 - Add `TAURI_HASGARD_PRESS=window` for macOS Wry: `press` hands its key events to the target window through `AppKit`'s own key-equivalent and responder dispatch instead of posting them to the system input layer. The application is not activated, so a native run neither steals keyboard focus from the developer nor fails with `failed to focus target window` when another application takes the foreground. Menu shortcuts, trusted DOM key events, modifier pairs and text input into the requested window keep working; system-wide shortcuts are not triggered in this mode. The default (`system`) is unchanged, an unknown value is an error, and CEF rejects `window`.
