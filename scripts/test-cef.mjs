@@ -123,7 +123,7 @@ try {
   pass("remote guest requires no Tauri IPC; unequal document heights")
   await assert.rejects(rpc("console.getLogs", {}, "guest"), /not implemented/)
   await assert.rejects(rpc("ipc", { command: "close_guest" }, "guest"), /unavailable|not allowed|denied/i)
-  const escaped = '\";throw new Error("injected");//\n中文'
+  const escaped = '";throw new Error("injected");//\n中文'
   assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: escaped } }, "main"), `main:${escaped}`)
   assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: "second" } }, "second"), "second:second")
   await assert.rejects(rpc("ipc", { command: "ipc_echo", args: { value: "reject" } }, "main"), /fixture rejection/)

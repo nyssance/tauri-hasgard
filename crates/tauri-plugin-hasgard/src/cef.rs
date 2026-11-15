@@ -237,17 +237,7 @@ fn eval_hook(app: &tauri::AppHandle, engine: EvalEngine, clients: Arc<Clients>) 
     eval
 }
 
-pub(crate) fn hooks(
-    app: &tauri::AppHandle, engine: EvalEngine,
-) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>> {
-    // Validate even if the application currently has no windows.
-    if app.runtime_handle().downcast_ref::<tauri_runtime_cef::CefRuntimeHandle<tauri::EventLoopMessage>>().is_none() {
-        return Err(std::io::Error::other("init_cef requires the CEF runtime").into());
-    }
-    engine.cef.store(true, std::sync::atomic::Ordering::Relaxed);
-    let clients = Arc::new(Clients::default());
-    let eval = eval_hook(app, engine, clients.clone());
-
+fn register_captures(app: &tauri::AppHandle, clients: &Arc<Clients>) {
     {
         let capture_app = app.clone();
         let capture_clients = clients.clone();
@@ -269,9 +259,10 @@ pub(crate) fn hooks(
     {
         use base64::Engine;
         let capture_app = app.clone();
+        let snapshot_clients = clients.clone();
         crate::screenshot::register_snapshot_fn(Arc::new(move |label| {
             let view = target(&capture_app, label)?;
-            let client = clients.get(&view)?;
+            let client = snapshot_clients.get(&view)?;
             let result = client.call(
                 &view,
                 "Page.captureScreenshot",
@@ -286,6 +277,20 @@ pub(crate) fn hooks(
             })
         }));
     }
+}
+
+pub(crate) fn hooks(
+    app: &tauri::AppHandle, engine: EvalEngine,
+) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>> {
+    // Validate even if the application currently has no windows.
+    if app.runtime_handle().downcast_ref::<tauri_runtime_cef::CefRuntimeHandle<tauri::EventLoopMessage>>().is_none() {
+        return Err(std::io::Error::other("init_cef requires the CEF runtime").into());
+    }
+    engine.cef.store(true, std::sync::atomic::Ordering::Relaxed);
+    let clients = Arc::new(Clients::default());
+    let eval = eval_hook(app, engine, clients.clone());
+
+    register_captures(app, &clients);
     #[cfg(any(target_os = "macos", windows))]
     crate::heap::register_heap_snapshot_fn(Arc::new(|_| Err("heap.snapshot is not implemented for CEF".into())));
 
