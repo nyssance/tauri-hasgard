@@ -1,0 +1,3 @@
+<!doctype html><meta charset="utf-8"><title>Cross-origin editor</title>
+<input id="frame-input" aria-label="Frame input" style="margin-top:60px"><button id="frame-save" style="position:absolute;left:10px;top:10px;width:100px;height:40px">Save</button>
+<script>document.querySelector('#frame-save').onclick=e=>parent.postMessage({frameValue:document.querySelector('#frame-input').value,trusted:e.isTrusted,shift:e.shiftKey},'*');</script>

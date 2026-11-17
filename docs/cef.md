@@ -20,7 +20,19 @@ let builder = tauri::Builder::default()
 Keep the application's usual CEF entry point and bundling setup. Do not enable a
 remote debugging port for Hasgard. CEF uses an in-process CDP observer; external
 pages need neither `hasgard:default` nor permission to invoke Tauri commands.
-The plugin stays inert in release builds.
+`init_cef()` works in both debug and release builds and does not move application windows.
+
+CEF interactions require the packaged Playwright executor. Build it with
+`bun run --cwd packages/executor build` and include the generated native binary
+as a Tauri `externalBin`, as in `examples/cef-fixture-app`. The resulting app
+contains `hasgard-playwright` beside its executable (`.exe` on Windows); users
+do not install Node or Bun. For local development, `TAURI_HASGARD_PLAYWRIGHT`
+may name an absolute executor path. Missing or failed executors return an error,
+never a synthetic-click fallback.
+
+The shared [executor](../packages/executor/README.md) can also be used by a
+release application through `init_cef_with_executor`; its code selects
+whether the local transport is enabled. It neither starts a second browser nor creates another login profile.
 
 ## Routing and results
 
@@ -43,6 +55,15 @@ message-ID allocator and a unique execution-context ID; navigation cannot redire
 an already submitted evaluation into another renderer context. A new request can
 attach to the next document. Recreating a view with the same label creates a fresh
 CDP session. A request to a closed label fails explicitly.
+
+Click, double-click, hover, fill, type, check and select use Playwright over the
+selected webview's CDP stream. They perform browser input with actionability
+checks, including visibility, stability and hit testing. A covered target can
+therefore fail where Wry's synthetic DOM interaction succeeds. CEF selectors can
+pierce open shadow roots and frame selectors can reach cross-origin documents;
+the existing snapshot/ref reader still has its documented frame limits. Do not
+infer equivalent input fidelity or capabilities on WKWebView from the shared
+method names. Native window focus, keyboard shortcuts and IPC remain native.
 
 `ipc` executes in the selected webview's top-level main world and calls its
 existing Tauri invoke bridge. It preserves command results, rejections and Tauri

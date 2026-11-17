@@ -44,7 +44,7 @@ data rejects the eval instead of becoming a successful null or raw string.
 ## Transport
 
 - macOS/Linux: private Unix socket. A managed test supplies `TAURI_HASGARD_SOCKET`; otherwise the plugin derives a path from the Tauri application identifier.
-- `TAURI_HASGARD_DISPLAY` (`secondary`, a display index from 0, or a display name) moves each new window onto that display, fitted and then shown, so a run does not cover the developer's main screen; unset leaves windows where the application put them.
+- The native test fixtures use `TAURI_HASGARD_DISPLAY` (`secondary`, a display index from 0, or a display name) to select their display. Window placement belongs to the fixture; the plugin never moves application windows.
 - `TAURI_HASGARD_PRESS` (macOS, Wry) chooses where `press` sends its key events: `system` (the default) or `window`; any other value fails the press. See [Native keyboard completion](#native-keyboard-completion).
 - Windows: named pipe. A managed test supplies the full named-pipe path through the same environment variable.
 

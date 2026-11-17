@@ -25,11 +25,103 @@ struct ExecutionContext {
 
 #[derive(Default)]
 struct Client {
+    host_window: String,
     pending: Mutex<HashMap<i32, Reply>>,
     contexts: Mutex<HashMap<i64, ExecutionContext>>,
+    executor: Mutex<Option<Arc<crate::playwright::PlaywrightExecutor>>>,
+    executor_pending: Mutex<HashMap<i32, (Value, bool)>>,
+    action_order: Mutex<()>,
+    revoked: Mutex<bool>,
 }
 
 impl Client {
+    fn stop(&self) -> Result<(), String> {
+        *self.revoked.lock().expect("CEF input gate") = true;
+        let stopped = self.executor.lock().expect("executor").take().map(|executor| executor.stop());
+        self.executor_pending.lock().expect("executor CDP").clear();
+        self.cancel("CEF control was stopped");
+        stopped.transpose().map(|_| ())
+    }
+    fn action(
+        self: &Arc<Self>, view: &View, method: &str, mut params: Value,
+        command: Option<crate::playwright::ExecutorCommand>,
+    ) -> Result<Value, String> {
+        let _order = self.action_order.lock().expect("CEF action order");
+        let existing = self.executor.lock().expect("executor").clone();
+        let executor = if let Some(executor) = existing {
+            executor
+        } else {
+            let info = self.call(view, "Target.getTargetInfo", &json!({}))?;
+            let path = if let Some(path) = std::env::var_os("TAURI_HASGARD_PLAYWRIGHT") {
+                std::path::PathBuf::from(path)
+            } else {
+                std::env::current_exe()
+                    .map_err(|e| e.to_string())?
+                    .parent()
+                    .ok_or("Executable has no parent")?
+                    .join(if cfg!(windows) { "hasgard-playwright.exe" } else { "hasgard-playwright" })
+            };
+            let command = command.unwrap_or(crate::playwright::ExecutorCommand { program: path, args: Vec::new() });
+            let weak = Arc::downgrade(self);
+            let native = view.clone();
+            let executor =
+                Arc::new(crate::playwright::PlaywrightExecutor::start_command(&command, move |mut message, root| {
+                    let client = weak.upgrade().ok_or("CEF target closed")?;
+                    let revoked = client.revoked.lock().expect("CEF input gate");
+                    if *revoked {
+                        return Err("CEF control was revoked".into());
+                    }
+                    let id = allocate_devtools_message_id().map_err(|e| e.to_string())?;
+                    client.executor_pending.lock().expect("executor CDP").insert(id, (message["id"].clone(), root));
+                    message["id"] = json!(id);
+                    native
+                        .send_dev_tools_message(&serde_json::to_vec(&message).map_err(|e| e.to_string())?)
+                        .map_err(|e| e.to_string())
+                })?);
+            {
+                let revoked = self.revoked.lock().expect("CEF input gate");
+                if *revoked {
+                    executor.stop()?;
+                    return Err("CEF control was revoked".into());
+                }
+                *self.executor.lock().expect("executor") = Some(executor.clone());
+            }
+            // Replay existing contexts to the newly attached Playwright connection.
+            self.call(view, "Runtime.disable", &json!({}))?;
+            if let Err(error) = executor.request(json!({"kind":"init", "targetInfo":info["targetInfo"]})) {
+                self.executor.lock().expect("executor").take();
+                return Err(error);
+            }
+            executor
+        };
+        let reference = params.get("ref").and_then(Value::as_str).map(str::to_owned);
+        let token = uuid::Uuid::new_v4().to_string();
+        let previous = if let Some(reference) = &reference {
+            let code = format!(
+                "(()=>{{const e=window.__HASGARD__.resolve({});if(!e?.isConnected)throw Error('Stale reference; read the page again');const old=e.getAttribute('data-hasgard-action');e.setAttribute('data-hasgard-action',{});return old}})()",
+                json!(reference),
+                json!(token)
+            );
+            let previous = self.evaluate(view, &EvalScript { code, world: EvalWorld::Automation }, || Ok(TIMEOUT))?;
+            params["actionToken"] = json!(token);
+            Some(previous)
+        } else {
+            None
+        };
+        let result = executor.request(json!({"kind":"action", "method":method, "params":params}));
+        if let (Some(reference), Some(previous)) = (reference, previous) {
+            let code = format!(
+                "(()=>{{const e=window.__HASGARD__.resolve({});if(e?.getAttribute('data-hasgard-action')==={}){{const old={};if(old===null)e.removeAttribute('data-hasgard-action');else e.setAttribute('data-hasgard-action',old)}}}})()",
+                json!(reference),
+                json!(token),
+                previous
+            );
+            // Navigation can destroy the original document after a successful action.
+            let _ = self.evaluate(view, &EvalScript { code, world: EvalWorld::Automation }, || Ok(TIMEOUT));
+        }
+        result
+    }
+
     fn receive(&self, message: DevToolsProtocol) {
         match message {
             DevToolsProtocol::MethodResult { message_id, success, result } => {
@@ -66,7 +158,24 @@ impl Client {
                     self.cancel("CEF document navigated or debugger detached");
                 }
             }
-            DevToolsProtocol::Message(_) => (),
+            DevToolsProtocol::Message(bytes) => {
+                let executor = self.executor.lock().expect("executor").clone();
+                if let Some(executor) = executor
+                    && let Ok(mut value) = serde_json::from_slice::<Value>(&bytes)
+                {
+                    if let Some(id) = value["id"].as_i64() {
+                        if let Ok(id) = i32::try_from(id)
+                            && let Some((original, root)) =
+                                self.executor_pending.lock().expect("executor CDP").remove(&id)
+                        {
+                            value["id"] = original;
+                            let _ = executor.receive(&value, root);
+                        }
+                    } else {
+                        let _ = executor.receive(&value, false);
+                    }
+                }
+            }
         }
     }
 
@@ -84,9 +193,17 @@ impl Client {
         let id = allocate_devtools_message_id().map_err(|e| e.to_string())?;
         let (tx, rx) = mpsc::sync_channel(1);
         self.pending.lock().expect("CDP pending lock").insert(id, tx);
-        let sent = view.send_dev_tools_message(
-            &serde_json::to_vec(&json!({"id": id, "method": method, "params": params})).map_err(|e| e.to_string())?,
-        );
+        let sent = {
+            let revoked = self.revoked.lock().expect("CEF input gate");
+            if *revoked {
+                self.pending.lock().expect("CDP pending lock").remove(&id);
+                return Err("CEF control was revoked".into());
+            }
+            view.send_dev_tools_message(
+                &serde_json::to_vec(&json!({"id": id, "method": method, "params": params}))
+                    .map_err(|e| e.to_string())?,
+            )
+        };
         let result = match sent {
             Ok(()) => {
                 rx.recv_timeout(timeout).map_err(|e| format!("CDP {method}: {e}")).and_then(std::convert::identity)
@@ -162,8 +279,27 @@ fn evaluation_result(result: &Value) -> Result<Value, String> {
 }
 
 #[derive(Default)]
-struct Clients(Mutex<HashMap<String, (i32, Arc<Client>)>>);
+struct Clients(Mutex<HashMap<String, (i32, Arc<Client>)>>, Mutex<std::collections::HashSet<String>>);
 impl Clients {
+    fn cleanup(&self, window: Option<&str>) -> Result<(), String> {
+        let mut clients = self.0.lock().expect("CEF clients lock");
+        let labels: Vec<_> = clients
+            .iter()
+            .filter(|(label, (_, client))| {
+                window.is_none_or(|window| window == label.as_str() || window == client.host_window)
+            })
+            .map(|(label, _)| label.clone())
+            .collect();
+        let mut errors = Vec::new();
+        for label in labels {
+            if let Some((_, client)) = clients.remove(&label)
+                && let Err(error) = client.stop()
+            {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+    }
     fn get(&self, view: &View) -> Result<Arc<Client>, String> {
         let (tx, rx) = mpsc::sync_channel(1);
         view.with_cef_webview(move |native| {
@@ -173,6 +309,9 @@ impl Clients {
         let browser_id = rx.recv_timeout(TIMEOUT).map_err(|e| e.to_string())?;
         let live = view.app_handle().webviews();
         let mut clients = self.0.lock().expect("CEF clients lock");
+        if self.1.lock().expect("CEF revoked targets").contains(view.label()) {
+            return Err("CEF control was revoked".into());
+        }
         clients.retain(|label, (_, client)| {
             if live.contains_key(label) {
                 true
@@ -189,7 +328,7 @@ impl Clients {
         if let Some((_, old)) = clients.remove(view.label()) {
             old.cancel("CEF browser replaced");
         }
-        let client = Arc::new(Client::default());
+        let client = Arc::new(Client { host_window: view.window().label().to_owned(), ..Default::default() });
         let weak = Arc::downgrade(&client);
         view.on_dev_tools_protocol(move |message| {
             if let Some(client) = weak.upgrade() {
@@ -197,6 +336,10 @@ impl Clients {
             }
         })
         .map_err(|e| e.to_string())?;
+        // A revoked worker leaves the native Runtime domain enabled. A fresh
+        // observer needs its context inventory replayed before it can bind an
+        // evaluation to a unique context; enable alone is idempotent.
+        client.call(view, "Runtime.disable", &json!({}))?;
         client.call(view, "Runtime.enable", &json!({}))?;
         clients.insert(view.label().to_owned(), (browser_id, client.clone()));
         Ok(client)
@@ -288,6 +431,28 @@ pub(crate) fn hooks(
     }
     engine.cef.store(true, std::sync::atomic::Ordering::Relaxed);
     let clients = Arc::new(Clients::default());
+    let cleanup_clients = clients.clone();
+    *engine.cleanup.lock().expect("CEF cleanup hook") = Some(Arc::new(move |window| cleanup_clients.cleanup(window)));
+    let cancel_clients = clients.clone();
+    *engine.cancel.lock().expect("CEF cancel hook") = Some(Arc::new(move |label, revoked| {
+        let mut clients = cancel_clients.0.lock().expect("CEF clients");
+        if !revoked {
+            cancel_clients.1.lock().expect("CEF revoked targets").remove(label);
+            return Ok(());
+        }
+        cancel_clients.1.lock().expect("CEF revoked targets").insert(label.to_owned());
+        if let Some((_, client)) = clients.remove(label) {
+            client.stop()?;
+        }
+        Ok(())
+    }));
+    let action_clients = clients.clone();
+    let action_app = app.clone();
+    let command = engine.executor.clone();
+    *engine.action.lock().expect("CEF action hook") = Some(Arc::new(move |label, method, params| {
+        let view = target(&action_app, label)?;
+        action_clients.get(&view)?.action(&view, method, params, command.lock().expect("executor command").clone())
+    }));
     let eval = eval_hook(app, engine, clients.clone());
 
     register_captures(app, &clients);
@@ -362,6 +527,31 @@ pub(crate) fn hooks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closing_a_host_cleans_its_children_and_exit_cleans_remaining_targets() {
+        let clients = Clients::default();
+        let mut receivers = Vec::new();
+        let mut handles = Vec::new();
+        for (label, host) in [("main", "main"), ("guest", "main"), ("settings", "settings")] {
+            let client = Arc::new(Client { host_window: host.into(), ..Default::default() });
+            let (tx, rx) = mpsc::sync_channel(1);
+            client.pending.lock().expect("test lock").insert(1, tx);
+            clients.0.lock().expect("test lock").insert(label.into(), (1, client.clone()));
+            handles.push(client);
+            receivers.push(rx);
+        }
+        clients.cleanup(Some("main")).expect("close host");
+        for index in 0..2 {
+            assert!(receivers[index].recv().expect("cancelled reply").is_err());
+            assert!(*handles[index].revoked.lock().expect("test lock"));
+        }
+        assert!(receivers[2].try_recv().is_err());
+        assert!(!*handles[2].revoked.lock().expect("test lock"));
+        assert_eq!(clients.0.lock().expect("test lock").len(), 1);
+        clients.cleanup(None).expect("exit");
+        assert!(receivers[2].recv().expect("cancelled reply").is_err());
+        assert!(clients.0.lock().expect("test lock").is_empty());
+    }
     #[test]
     fn cdp_results_route_only_to_the_allocated_request() {
         let client = Client::default();

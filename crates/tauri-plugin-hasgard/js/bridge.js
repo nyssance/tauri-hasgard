@@ -717,7 +717,7 @@
     const selector = options?.selector || null
     const maxDepth = options?.depth ?? 255
 
-    refCounter = 0
+    // Never recycle a ref: another connection may still hold an older snapshot.
     idMap.clear()
 
     const doc = frameDocument(options?.frame)
@@ -738,6 +738,8 @@
     function walk(node, currentDepth) {
       if (currentDepth > maxDepth) return
       if (node.nodeType !== Node.ELEMENT_NODE) return
+      // Inactive application panes must not mint actionable references.
+      if (node.getAttribute("inert") !== null || node.getAttribute("hidden") !== null || node.getAttribute("aria-hidden") === "true") return
 
       const role = getRole(node)
       const isInteractive = isInteractiveElement(node)
@@ -758,6 +760,9 @@
       }
     }
 
+    for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.hasAttribute("inert") || ancestor.hasAttribute("hidden") || ancestor.getAttribute("aria-hidden") === "true") return { elements }
+    }
     walk(root, 0)
     return { elements }
   }

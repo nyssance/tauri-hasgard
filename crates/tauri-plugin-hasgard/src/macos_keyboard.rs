@@ -9,7 +9,7 @@ use tauri_runtime_wry::WebviewWryExt;
 
 /// Read actual `AppKit` focus on the main thread; a queued `set_focus` request alone
 /// does not prove that the application owns the keyboard.
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 pub(crate) fn macos_window_is_focused<R: tauri::Runtime>(
     window: &tauri::Window<R>, activate: bool,
 ) -> Result<bool, String> {
@@ -37,18 +37,20 @@ pub(crate) fn macos_window_is_focused<R: tauri::Runtime>(
         if native.isMiniaturized() {
             native.deminiaturize(None);
         }
-        if !native.isKeyWindow() || !native.isVisible() {
-            native.makeKeyAndOrderFront(None);
-        }
         if !application.isActive() {
             #[expect(deprecated, reason = "supports Tauri's older macOS deployment targets")]
             application.activateIgnoringOtherApps(true);
         }
     }
+    // Activation is asynchronous and may restore another window as key. Once
+    // active, select the requested window again before confirming keyboard ownership.
+    if (activate || application.isActive()) && (!native.isKeyWindow() || !native.isVisible()) {
+        native.makeKeyAndOrderFront(None);
+    }
     Ok(application.isActive() && native.isKeyWindow())
 }
 
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 pub(crate) fn focus<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String>
 where
     R::Handle: tauri_runtime_wry::AsWryHandle,

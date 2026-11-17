@@ -61,15 +61,18 @@ fn main() {
         .setup(move |app| {
             let primary = app.primary_monitor()?.ok_or("Primary monitor missing")?;
             let monitors = app.available_monitors()?;
-            let found = if wanted == "secondary" {
-                monitors.iter().any(|m| m.position() != primary.position())
+            let monitor = if wanted == "secondary" {
+                monitors.iter().find(|m| m.position() != primary.position())
             } else if let Ok(index) = wanted.parse::<usize>() {
-                monitors.get(index).is_some()
+                monitors.get(index)
             } else {
-                monitors.iter().any(|m| m.name().is_some_and(|n| n.eq_ignore_ascii_case(&wanted)))
-            };
-            if !found {
-                return Err("Requested test display unavailable; refusing primary fallback".into());
+                monitors.iter().find(|m| m.name().is_some_and(|n| n.eq_ignore_ascii_case(&wanted)))
+            }
+            .ok_or("Requested test display unavailable; refusing primary fallback")?;
+            // Production integration does not reposition windows; the fixture does.
+            for window in app.windows().values() {
+                window.set_position(*monitor.position())?;
+                window.show()?;
             }
             Ok(())
         })

@@ -132,3 +132,23 @@ test("snapshot uses associated label text as a form control accessible name", ()
 
   assert.equal(field.name, "Display name")
 })
+
+test("snapshot excludes inert, hidden and accessibility-hidden subtrees", () => {
+  const panes = ["inert", "hidden", "aria-hidden"].map((attribute) =>
+    makeEl("section", { attrs: { [attribute]: attribute === "aria-hidden" ? "true" : "" }, children: [makeEl("button", { text: "inactive" })] })
+  )
+  const hasgard = loadBridge(makeEl("body", { children: [...panes, makeEl("button", { text: "active" })] }))
+  const elements = hasgard.snapshot().elements
+  assert.ok(elements.some((element) => element.name === "active"))
+  assert.ok(!elements.some((element) => element.name === "inactive"))
+})
+
+test("a later snapshot never reassigns an old reference to a different element", () => {
+  const body = makeEl("body", { children: [makeEl("button", { text: "first" })] })
+  const hasgard = loadBridge(body)
+  const old = hasgard.snapshot().elements.find((element) => element.name === "first").ref
+  body.children = [makeEl("button", { text: "second" })]
+  const next = hasgard.snapshot().elements.find((element) => element.name === "second").ref
+  assert.notEqual(old, next)
+  assert.equal(hasgard.resolve(old), null)
+})

@@ -2,4 +2,19 @@
 <style>body{font:18px system-ui;background:#12bc68;color:#000;margin:0;padding:20px;min-height:1800px}input{font-size:18px;padding:8px}</style>
 <h1>CEF GUEST</h1><input id="guest-input" aria-label="Guest input"><button id="increment">Increment</button><output id="count">0</output>
 <a id="navigate" href="guest-next.html">Next page</a><p>Remote page: no Tauri IPC permissions.</p>
+<button id="trusted">Trusted click</button><output id="trusted-result"></output>
+<div id="editor" contenteditable="true" role="textbox">Original draft</div>
+<input id="checked" type="checkbox"><select id="choice"><option value="a">Alpha</option><option value="b">Beta</option></select>
+<div style="position:relative;width:180px;height:40px"><button id="covered">Covered action</button><div id="cover" style="position:absolute;inset:0;background:gray"></div></div>
+<button id="delayed" disabled>Delayed action</button><output id="delayed-result"></output>
+<div id="shadow-host"></div><iframe id="foreign-frame" title="Cross-origin editor"></iframe>
+<script>
+document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML='<button id="shadow-button">Shadow action</button>';
+document.querySelector('#shadow-host').shadowRoot.querySelector('button').onclick=e=>document.body.dataset.shadowTrusted=String(e.isTrusted);
+document.querySelector('#foreign-frame').src='http://localhost:'+location.port+'/guest-frame.html';
+window.addEventListener('message',e=>{if(e.source===document.querySelector('#foreign-frame').contentWindow){document.body.dataset.frameValue=e.data.frameValue;document.body.dataset.frameTrusted=String(e.data.trusted);document.body.dataset.frameShift=String(e.data.shift)}});
+document.querySelector('#trusted').onclick=e=>document.querySelector('#trusted-result').textContent=String(e.isTrusted);
+document.querySelector('#covered').onclick=()=>document.body.dataset.coveredClicked="true";
+document.querySelector('#delayed').onclick=e=>document.querySelector('#delayed-result').textContent=String(e.isTrusted);
+</script>
 <script>document.querySelector('#increment').onclick=()=>{const c=document.querySelector('#count');c.textContent=Number(c.textContent)+1};</script>

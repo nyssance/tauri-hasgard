@@ -1,20 +1,25 @@
-#[cfg(all(feature = "cef", any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
+mod automation;
+#[cfg(all(feature = "cef", any(unix, windows)))]
 mod cef;
+#[cfg(any(unix, windows))]
+pub use automation::{Automation, Options, RpcError, init, init_with_options};
+#[cfg(all(feature = "cef", any(unix, windows)))]
+pub use automation::{init_cef, init_cef_with_executor};
 
 pub mod diff;
-#[cfg(all(any(unix, windows), debug_assertions))]
-mod display;
 mod error;
 #[cfg(any(unix, windows))]
 pub(crate) mod eval;
 #[cfg(any(unix, windows))]
 mod handler;
+#[cfg(feature = "cef")]
+pub mod playwright;
 // JavaScript heap snapshots for `heap.snapshot`: WebKit's inspector on macOS, CDP on WebView2.
-#[cfg(all(any(target_os = "macos", windows), debug_assertions))]
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) mod heap;
-#[cfg(feature = "press")]
 pub(crate) mod key;
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 mod macos_keyboard;
 pub(crate) mod protocol;
 pub(crate) mod recorder;
@@ -38,77 +43,20 @@ use std::sync::Arc;
 #[cfg(any(unix, windows))]
 use tauri::Manager;
 
-#[cfg(all(any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
 pub(crate) const BRIDGE_JS: &str =
     concat!(include_str!("../js/vendor/html-to-image.iife.js"), "\n", include_str!("../js/bridge.js"));
 
-/// Initialize the tauri-hasgard plugin.
-///
-/// On non-Unix, non-Windows platforms or in release builds, returns a no-op plugin.
-/// In debug builds on Unix, injects the JS bridge, stores an `EvalEngine`,
-/// and starts a Unix socket server at `TAURI_HASGARD_SOCKET` when set, otherwise
-/// at `$XDG_RUNTIME_DIR/tauri-hasgard-{identifier}.sock`.
-/// In debug builds on Windows, starts a Named Pipe server at
-/// `\\.\pipe\tauri-hasgard-{identifier}` and registers the instance under `%LOCALAPPDATA%\tauri-hasgard\instances\`.
-#[must_use]
-pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R>
-where
-    R::Handle: tauri_runtime_wry::AsWryHandle,
-{
-    #[cfg(all(any(unix, windows), debug_assertions))]
-    {
-        build_plugin::<R>(true, |app, engine| {
-            use tauri_runtime_wry::AsWryHandle;
-            if app.runtime_handle().as_wry_handle().is_none() {
-                return Err(
-                    std::io::Error::other("Hasgard requires the Tauri 3 Wry runtime; use init_cef for CEF").into()
-                );
-            }
-            #[cfg(target_os = "macos")]
-            screenshot::register_snapshot_fn(make_snapshot_fn(app));
-            #[cfg(any(target_os = "macos", windows))]
-            heap::register_heap_snapshot_fn(make_heap_snapshot_fn(app));
-            Ok((make_eval_fn(app, engine), make_press_hooks(app)))
-        })
-    }
-    #[cfg(not(all(any(unix, windows), debug_assertions)))]
-    {
-        tauri::plugin::Builder::<R>::new("hasgard").build()
-    }
-}
-
-/// CEF automation through the in-process `DevTools` protocol. No debugging port or
-/// remote-page Tauri permissions are required. In release builds this is inert.
-#[cfg(feature = "cef")]
-#[must_use]
-pub fn init_cef() -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
-    #[cfg(all(any(unix, windows), debug_assertions))]
-    {
-        build_plugin(false, cef::hooks)
-    }
-    #[cfg(not(all(any(unix, windows), debug_assertions)))]
-    {
-        tauri::plugin::Builder::new("hasgard").build()
-    }
-}
-
-#[cfg(all(any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
 fn build_plugin<R: tauri::Runtime>(
-    ipc_bridge: bool,
+    ipc_bridge: bool, transport: bool,
     hooks: impl Fn(&tauri::AppHandle<R>, EvalEngine) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>>
     + Send
     + Sync
     + 'static,
 ) -> tauri::plugin::TauriPlugin<R> {
-    #[cfg(not(all(any(unix, windows), debug_assertions)))]
-    {
-        return tauri::plugin::Builder::<R>::new("hasgard").build();
-    }
-
-    #[cfg(all(any(unix, windows), debug_assertions))]
-    {
-        let engine = EvalEngine::new();
-        tauri::plugin::Builder::<R>::new("hasgard")
+    let engine = EvalEngine::new();
+    tauri::plugin::Builder::<R>::new("hasgard")
             .initialization_script(if ipc_bridge { BRIDGE_JS } else { "" })
             .on_page_load(move |webview, payload| {
                 let engine = webview.state::<EvalEngine>();
@@ -123,7 +71,6 @@ fn build_plugin<R: tauri::Runtime>(
                     if let Err(error) = webview.eval(script) { tracing::error!(%error, "Failed to request automation handshake"); }
                 }
             })
-            .on_window_ready(|window| display::place(&window))
             .setup(move |app, _api| {
                 app.manage(engine.clone());
 
@@ -137,6 +84,9 @@ fn build_plugin<R: tauri::Runtime>(
                 let list_fn = make_list_fn(app, !ipc_bridge);
 
                 let recorder = Recorder::new();
+                app.manage(Automation::new(engine.clone(), eval_fn.clone(), list_fn.clone(), press_hooks.clone()));
+                if !transport { return Ok(()); }
+
 
                 // Unix binds with the std (sync) `UnixListener`, which needs no
                 // tokio runtime, so binding stays here in `setup` where a failure
@@ -177,26 +127,31 @@ fn build_plugin<R: tauri::Runtime>(
                 Ok(())
             })
             .on_event(|app, event| {
-                if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = event
-                    && let Some(engine) = app.try_state::<EvalEngine>() {
+                if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = event {
+                    let engine = app.state::<EvalEngine>();
                     engine.forget_window(label);
+                    if let Some(cleanup) = engine.cleanup.lock().expect("cleanup hook").clone()
+                        && let Err(error) = cleanup(Some(label)) { tracing::error!(%error, "Hasgard window cleanup failed"); }
                     #[cfg(target_os = "macos")]
                     engine.videos.cancel_window(label);
                 }
-                #[cfg(target_os = "macos")]
-                if matches!(event, tauri::RunEvent::Exit)
-                    && let Some(engine) = app.try_state::<EvalEngine>() { engine.videos.shutdown(); }
+                if matches!(event, tauri::RunEvent::Exit) {
+                    let engine = app.state::<EvalEngine>();
+                    if let Some(cleanup) = engine.cleanup.lock().expect("cleanup hook").clone()
+                        && let Err(error) = cleanup(None) { tracing::error!(%error, "Hasgard shutdown failed"); }
+                    #[cfg(target_os = "macos")]
+                    engine.videos.shutdown();
+                }
                 #[cfg(not(target_os = "macos"))]
                 let _ = (app, event);
             })
             .invoke_handler(tauri::generate_handler![handler::callback, handler::__callback])
             .build()
-    }
 }
 
 /// Strip path separators and unsafe characters from the app identifier
 /// so it can be safely used in a socket filename.
-#[cfg(all(any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
 fn sanitize_identifier(raw: &str) -> String {
     let sanitized: String = raw
         .chars()
@@ -209,7 +164,7 @@ fn sanitize_identifier(raw: &str) -> String {
 ///
 /// If `window` is `Some(label)`, targets that specific window (error if not found).
 /// If `window` is `None`, targets the conventional `main` window.
-#[cfg(all(any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
 fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine) -> EvalFn {
     let handle = app.clone();
     Arc::new(move |window: Option<&str>, id: Option<u64>, script: server::EvalScript| {
@@ -221,7 +176,8 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
         // Results come back via the `__callback` IPC command (see
         // EvalEngine::wrap_script). This eval is fire-and-forget; the IPC handler
         // resolves the pending request, not this closure.
-        let script = script.code;
+        // Wry uses the application-world IPC bridge for both kinds of evaluation.
+        let server::EvalScript { code: script, world: _world } = script;
         let script = match id {
             Some(id) => EvalEngine::wrap_script(id, &script, &engine.pending_nonce(id)?),
             None => script,
@@ -258,7 +214,7 @@ fn make_eval_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, engine: EvalEngine
 /// Resolution mirrors `make_eval_fn`: explicit label first, otherwise `main`.
 /// Webview capture for `screenshot_native` without a `window_id`: resolves the
 /// label like `EvalFn` and renders through `WKWebView` `takeSnapshot:`.
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 fn make_snapshot_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> screenshot::SnapshotFn
 where
     R::Handle: tauri_runtime_wry::AsWryHandle,
@@ -272,7 +228,7 @@ where
 }
 
 /// `heap.snapshot`: resolves the label like `EvalFn` and snapshots that webview's heap.
-#[cfg(all(any(target_os = "macos", windows), debug_assertions))]
+#[cfg(any(target_os = "macos", windows))]
 fn make_heap_snapshot_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> heap::HeapSnapshotFn
 where
     R::Handle: tauri_runtime_wry::AsWryHandle,
@@ -285,7 +241,7 @@ where
     })
 }
 
-#[cfg(all(any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
 fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef
 where
     R::Handle: tauri_runtime_wry::AsWryHandle,
@@ -373,7 +329,7 @@ where
 /// This one happens not to assert today, which is exactly why it is worth not
 /// relying on. `WebviewWindow::title` already blocks on the main thread the same
 /// way, so this adds no new hazard to the listing path.
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 fn native_window_id<R: tauri::Runtime>(window: &tauri::Window<R>) -> Option<u32> {
     use objc2_app_kit::NSWindow;
 
@@ -400,13 +356,13 @@ fn native_window_id<R: tauri::Runtime>(window: &tauri::Window<R>) -> Option<u32>
     id_rx.recv_timeout(std::time::Duration::from_secs(2)).ok().flatten()
 }
 
-#[cfg(all(any(unix, windows), debug_assertions, not(target_os = "macos")))]
+#[cfg(all(any(unix, windows), not(target_os = "macos")))]
 fn native_window_id<R: tauri::Runtime>(_window: &tauri::Window<R>) -> Option<u32> {
     None
 }
 
 /// Create a list function that enumerates all available webview windows.
-#[cfg(all(any(unix, windows), debug_assertions))]
+#[cfg(any(unix, windows))]
 fn make_list_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, include_children: bool) -> ListWindowsFn {
     let handle = app.clone();
     Arc::new(move || {
@@ -445,7 +401,7 @@ fn make_list_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>, include_children: 
 
 #[cfg(test)]
 mod tests {
-    #[cfg(all(any(unix, windows), debug_assertions))]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bridge_js_contains_html_to_image_and_hasgard() {
         let js = super::BRIDGE_JS;
@@ -467,7 +423,7 @@ mod tests {
     /// only check by matching exact whitespace belongs there, not here. An
     /// earlier version pinned indentation and broke the moment the gesture was
     /// wrapped in a loop, without any behaviour having changed.
-    #[cfg(all(any(unix, windows), debug_assertions))]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bridge_click_dispatches_pointer_sequence() {
         let js = super::BRIDGE_JS;
@@ -501,7 +457,7 @@ mod tests {
         assert!(gated >= 2, "mousedown and mouseup must each sit behind a pointerDownOk gate, found {gated}");
     }
 
-    #[cfg(all(any(unix, windows), debug_assertions))]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bridge_scroll_handles_top_and_bottom_directions() {
         let js = super::BRIDGE_JS;
@@ -540,7 +496,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(any(unix, windows), debug_assertions))]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bridge_eval_auto_wraps_top_level_await() {
         // #79: top-level `await` in user scripts must compile via the
@@ -586,7 +542,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(any(unix, windows), debug_assertions))]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bridge_native_value_setter_picks_prototype_per_element() {
         // #85: `fill` and `type` on a <textarea> threw
@@ -662,7 +618,7 @@ mod tests {
         assert!(helper_idx < fill_idx, "nativeValueSetter must be declared before fill (#85)");
     }
 
-    #[cfg(all(any(unix, windows), debug_assertions))]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bridge_role_map_maps_paragraph_and_keeps_it_noninteractive() {
         // #109: <p> text (e.g. the default Tauri template greeting rendered in

@@ -81,7 +81,7 @@ impl<'de> Deserialize<'de> for Response {
 
 /// A JSON-RPC 2.0 error object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RpcError {
+pub struct RpcError {
     pub code: i32,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]

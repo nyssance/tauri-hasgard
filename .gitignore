@@ -39,3 +39,5 @@ tauri-hasgard-failures/
 
 # Generated schemas for the CEF test fixture
 /examples/cef-fixture-app/src-tauri/gen/
+
+*.bun-build

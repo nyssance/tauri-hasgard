@@ -2,7 +2,7 @@
 
 Automate a running Tauri application through its real native webviews. The CLI, MCP server, and Playwright Test fixture share one JSON-RPC plugin.
 
-This repository supports **Tauri 3 + Wry** and an opt-in **CEF backend**. Tauri 2 projects use Hasgard 0.5.x. CLI binaries are published for macOS Apple Silicon, Windows x64, and Linux x64. The plugin is active only in debug builds. See [CEF setup and limits](docs/cef.md) for native child-webview automation.
+This repository supports **Tauri 3 + Wry** and an opt-in **CEF backend**. Tauri 2 projects use Hasgard 0.5.x. CLI binaries are published for macOS Apple Silicon, Windows x64, and Linux x64. Registering the plugin enables automation in debug and release builds. See [CEF setup and limits](docs/cef.md) for native child-webview automation.
 
 ## Choose a client
 
@@ -51,7 +51,7 @@ Add `hasgard:default` to the existing permissions in `src-tauri/capabilities/def
 
 `hasgard:default` grants only the internal `callback` and `__callback` commands used to return WebView evaluation results. Without it, the native server can accept connections, but evaluation, locators, screenshots, and Playwright assertions fail with `hasgard.__callback not allowed`.
 
-The plugin is inert in release builds. In debug builds it creates an application-scoped Unix socket or Windows named pipe and injects the Hasgard bridge into each webview.
+When registered, the plugin creates an application-scoped Unix socket or Windows named pipe and injects the Hasgard bridge into each webview.
 
 ## Start here
 

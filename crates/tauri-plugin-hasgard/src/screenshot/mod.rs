@@ -38,15 +38,13 @@ static SNAPSHOT_FN: std::sync::RwLock<Option<SnapshotFn>> = std::sync::RwLock::n
 /// Install the runtime-backed webview capture for this process.
 #[cfg(target_os = "macos")]
 pub(crate) fn register_snapshot_fn(capture: SnapshotFn) {
-    if let Ok(mut slot) = SNAPSHOT_FN.write() {
-        *slot = Some(capture);
-    }
+    *SNAPSHOT_FN.write().expect("snapshot capture lock") = Some(capture);
 }
 
 /// The installed webview capture, if the plugin has registered one.
 #[cfg(target_os = "macos")]
 pub(crate) fn snapshot_fn() -> Option<SnapshotFn> {
-    SNAPSHOT_FN.read().ok()?.clone()
+    SNAPSHOT_FN.read().expect("snapshot capture lock").clone()
 }
 
 /// Takes the pixels of an area of a webview's document (`x`, `y`, `width`,
@@ -58,13 +56,12 @@ pub(crate) type PageCaptureFn = std::sync::Arc<dyn Fn(Option<&str>, [f64; 4]) ->
 static PAGE_CAPTURE_FN: std::sync::RwLock<Option<PageCaptureFn>> = std::sync::RwLock::new(None);
 
 /// Install the composited page capture for this process.
+#[cfg(feature = "cef")]
 pub(crate) fn register_page_capture_fn(capture: PageCaptureFn) {
-    if let Ok(mut slot) = PAGE_CAPTURE_FN.write() {
-        *slot = Some(capture);
-    }
+    *PAGE_CAPTURE_FN.write().expect("page capture lock") = Some(capture);
 }
 
 /// The installed composited page capture, if a runtime has registered one.
 pub(crate) fn page_capture_fn() -> Option<PageCaptureFn> {
-    PAGE_CAPTURE_FN.read().ok()?.clone()
+    PAGE_CAPTURE_FN.read().expect("page capture lock").clone()
 }

@@ -1,6 +1,6 @@
 # tauri-hasgard
 
-CLI and stdio MCP server for running Tauri 3 Wry applications. Requires `tauri-plugin-hasgard` in the app and a debug build.
+CLI and stdio MCP server for running Tauri 3 Wry applications. Requires `tauri-plugin-hasgard` registered in the app.
 
 ```sh
 cargo install tauri-hasgard-cli

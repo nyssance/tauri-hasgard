@@ -19,12 +19,6 @@ exclude = ["js/*.test.mjs"]
 workspace = true
 
 [features]
-default = ["press"]
-# Enables the OS-level `press` command. Pulls in `enigo` and its platform
-# backends. Opt out with `--no-default-features` to drop the dependency from
-# release builds where the whole plugin is already no-op'd by
-# `cfg(debug_assertions)`.
-press = ["dep:enigo"]
 cef = ["dep:tauri-runtime-cef", "dep:base64"]
 
 [dependencies]
@@ -38,7 +32,7 @@ tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
 tauri-runtime-wry = "3.0.0-alpha.6"
 tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"], optional = true }
 base64 = { version = "0.23", optional = true }
-enigo = { version = "0.6", optional = true }
+enigo = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -55,7 +49,7 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
-enigo = { version = "0.6", features = ["wayland"], optional = true }
+enigo = { version = "0.6", features = ["wayland"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tempfile = "3"

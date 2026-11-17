@@ -12,3 +12,8 @@ Tauri Hasgard includes and adapts MIT-licensed work from:
 - `srsholmes/tauri-playwright` at commit `7e50bff1905ad8d5e6a52fb40e6439e0dbcbe6e6`
 
 The original copyright notices and MIT license terms remain in [LICENSE](LICENSE).
+
+The bundled production executor includes Playwright, Copyright Microsoft
+Corporation, under Apache-2.0. Its license and notices are included under
+`crates/tauri-plugin-hasgard/js/licenses/`. The generated worker is built from
+`packages/executor/src/worker.mjs` by `packages/executor/build.mjs`.

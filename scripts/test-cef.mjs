@@ -70,7 +70,7 @@ async function until(check, label, ms = 20000) {
 }
 const server = createServer((req, res) => {
   const name = req.url?.split("?")[0]?.slice(1)
-  if (!["guest.html", "guest-next.html"].includes(name)) {
+  if (!["guest.html", "guest-next.html", "guest-frame.html"].includes(name)) {
     res.writeHead(404).end()
     return
   }
@@ -101,6 +101,15 @@ app.on("error", (error) => {
   log += error.stack
 })
 const checks = []
+const executorPids = new Set()
+function collectExecutors() {
+  const processes = execFileSync("ps", ["-axo", "pid=,ppid=,comm="], { encoding: "utf8" }).trim().split("\n")
+  for (const line of processes) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/)
+    if (match && Number(match[2]) === app.pid && match[3].includes("hasgard-playwright"))
+      executorPids.add(Number(match[1]))
+  }
+}
 const pass = (text) => {
   checks.push(text)
   console.log(`PASS ${text}`)
@@ -149,6 +158,44 @@ try {
   await rpc("fill", { selector: "#second-input", value: "second text" }, "second")
   assert.equal(await evaluate("guest", 'document.querySelector("#guest-input").value'), "guest text")
   pass("DOM click and fill are isolated between windows")
+  collectExecutors()
+  assert.ok(executorPids.size >= 3, "Each exercised native view must use its packaged Playwright executor")
+  await rpc("click", { selector: "#trusted" }, "guest")
+  assert.equal(await evaluate("guest", 'document.querySelector("#trusted-result").textContent'), "true")
+  await rpc("fill", { selector: "#editor", value: "Replacement draft" }, "guest")
+  assert.equal(await evaluate("guest", 'document.querySelector("#editor").textContent'), "Replacement draft")
+  await rpc("check", { selector: "#checked", checked: true }, "guest")
+  await rpc("check", { selector: "#checked", checked: true }, "guest")
+  assert.equal(await evaluate("guest", 'document.querySelector("#checked").checked'), true)
+  await rpc("select", { selector: "#choice", value: "Beta" }, "guest")
+  assert.equal(await evaluate("guest", 'document.querySelector("#choice").value'), "b")
+  await assert.rejects(
+    rpc("click", { selector: "#covered", timeout: 300 }, "guest"),
+    /intercepts pointer events|Timeout/
+  )
+  assert.notEqual(await evaluate("guest", 'document.body.dataset.coveredClicked === "true"'), true)
+  await evaluate("guest", 'setTimeout(()=>document.querySelector("#delayed").disabled=false,350);null')
+  await rpc("click", { selector: "#delayed" }, "guest")
+  assert.equal(await evaluate("guest", 'document.querySelector("#delayed-result").textContent'), "true")
+  const referenced = await rpc("query", { by: "selector", value: "#trusted" }, "guest")
+  await rpc("click", { ref: referenced.elements[0].ref }, "guest")
+  assert.equal(await evaluate("guest", 'document.querySelectorAll("[data-hasgard-action]").length'), 0)
+  pass("Playwright trusted input, rich text replacement, idempotent check, select label, actionability and references")
+  await rpc("click", { selector: "#shadow-button" }, "guest")
+  assert.equal(await evaluate("guest", "document.body.dataset.shadowTrusted"), "true")
+  await rpc("fill", { frame: "#foreign-frame", selector: "#frame-input", value: "Cross-origin draft" }, "guest")
+  await rpc("click", { frame: "#foreign-frame", selector: "#frame-save" }, "guest")
+  await until(
+    async () => (await evaluate("guest", "document.body.dataset.frameValue")) === "Cross-origin draft",
+    "Frame save"
+  )
+  assert.equal(await evaluate("guest", "document.body.dataset.frameTrusted"), "true")
+  await rpc("click", { frame: "#foreign-frame", x: 30, y: 25, modifiers: ["Shift"] }, "guest")
+  await until(
+    async () => (await evaluate("guest", "document.body.dataset.frameShift")) === "true",
+    "Frame-relative modified click"
+  )
+  pass("Playwright open shadow root and cross-origin frame input")
   await rpc("focus", { selector: "#guest-input" }, "guest")
   await rpc("press", { key: "End" }, "guest")
   await rpc("press", { key: "x" }, "guest")
@@ -186,11 +233,14 @@ try {
       "python3",
       [
         "-c",
-        `from PIL import Image
+        `from PIL import Image,ImageCms
+from io import BytesIO
 import json,sys
 out=[]
 for path in sys.argv[1:]:
- im=Image.open(path).convert('RGB')
+ im=Image.open(path)
+ profile=im.info.get('icc_profile')
+ im=ImageCms.profileToProfile(im,ImageCms.ImageCmsProfile(BytesIO(profile)),ImageCms.createProfile('sRGB'),outputMode='RGB') if profile else im.convert('RGB')
  colors=list(im.getdata())
  out.append({'pink':sum(r>230 and 40<g<100 and b>170 for r,g,b in colors),'green':sum(r<50 and g>140 and 60<b<150 for r,g,b in colors)})
 print(json.dumps(out))`,
@@ -216,8 +266,22 @@ print(json.dumps(out))`,
   await until(() => app.exitCode !== null || app.signalCode !== null, "Graceful exit", 10000)
   assert.equal(app.exitCode, 0, `Unexpected shutdown: ${app.signalCode}: ${shutdownResponse}`)
   assert.equal(app.signalCode, null)
+  await until(
+    () =>
+      [...executorPids].every((pid) => {
+        try {
+          process.kill(pid, 0)
+          return false
+        } catch (error) {
+          if (error.code === "ESRCH") return true
+          throw error
+        }
+      }),
+    "Executor process cleanup",
+    5000
+  )
   assert.doesNotMatch(log, /FATAL:|panicked at/)
-  pass("graceful IPC shutdown exits 0 without panic or fatal error")
+  pass("graceful IPC shutdown exits 0 and reaps Playwright executors")
   writeFileSync(
     join(artifacts, "report.json"),
     JSON.stringify({ checks, windows, host, guest, whole, colors, exitCode: app.exitCode, shutdownResponse }, null, 2)

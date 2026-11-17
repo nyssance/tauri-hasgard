@@ -24,6 +24,10 @@ struct Pending {
     source: Option<(String, String)>,
 }
 type PendingMap = HashMap<u64, Pending>;
+pub(crate) type CancelFn = Arc<dyn Fn(&str, bool) -> Result<(), String> + Send + Sync>;
+pub(crate) type CleanupFn = Arc<dyn Fn(Option<&str>) -> Result<(), String> + Send + Sync>;
+pub(crate) type ActionFn =
+    Arc<dyn Fn(Option<&str>, &str, serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync>;
 
 pub(crate) fn origin(url: &tauri::Url) -> Result<String, String> {
     let host = url.host_str().ok_or_else(|| "Opaque origins are not supported for automation".to_owned())?;
@@ -53,6 +57,11 @@ pub(crate) struct EvalEngine {
     pub(crate) videos: Arc<crate::video::Videos>,
     next_id: Arc<AtomicU64>,
     pub(crate) cef: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) action: Arc<Mutex<Option<ActionFn>>>,
+    #[cfg(feature = "cef")]
+    pub(crate) executor: Arc<Mutex<Option<crate::playwright::ExecutorCommand>>>,
+    pub(crate) cancel: Arc<Mutex<Option<CancelFn>>>,
+    pub(crate) cleanup: Arc<Mutex<Option<CleanupFn>>>,
     allowed: Arc<Mutex<HashMap<String, String>>>,
     handshakes: Arc<Mutex<HashMap<String, (String, String)>>>,
     last_snapshot: Arc<Mutex<HashMap<String, serde_json::Value>>>,
@@ -66,6 +75,11 @@ impl EvalEngine {
             videos: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
             cef: Arc::default(),
+            action: Arc::default(),
+            cancel: Arc::default(),
+            cleanup: Arc::default(),
+            #[cfg(feature = "cef")]
+            executor: Arc::default(),
             allowed: Arc::new(Mutex::new(HashMap::new())),
             handshakes: Arc::default(),
             last_snapshot: Arc::new(Mutex::new(HashMap::new())),

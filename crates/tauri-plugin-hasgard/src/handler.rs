@@ -1,6 +1,5 @@
 use crate::diff;
 use crate::eval::EvalEngine;
-#[cfg(feature = "press")]
 use crate::key;
 use crate::protocol::{RPC_INTERNAL_ERROR, RpcError};
 use crate::recorder::{RecordEntry, Recorder};
@@ -8,14 +7,13 @@ use crate::screenshot;
 use crate::server::{EvalFn, EvalScript, EvalWorld, ListWindowsFn, PressHooksRef};
 
 use std::time::Duration;
-#[cfg(feature = "press")]
 use tokio::sync::Mutex as AsyncMutex;
 
 /// Delay after requesting window focus before injecting OS-level keyboard
 /// events, so the window manager has time to actually transfer focus. Tuned
 /// empirically — too short and the first key on Wayland drops; too long and
 /// press feels sluggish.
-#[cfg(all(feature = "press", not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 const FOCUS_SETTLE_MS: u64 = 80;
 
 /// Serializes the full `focus → settle → inject` sequence across concurrent
@@ -23,9 +21,7 @@ const FOCUS_SETTLE_MS: u64 = 80;
 /// so without this outer lock two calls targeting different windows could
 /// race on the focus step and deliver both keys to whichever window won the
 /// focus race.
-#[cfg(feature = "press")]
 static PRESS_ORDER_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
-#[cfg(feature = "press")]
 static NEXT_MARKER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0x4847_0000);
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -93,9 +89,6 @@ pub(crate) async fn dispatch(
     method: &str, params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>,
     list_fn: Option<&ListWindowsFn>, press_hooks: Option<&PressHooksRef>, recorder: &Recorder,
 ) -> Result<serde_json::Value, RpcError> {
-    #[cfg(not(feature = "press"))]
-    let _ = press_hooks;
-
     if let Some(params) = params {
         let object = params.as_object().ok_or_else(|| RpcError {
             code: -32602,
@@ -151,7 +144,19 @@ pub(crate) async fn dispatch(
     let params = owned_params.as_ref().or(params);
     let win = window.as_deref();
 
+    let action = engine.action.lock().expect("action hook").clone();
     let result = match method {
+        "click" | "dblclick" | "hover" | "fill" | "type" | "check" | "select" if action.is_some() => {
+            let action = action.expect("action was checked");
+            let method = method.to_owned();
+            let params = params.cloned().unwrap_or_else(|| serde_json::json!({}));
+            let label = window.clone();
+            tokio::task::spawn_blocking(move || action(label.as_deref(), &method, params))
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(std::convert::identity)
+                .map_err(|message| RpcError { code: -32603, message, data: None })
+        }
         "ping" => {
             let mut result = serde_json::json!({"status": "ok"});
             inject_plugin_version(&mut result);
@@ -171,21 +176,13 @@ pub(crate) async fn dispatch(
         }
         "query" | "filter" => handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "diff" => handle_diff(params, engine, eval_fn, win).await,
-        #[cfg(feature = "press")]
         "press" => handle_press(params, press_hooks, win, engine, eval_fn).await,
-        #[cfg(not(feature = "press"))]
-        "press" => Err(RpcError {
-            code: -32601,
-            message: "press disabled (compile `tauri-plugin-hasgard` with the `press` feature)".to_owned(),
-            data: None,
-        }),
         "click" | "fill" | "type" | "select" | "check" | "scroll" | "drag" | "drop" | "text" | "html" | "value"
         | "attrs" | "eval" | "ipc" | "navigate" | "url" | "title" | "visible" | "count" | "checked" | "disabled"
         | "boundingBox" | "blur" | "hover" | "dblclick" | "setInputFiles" | "wheel" => {
             handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
         }
         "focus" => {
-            #[cfg(feature = "press")]
             let _order = PRESS_ORDER_LOCK.lock().await;
             let hooks = press_hooks
                 .ok_or_else(|| RpcError { code: -32603, message: "No native focus hook available".into(), data: None })?
@@ -243,9 +240,9 @@ pub(crate) async fn dispatch(
         // Native capture resolves its own target; keep the window label that
         // is stripped from parameters sent to the JavaScript bridge.
         "screenshot_native" => screenshot::handle_screenshot(original_params).await,
-        #[cfg(all(any(target_os = "macos", windows), debug_assertions))]
+        #[cfg(any(target_os = "macos", windows))]
         "heap.snapshot" => crate::heap::handle_heap_snapshot(window.clone(), params).await,
-        #[cfg(not(all(any(target_os = "macos", windows), debug_assertions)))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         "heap.snapshot" => Err(RpcError {
             code: -32601,
             message: "heap.snapshot is only available on macOS and Windows".to_owned(),
@@ -442,19 +439,16 @@ async fn handle_diff(
     })
 }
 
-#[cfg(feature = "press")]
 struct PressRequest<'a> {
     key_str: &'a str,
     wait_for: Option<&'a str>,
     webview_completion: bool,
 }
 
-#[cfg(feature = "press")]
 fn press_error(message: String, phase: &str, injected: bool) -> RpcError {
     RpcError { code: -32603, message, data: Some(serde_json::json!({"phase": phase, "injected": injected})) }
 }
 
-#[cfg(feature = "press")]
 fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, RpcError> {
     let wait_for = params
         .and_then(|p| p.get("waitFor"))
@@ -521,7 +515,6 @@ fn parse_press(params: Option<&serde_json::Value>) -> Result<PressRequest<'_>, R
 /// (#114), but characters that sit above shift-level 0 on an exotic layout may
 /// still be remapped by `enigo` and miss the grab. See the `key` module-level
 /// docs (#45, #75, #114).
-#[cfg(feature = "press")]
 async fn handle_press(
     params: Option<&serde_json::Value>, press_hooks: Option<&PressHooksRef>, window: Option<&str>, engine: &EvalEngine,
     eval_fn: Option<&EvalFn>,
@@ -645,7 +638,6 @@ async fn handle_press(
     Ok(serde_json::json!({"ok": true}))
 }
 
-#[cfg(feature = "press")]
 fn injection_error(error: &crate::server::InjectionError) -> RpcError {
     let injected = if error.started { serde_json::json!("unknown") } else { serde_json::json!(false) };
     RpcError {
@@ -779,7 +771,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[cfg(feature = "press")]
     #[test]
     fn press_rejects_invalid_completion_and_postcondition_timeouts() {
         for completion in [json!(null), json!(true), json!("unknown")] {
@@ -846,7 +837,6 @@ mod tests {
         assert_eq!(result["plugin_version"], json!(env!("CARGO_PKG_VERSION")));
     }
 
-    #[cfg(feature = "press")]
     #[tokio::test]
     async fn test_dispatch_press_with_invalid_combo_returns_invalid_params() {
         // A malformed combo must not steal focus or acquire the serialization
@@ -859,7 +849,6 @@ mod tests {
         assert!(err.message.contains("invalid press combo"));
     }
 
-    #[cfg(feature = "press")]
     #[tokio::test]
     async fn test_dispatch_press_with_explicit_window_and_no_focus_fn_errors() {
         // --window <label> with no focus hook must not silently inject into
@@ -881,7 +870,6 @@ mod tests {
         assert!(err.message.contains("focus"));
     }
 
-    #[cfg(feature = "press")]
     #[tokio::test]
     async fn test_dispatch_press_with_missing_key_returns_invalid_params() {
         let engine = EvalEngine::new();
@@ -890,7 +878,6 @@ mod tests {
         assert_eq!(err.code, -32602);
     }
 
-    #[cfg(feature = "press")]
     #[tokio::test]
     async fn default_window_focus_failure_never_injects_keys() {
         let hooks = std::sync::Arc::new(crate::server::PressHooks {
@@ -912,7 +899,6 @@ mod tests {
         assert!(error.message.contains("focus denied"));
     }
 
-    #[cfg(feature = "press")]
     #[tokio::test]
     async fn injection_errors_preserve_whether_dispatch_started() {
         for started in [false, true] {
@@ -940,7 +926,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "press")]
     #[tokio::test]
     async fn default_window_requires_host_hooks() {
         let error = dispatch(
@@ -1016,6 +1001,30 @@ mod tests {
     fn test_build_bridge_call_no_params() {
         let script = build_bridge_call("snapshot", None).expect("build_bridge_call");
         assert_eq!(script, "window.__HASGARD__.snapshot({})");
+    }
+
+    #[tokio::test]
+    async fn action_hook_preserves_window_scope_and_does_not_fall_back_on_failure() {
+        let engine = EvalEngine::new();
+        *engine.action.lock().expect("action hook") = Some(std::sync::Arc::new(|window, method, params| {
+            assert_eq!(window, Some("second"));
+            assert_eq!(method, "click");
+            assert!(params.get("window").is_none());
+            assert_eq!(params["selector"], "#covered");
+            Err("intercepts pointer events".into())
+        }));
+        let eval: EvalFn = std::sync::Arc::new(|_, _, _| panic!("Must not substitute a synthetic DOM click"));
+        let result = dispatch(
+            "click",
+            Some(&json!({"window":"second", "selector":"#covered"})),
+            &engine,
+            Some(&eval),
+            None,
+            None,
+            &Recorder::new(),
+        )
+        .await;
+        assert!(result.expect_err("covered click fails").message.contains("intercepts pointer events"));
     }
 
     #[tokio::test]

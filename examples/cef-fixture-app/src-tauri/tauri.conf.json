@@ -3,7 +3,7 @@
   "productName": "Hasgard CEF Fixture",
   "version": "0.1.0",
   "identifier": "dev.nyssance.hasgard-cef-fixture",
-  "build": { "frontendDist": "../ui" },
+  "build": { "frontendDist": "../ui", "beforeBuildCommand": "bun run --cwd ../../packages/executor build" },
   "app": {
     "withGlobalTauri": true,
     "windows": [
@@ -18,5 +18,5 @@
       }
     ]
   },
-  "bundle": { "active": true, "targets": ["app"] }
+  "bundle": { "active": true, "targets": ["app"], "externalBin": ["../../../target/hasgard-playwright"] }
 }
