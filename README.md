@@ -65,8 +65,8 @@ The plugin is active in every build that registers it, release builds included. 
 Start your app, then run one command. Nothing else to install:
 
 ```sh
-claude mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp   # Claude Code
-codex mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp    # Codex
+claude mcp add tauri-hasgard -- npx -y tauri-hasgard mcp   # Claude Code
+codex mcp add tauri-hasgard -- npx -y tauri-hasgard mcp    # Codex
 ```
 
 An app that hosts its own agent can serve the same tools in process or over ACP, with no setup for its users. See the [MCP guide](docs/mcp.md).
@@ -77,7 +77,7 @@ An app that hosts its own agent can serve the same tools in process or over ACP,
 brew install nyssance/tap/tauri-hasgard        # macOS Apple Silicon
 scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
 scoop install nyssance/tauri-hasgard           # Windows x64
-npm install -g @nyssance/tauri-hasgard-cli     # any of the three platforms
+npm install -g tauri-hasgard                   # any of the three platforms
 cargo install tauri-hasgard-cli                # anywhere with Rust
 ```
 

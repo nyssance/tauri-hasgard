@@ -81,6 +81,16 @@ test("CLI preserves native press completion and structured failure data", async 
   }
 })
 
+test("in-process MCP server calls the plugin without the endpoint or the CLI", async ({ window }) => {
+  // The fixture command serves Automation::mcp_server over an in-memory pipe inside the app.
+  const title = await window.invoke<ToolResult>("fixture_mcp_tool", { name: "hasgard.title", window: "settings" })
+  expect(title.isError).toBe(false)
+  expect(title.structuredContent.result).toBe("Settings")
+  const missing = await window.invoke<ToolResult>("fixture_mcp_tool", { name: "hasgard.title", window: "absent" })
+  expect(missing.isError).toBe(true)
+  expect(missing.structuredContent.rpcError).toBeDefined()
+})
+
 test("MCP stdio drives the same native app and preserves RPC error details", async ({ window }, testInfo) => {
   test.skip(process.platform !== "darwin", "Native keyboard integration")
   const child = spawn(cli, ["--socket", fixtureEndpoint(testInfo.workerIndex), "--window", "main", "mcp"])

@@ -15,8 +15,8 @@ Tools are named `hasgard.<command>`, for example `hasgard.snapshot`, and each ta
 Start your app, then register the server. `npx` downloads the binary for your platform on first use:
 
 ```sh
-claude mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp   # Claude Code
-codex mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp    # Codex
+claude mcp add tauri-hasgard -- npx -y tauri-hasgard mcp   # Claude Code
+codex mcp add tauri-hasgard -- npx -y tauri-hasgard mcp    # Codex
 ```
 
 With the CLI [installed](../README.md#install-the-cli), `tauri-hasgard mcp` is the same server without the `npx` startup cost.
@@ -26,7 +26,7 @@ Or write the configuration by hand. `.mcp.json` in the project, for Claude Code 
 ```json
 {
   "mcpServers": {
-    "tauri-hasgard": { "command": "npx", "args": ["-y", "@nyssance/tauri-hasgard-cli", "mcp"] }
+    "tauri-hasgard": { "command": "npx", "args": ["-y", "tauri-hasgard", "mcp"] }
   }
 }
 ```
@@ -36,7 +36,7 @@ Or write the configuration by hand. `.mcp.json` in the project, for Claude Code 
 ```toml
 [mcp_servers.tauri-hasgard]
 command = "npx"
-args = ["-y", "@nyssance/tauri-hasgard-cli", "mcp"]
+args = ["-y", "tauri-hasgard", "mcp"]
 ```
 
 - The server attaches to the running app and does not start it.
@@ -84,5 +84,5 @@ MCP over ACP is a [draft](https://agentclientprotocol.com/rfds/mcp-over-acp) beh
 
 `eval`, `ipc` and `drop` run arbitrary code or commands in the application, so they are hidden by default.
 
-- stdio: set `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1` in the server's environment, for example `codex mcp add tauri-hasgard --env TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1 -- npx -y @nyssance/tauri-hasgard-cli mcp`, or `-e` for `claude mcp add`.
+- stdio: set `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1` in the server's environment, for example `codex mcp add tauri-hasgard --env TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1 -- npx -y tauri-hasgard mcp`, or `-e` for `claude mcp add`.
 - In process: `server.with_dangerous_tools(true)`.

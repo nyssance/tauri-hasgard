@@ -4,7 +4,7 @@ The [Tauri Hasgard](https://github.com/nyssance/tauri-hasgard) tools as an MCP s
 
 Most users do not need this crate directly:
 
-- To connect Claude Code or Codex, run `npx -y @nyssance/tauri-hasgard-cli mcp`.
+- To connect Claude Code or Codex, run `npx -y tauri-hasgard mcp`.
 - To serve the tools from a Tauri app, enable the `mcp` feature of `tauri-plugin-hasgard` and call `Automation::mcp_server`.
 
 Use it directly to reach an application another way:

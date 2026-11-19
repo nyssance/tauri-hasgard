@@ -7,10 +7,9 @@
     reason = "shared with the tauri-hasgard CLI; not a stable API"
 )]
 
-use std::{
-    fmt::Write as _,
-    path::{Path, PathBuf},
-};
+#[cfg(unix)]
+use std::path::Path;
+use std::{fmt::Write as _, path::PathBuf};
 
 use anyhow::{Context, Result};
 use base64::Engine;

@@ -15,3 +15,10 @@ if (workspaceVersion !== version) {
 if (npmPackage.version !== version) {
   throw new Error(`npm package version ${npmPackage.version} does not match tag ${tag}`)
 }
+const server = JSON.parse(readFileSync(new URL("../server.json", import.meta.url), "utf8"))
+for (const [field, value] of [
+  ["version", server.version],
+  ["packages[0].version", server.packages[0].version]
+]) {
+  if (value !== version) throw new Error(`server.json ${field} ${value} does not match tag ${tag}`)
+}

@@ -6,7 +6,6 @@ use base64::Engine;
 use clap::Parser;
 use serde_json::{Value, json};
 use std::io::IsTerminal;
-#[cfg(unix)]
 use std::path::PathBuf;
 use std::time::Duration;
 

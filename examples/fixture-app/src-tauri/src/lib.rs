@@ -26,6 +26,28 @@ fn fixture_shortcut(app: tauri::AppHandle, action: String) -> Result<u32, String
     Ok(SHORTCUT_COUNT.load(Ordering::SeqCst))
 }
 
+/// Call one Hasgard tool through the plugin's in-process MCP server: no endpoint, no CLI.
+#[cfg(feature = "hasgard-testing")]
+#[tauri::command]
+async fn fixture_mcp_tool(app: tauri::AppHandle, name: String, window: String) -> Result<serde_json::Value, String> {
+    use rmcp::{ServiceExt, model::CallToolRequestParams};
+    let automation = app.state::<tauri_plugin_hasgard::Automation>().inner().clone();
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let server = tauri::async_runtime::spawn(async move {
+        let service = automation.mcp_server(None).serve(server_io).await.map_err(|error| error.to_string())?;
+        service.waiting().await.map_err(|error| error.to_string())
+    });
+    let client = ().serve(client_io).await.map_err(|error| error.to_string())?;
+    let arguments = serde_json::Map::from_iter([("window".to_owned(), serde_json::Value::String(window))]);
+    let result = client
+        .call_tool(CallToolRequestParams::new(name).with_arguments(arguments))
+        .await
+        .map_err(|error| error.to_string())?;
+    client.cancel().await.map_err(|error| error.to_string())?;
+    server.await.map_err(|error| error.to_string())??;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn fixture_process_id() -> u32 {
     std::process::id()
@@ -73,9 +95,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![open_settings, fixture_process_id]);
 
+    #[cfg(all(not(target_os = "macos"), feature = "hasgard-testing"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![open_settings, fixture_process_id, fixture_mcp_tool]);
+
     #[cfg(all(target_os = "macos", feature = "hasgard-testing"))]
     let builder = builder
-        .invoke_handler(tauri::generate_handler![open_settings, fixture_process_id, fixture_shortcut])
+        .invoke_handler(tauri::generate_handler![open_settings, fixture_process_id, fixture_shortcut, fixture_mcp_tool])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
     #[cfg(feature = "hasgard-testing")]

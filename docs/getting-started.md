@@ -37,8 +37,8 @@ A target is a ref from the latest snapshot or a CSS selector. Refs are invalid a
 ## 4. Hand it to an AI client
 
 ```sh
-claude mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp   # Claude Code
-codex mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp    # Codex
+claude mcp add tauri-hasgard -- npx -y tauri-hasgard mcp   # Claude Code
+codex mcp add tauri-hasgard -- npx -y tauri-hasgard mcp    # Codex
 ```
 
 Configuration files, options, and serving the tools from inside your app or over ACP are in the [MCP guide](mcp.md).

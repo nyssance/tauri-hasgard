@@ -16,8 +16,8 @@
 6. For a crate or npm package added later, the registry accepts trusted publishing only for a name that
    already exists. Publish the crate once by hand with `cargo publish -p <crate>`, and create each npm
    package once by publishing a placeholder version under a non-`latest` tag, then add this workflow
-   as its trusted publisher. This applies to `tauri-hasgard-mcp`, `@nyssance/tauri-hasgard-cli` and its
-   three platform packages (`-darwin-arm64`, `-win32-x64`, `-linux-x64`).
+   as its trusted publisher. This applies to `tauri-hasgard-mcp`, the npm launcher `tauri-hasgard` and the
+   three platform packages `@nyssance/tauri-hasgard-cli-{darwin-arm64,win32-x64,linux-x64}`.
 
 ## Release
 
@@ -25,6 +25,7 @@ Keep these three versions identical:
 
 - `[workspace.package].version` in `Cargo.toml`.
 - `version` in `packages/playwright/package.json`.
+- `version` and `packages[0].version` in `server.json`, the MCP Registry entry.
 - Git tag without its `v` prefix.
 
 The root `package.json` is `private: true` and is not published, so its version
@@ -59,7 +60,8 @@ The release workflow validates the version, tests the workspace, publishes the t
 (`tauri-hasgard-mcp` first, since the others depend on it) and the Playwright npm package, builds three CLI archives (macOS Apple Silicon, Windows x64, Linux x64), creates checksums and GitHub provenance attestations, creates
 the GitHub Release, then updates the Homebrew Tap and Scoop Bucket with a short-lived GitHub App
 installation token. It then assembles the CLI npm packages from those archives with
-`scripts/build-cli-npm.mjs` and publishes the three platform packages before the launcher. Every CLI archive and the npm package include `LICENSE` and `NOTICE.md`.
+`scripts/build-cli-npm.mjs` and publishes the three platform packages before the launcher, and for a stable release registers
+`server.json` with the MCP Registry through GitHub OIDC. Every CLI archive and the npm package include `LICENSE` and `NOTICE.md`.
 
 ## User installation
 
@@ -72,7 +74,7 @@ scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
 scoop install nyssance/tauri-hasgard
 
 # npm, with a prebuilt binary
-npm install -g @nyssance/tauri-hasgard-cli
+npm install -g tauri-hasgard
 
 # Any Rust toolchain
 cargo install tauri-hasgard-cli

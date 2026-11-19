@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.nyssance/tauri-hasgard",
+  "title": "Tauri Hasgard",
+  "description": "Inspect and drive a running Tauri app's native webviews: snapshot, click, type, screenshot.",
+  "repository": {
+    "url": "https://github.com/nyssance/tauri-hasgard",
+    "source": "github"
+  },
+  "version": "0.7.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "tauri-hasgard",
+      "version": "0.7.0",
+      "transport": { "type": "stdio" },
+      "packageArguments": [{ "type": "positional", "value": "mcp" }],
+      "environmentVariables": [
+        {
+          "name": "TAURI_HASGARD_SOCKET",
+          "description": "Endpoint of the application to drive. Unset, the running application is discovered.",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "TAURI_HASGARD_WINDOW",
+          "description": "Window label used by tool calls that name none.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS",
+          "description": "Set to true to expose the eval, ipc and drop tools, which run code or commands in the app.",
+          "isRequired": false,
+          "format": "boolean"
+        }
+      ]
+    }
+  ]
+}

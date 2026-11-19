@@ -1,7 +1,17 @@
 // Assemble the npm packages for the CLI from the release archives:
 // one package per platform holding the binary, and a launcher that depends on them.
 import { spawnSync } from "node:child_process"
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -10,7 +20,9 @@ if (!tag || !dist || !out) throw new Error("usage: build-cli-npm.mjs <tag> <arch
 if (!/^v\d+\.\d+\.\d+(?:-alpha\.[1-9]\d*)?$/.test(tag)) throw new Error(`invalid release tag: ${tag}`)
 const version = tag.slice(1)
 const root = resolve(import.meta.dirname, "..")
-const scope = "@nyssance/tauri-hasgard-cli"
+const launcher = "tauri-hasgard"
+const platformPrefix = "@nyssance/tauri-hasgard-cli"
+const mcpName = JSON.parse(readFileSync(join(root, "server.json"), "utf8")).name
 const targets = [
   { triple: "aarch64-apple-darwin", os: "darwin", cpu: "arm64", archive: "tar.gz", binary: "tauri-hasgard" },
   { triple: "x86_64-unknown-linux-gnu", os: "linux", cpu: "x64", archive: "tar.gz", binary: "tauri-hasgard" },
@@ -42,7 +54,7 @@ try {
         : spawnSync("tar", ["-xzf", archive, "-C", scratch], { stdio: "inherit" })
     if (extract.error) throw extract.error
     if (extract.status !== 0) throw new Error(`cannot extract ${archive}`)
-    const name = `${scope}-${target.os}-${target.cpu}`
+    const name = `${platformPrefix}-${target.os}-${target.cpu}`
     const directory = join(out, `${target.os}-${target.cpu}`)
     mkdirSync(join(directory, "bin"), { recursive: true })
     cpSync(join(scratch, stem, target.binary), join(directory, "bin", target.binary))
@@ -56,7 +68,7 @@ try {
         cpu: [target.cpu],
         files: ["bin", "LICENSE", "NOTICE.md"]
       },
-      `# ${name}\n\nThe \`tauri-hasgard\` binary for ${target.os} ${target.cpu}. Install [\`${scope}\`](https://www.npmjs.com/package/${scope}) instead; it selects this package.\n`
+      `# ${name}\n\nThe \`tauri-hasgard\` binary for ${target.os} ${target.cpu}. Install [\`${launcher}\`](https://www.npmjs.com/package/${launcher}) instead; it selects this package.\n`
     )
     optionalDependencies[name] = version
   }
@@ -67,7 +79,9 @@ try {
   write(
     directory,
     {
-      name: scope,
+      name: launcher,
+      // The MCP Registry verifies package ownership through this field.
+      mcpName,
       description: "CLI and MCP server for Tauri Hasgard automation",
       keywords: ["tauri", "mcp", "cli", "testing", "automation"],
       type: "module",
@@ -76,7 +90,7 @@ try {
       engines: { node: ">=20" },
       optionalDependencies
     },
-    `# ${scope}\n\nThe [\`tauri-hasgard\`](https://github.com/nyssance/tauri-hasgard) CLI and MCP server as a prebuilt binary for macOS Apple Silicon, Windows x64 and Linux x64.\n\n\`\`\`sh\nclaude mcp add tauri-hasgard -- npx -y ${scope} mcp   # Claude Code\ncodex mcp add tauri-hasgard -- npx -y ${scope} mcp    # Codex\nnpx -y ${scope} windows                               # any CLI command\n\`\`\`\n\nThe application must register [\`tauri-plugin-hasgard\`](https://crates.io/crates/tauri-plugin-hasgard). Other platforms: \`cargo install tauri-hasgard-cli\`.\n`
+    `# ${launcher}\n\nThe [Tauri Hasgard](https://github.com/nyssance/tauri-hasgard) CLI and MCP server as a prebuilt binary for macOS Apple Silicon, Windows x64 and Linux x64.\n\n\`\`\`sh\nclaude mcp add tauri-hasgard -- npx -y ${launcher} mcp   # Claude Code\ncodex mcp add tauri-hasgard -- npx -y ${launcher} mcp    # Codex\nnpx -y ${launcher} windows                               # any CLI command\n\`\`\`\n\nThe application must register [\`tauri-plugin-hasgard\`](https://crates.io/crates/tauri-plugin-hasgard). Other platforms: \`cargo install tauri-hasgard-cli\`.\n`
   )
 } finally {
   rmSync(scratch, { recursive: true, force: true })
