@@ -141,6 +141,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
@@ -258,7 +259,15 @@ jobs:
             "$archive"
           tar xzf "$archive" mcp-publisher
       - run: ./mcp-publisher login github-oidc
-      - run: ./mcp-publisher publish
+      # The registry looks the version up on npm, where a new release takes a moment to appear.
+      - name: Publish to the MCP Registry
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if ./mcp-publisher publish; then exit 0; fi
+            echo "attempt $attempt failed; retrying in 30 seconds"
+            sleep 30
+          done
+          exit 1
 
   package-managers:
     if: ${{ !contains(github.ref_name, '-') }}
