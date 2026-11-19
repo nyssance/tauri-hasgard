@@ -135,7 +135,10 @@ test("snapshot uses associated label text as a form control accessible name", ()
 
 test("snapshot excludes inert, hidden and accessibility-hidden subtrees", () => {
   const panes = ["inert", "hidden", "aria-hidden"].map((attribute) =>
-    makeEl("section", { attrs: { [attribute]: attribute === "aria-hidden" ? "true" : "" }, children: [makeEl("button", { text: "inactive" })] })
+    makeEl("section", {
+      attrs: { [attribute]: attribute === "aria-hidden" ? "true" : "" },
+      children: [makeEl("button", { text: "inactive" })]
+    })
   )
   const hasgard = loadBridge(makeEl("body", { children: [...panes, makeEl("button", { text: "active" })] }))
   const elements = hasgard.snapshot().elements

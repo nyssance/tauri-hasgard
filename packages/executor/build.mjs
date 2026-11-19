@@ -13,10 +13,19 @@ const root = fileURLToPath(new URL("../../", import.meta.url))
 const suffix = process.platform === "win32" ? ".exe" : ""
 const output = resolve(root, `target/hasgard-playwright${suffix}`)
 mkdirSync(resolve(root, "target"), { recursive: true })
-const bundled = Bun.spawn([
-  process.execPath, "build", fileURLToPath(new URL("src/host-worker.mjs", import.meta.url)),
-  "--target", "bun", "--minify", "--outfile", resolve(root, "crates/tauri-plugin-hasgard/js/playwright-worker.mjs")
-], { stdout: "inherit", stderr: "inherit" })
+const bundled = Bun.spawn(
+  [
+    process.execPath,
+    "build",
+    fileURLToPath(new URL("src/host-worker.mjs", import.meta.url)),
+    "--target",
+    "bun",
+    "--minify",
+    "--outfile",
+    resolve(root, "crates/tauri-plugin-hasgard/js/playwright-worker.mjs")
+  ],
+  { stdout: "inherit", stderr: "inherit" }
+)
 if ((await bundled.exited) !== 0) throw Error("Executor module build failed")
 const child = Bun.spawn(
   [

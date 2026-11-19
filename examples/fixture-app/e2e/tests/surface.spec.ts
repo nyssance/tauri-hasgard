@@ -497,7 +497,7 @@ test("position presses a point inside the element, not its centre", async ({ win
   const pad = window.locator("#hit-pad")
   const hit = async (): Promise<[number, number]> => {
     const [x, y] = (await window.locator("#hit-log").textContent()).split(",").map(Number)
-    return [x as number, y as number]
+    return [x, y]
   }
   // One pixel of slack: an element's box lands on fractional coordinates, and
   // the platform rounds the event's own clientX/clientY independently, so an

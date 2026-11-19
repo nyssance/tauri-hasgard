@@ -1091,7 +1091,7 @@ export class HasgardLocator {
 
   async getAttribute(name: string): Promise<string | null> {
     const attributes = await this.attributes()
-    return Object.hasOwn(attributes, name) ? attributes[name]! : null
+    return Object.hasOwn(attributes, name) ? attributes[name] : null
   }
 
   /** Drag this element onto another one in the same window. */
@@ -1252,7 +1252,7 @@ export class HasgardLocator {
     if (elements.length !== 1) {
       throw new Error(`Locator resolved to ${elements.length} elements; expected exactly one`)
     }
-    return byRef(elements[0]!.ref)
+    return byRef(elements[0].ref)
   }
 
   /**
