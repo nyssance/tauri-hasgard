@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { delimiter, dirname, join, resolve } from "node:path"
 
 if (!["darwin", "win32"].includes(process.platform)) throw new Error("Native Rust validation requires macOS or Windows")
@@ -35,22 +35,7 @@ if (process.platform === "darwin") {
     throw new Error(`Expected one CEF framework in ${env.CEF_PATH}, found ${matching.length} matching ${cefVersion}`)
   env.DYLD_FRAMEWORK_PATH = dirname(matching[0])
 } else {
-  // Test executables need libcef.dll on PATH. cef-dll-sys copies it beside target/debug, but a
-  // restored build cache skips that build script and the cache does not keep the copy.
-  const targetDebug = resolve(process.env.CARGO_TARGET_DIR ?? "target", "debug")
-  const runtimes = []
-  function locate(path, depth) {
-    for (const entry of readdirSync(path, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name === "libcef.dll") runtimes.push(path)
-      else if (entry.isDirectory() && depth > 0) locate(join(path, entry.name), depth - 1)
-    }
-  }
-  for (const [path, depth] of [
-    [targetDebug, 0],
-    [env.CEF_PATH, 3]
-  ])
-    if (existsSync(path)) locate(path, depth)
-  if (runtimes.length === 0) throw new Error(`libcef.dll is in neither ${targetDebug} nor ${env.CEF_PATH}`)
-  env.PATH = [...runtimes, process.env.PATH].join(delimiter)
+  // cef-dll-sys copies runtime DLLs beside target/debug, not test executables in deps.
+  env.PATH = resolve(process.env.CARGO_TARGET_DIR ?? "target", "debug") + delimiter + process.env.PATH
 }
 run(["test", "--workspace", "--all-features", "--locked"])
