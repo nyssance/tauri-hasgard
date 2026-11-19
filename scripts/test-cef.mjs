@@ -130,7 +130,16 @@ try {
   assert.equal(await evaluate("guest", "document.body.scrollHeight > 1500"), true)
   assert.equal(await evaluate("second", "document.body.scrollHeight < 1500"), true)
   pass("remote guest requires no Tauri IPC; unequal document heights")
-  await assert.rejects(rpc("console.getLogs", {}, "guest"), /not implemented/)
+  // Written while the page loaded, before any automation request reached this webview.
+  // CDP replays such messages without object previews, so the object is its description.
+  const loaded = await rpc("console.getLogs", {}, "guest")
+  assert.deepEqual(
+    loaded.map(({ level, args }) => ({ level, args })),
+    [{ level: "warn", args: ["guest loaded", "Object"] }]
+  )
+  assert.match(loaded[0].source, /guest\.html:\d+:\d+$/)
+  assert.deepEqual(await rpc("console.getLogs", {}, "second"), [])
+  await assert.rejects(rpc("network.getRequests", {}, "guest"), /not implemented/)
   await assert.rejects(rpc("ipc", { command: "close_guest" }, "guest"), /unavailable|not allowed|denied/i)
   const escaped = '";throw new Error("injected");//\n中文'
   assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: escaped } }, "main"), `main:${escaped}`)
@@ -166,6 +175,29 @@ try {
     async () => (await evaluate("guest", 'document.querySelector("#trusted-result").textContent')) === "true",
     "Trusted click on #trusted"
   )
+  // Attaching the Playwright executor re-enables the Runtime domain, which replays old messages.
+  const clicked = await rpc("console.getLogs", {}, "guest")
+  assert.deepEqual(
+    clicked.map(({ id, level, args }) => ({ id, level, args })),
+    [
+      { id: 1, level: "warn", args: ["guest loaded", "Object"] },
+      { id: 2, level: "log", args: ["trusted click", { trusted: true }] }
+    ]
+  )
+  assert.deepEqual(
+    (await rpc("console.getLogs", { level: "log" }, "guest")).map(({ id }) => id),
+    [2]
+  )
+  assert.deepEqual(
+    (await rpc("console.getLogs", { sinceId: 1 }, "guest")).map(({ id }) => id),
+    [2]
+  )
+  assert.deepEqual(await rpc("console.clear", {}, "guest"), { cleared: true })
+  assert.deepEqual(await rpc("console.getLogs", {}, "guest"), [])
+  await rpc("click", { selector: "#trusted" }, "guest")
+  await until(async () => (await rpc("console.getLogs", {}, "guest")).length === 1, "Console after clear")
+  assert.deepEqual((await rpc("console.getLogs", {}, "guest"))[0].args, ["trusted click", { trusted: true }])
+  pass("CEF console: load-time output, live object previews, replay without duplicates, filters, clear and isolation")
   await rpc("fill", { selector: "#editor", value: "Replacement draft" }, "guest")
   assert.equal(await evaluate("guest", 'document.querySelector("#editor").textContent'), "Replacement draft")
   await rpc("check", { selector: "#checked", checked: true }, "guest")

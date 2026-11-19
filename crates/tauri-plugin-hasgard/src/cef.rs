@@ -15,6 +15,8 @@ type View = tauri::Webview<DynRuntime>;
 type Reply = mpsc::SyncSender<Result<Value, String>>;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const WORLD: &str = "tauri-hasgard";
+/// Same bound as the page bridge keeps on Wry.
+const MAX_LOGS: usize = 500;
 
 #[derive(Clone)]
 struct ExecutionContext {
@@ -32,6 +34,114 @@ struct Client {
     executor_pending: Mutex<HashMap<i32, (Value, bool)>>,
     action_order: Mutex<()>,
     revoked: Mutex<bool>,
+    console: Mutex<ConsoleLog>,
+}
+
+/// Main-world console output, collected from `Runtime.consoleAPICalled`.
+#[derive(Default)]
+struct ConsoleLog {
+    entries: std::collections::VecDeque<(String, Value)>,
+    sequence: u64,
+    /// Entries at or before this CDP timestamp were cleared; `Runtime.enable` replays them.
+    cleared: f64,
+}
+
+/// A console argument as data. Objects arrive as remote handles; their CDP preview gives
+/// one level of own properties, and anything deeper is reported by its description.
+fn console_argument(arg: &Value) -> Value {
+    if let Some(value) = arg.get("value") {
+        return value.clone();
+    }
+    let Some(properties) = arg["preview"]["properties"].as_array() else {
+        return arg["unserializableValue"]
+            .as_str()
+            .or(arg["description"].as_str())
+            .map_or(Value::Null, |text| json!(text));
+    };
+    let value = |property: &Value| {
+        let text = property["value"].as_str().unwrap_or_default();
+        match property["type"].as_str() {
+            Some("number") => {
+                text.parse::<f64>().ok().and_then(serde_json::Number::from_f64).map_or(json!(text), Value::Number)
+            }
+            Some("boolean") => json!(text == "true"),
+            Some("undefined") => Value::Null,
+            Some("object") if property["subtype"] == "null" => Value::Null,
+            _ => json!(text),
+        }
+    };
+    if arg["subtype"] == "array" {
+        Value::Array(properties.iter().map(value).collect())
+    } else {
+        Value::Object(
+            properties
+                .iter()
+                .map(|property| (property["name"].as_str().unwrap_or_default().to_owned(), value(property)))
+                .collect(),
+        )
+    }
+}
+
+impl ConsoleLog {
+    fn record(&mut self, event: &Value) {
+        let level = match event["type"].as_str() {
+            Some("log") => "log",
+            Some("warning") => "warn",
+            Some("error") => "error",
+            Some("info") => "info",
+            _ => return,
+        };
+        let timestamp = event["timestamp"].as_f64().unwrap_or_default();
+        // Enabling the Runtime domain again replays buffered messages under new context and
+        // object identifiers; the timestamp, call site and rendered arguments identify a message.
+        let descriptions: Vec<_> =
+            event["args"].as_array().into_iter().flatten().map(|arg| (&arg["value"], &arg["description"])).collect();
+        let raw = json!([timestamp, event["type"], descriptions, event["stackTrace"]["callFrames"]]).to_string();
+        if timestamp <= self.cleared || self.entries.iter().any(|(seen, _)| *seen == raw) {
+            return;
+        }
+        let args: Vec<Value> =
+            event["args"].as_array().map(|args| args.iter().map(console_argument).collect()).unwrap_or_default();
+        let source = event["stackTrace"]["callFrames"].get(0).map(|frame| {
+            format!(
+                "{}:{}:{}",
+                frame["url"].as_str().unwrap_or_default(),
+                frame["lineNumber"].as_u64().unwrap_or_default() + 1,
+                frame["columnNumber"].as_u64().unwrap_or_default() + 1
+            )
+        });
+        self.sequence += 1;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let entry = json!({
+            "id": self.sequence, "timestamp": timestamp as u64, "level": level, "args": args, "source": source,
+        });
+        self.entries.push_back((raw, entry));
+        if self.entries.len() > MAX_LOGS {
+            self.entries.pop_front();
+        }
+    }
+
+    fn list(&self, options: &Value) -> Value {
+        let level = options["level"].as_str();
+        let since_id = options["sinceId"].as_u64().filter(|id| *id > 0);
+        let since = options["since"].as_u64().filter(|time| *time > 0);
+        let mut result: Vec<&Value> = self
+            .entries
+            .iter()
+            .map(|(_, entry)| entry)
+            .filter(|entry| level.is_none_or(|level| entry["level"] == level))
+            .filter(|entry| match (since_id, since) {
+                (Some(id), _) => entry["id"].as_u64() > Some(id),
+                (None, Some(time)) => entry["timestamp"].as_u64() > Some(time),
+                (None, None) => true,
+            })
+            .collect();
+        if let Some(last) = options["last"].as_u64().filter(|last| *last > 0) {
+            let skip = result.len().saturating_sub(usize::try_from(last).unwrap_or(usize::MAX));
+            result.drain(..skip);
+        }
+        json!(result)
+    }
 }
 
 impl Client {
@@ -146,6 +256,16 @@ impl Client {
                                 is_default: value["context"]["auxData"]["isDefault"] == true,
                             },
                         );
+                    }
+                } else if method == "Runtime.consoleAPICalled" {
+                    if let Ok(value) = serde_json::from_slice::<Value>(&params) {
+                        // The automation bridge logs from its own isolated world; report the page only.
+                        let isolated = value["executionContextId"].as_i64().is_some_and(|id| {
+                            self.contexts.lock().expect("CDP contexts lock").get(&id).is_some_and(|c| !c.is_default)
+                        });
+                        if !isolated {
+                            self.console.lock().expect("CEF console lock").record(&value);
+                        }
                     }
                 } else if method == "Runtime.executionContextDestroyed" {
                     if let Ok(value) = serde_json::from_slice::<Value>(&params)
@@ -422,6 +542,26 @@ fn register_captures(app: &tauri::AppHandle, clients: &Arc<Clients>) {
     }
 }
 
+fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<Clients>) {
+    let console_clients = clients.clone();
+    let console_app = app.clone();
+    *engine.console.lock().expect("CEF console hook") = Some(Arc::new(move |label, method, params| {
+        let view = target(&console_app, label)?;
+        let client = console_clients.get(&view)?;
+        if method == "console.clear" {
+            // Stamp before discarding: a later Runtime.enable must not resurrect these entries.
+            let now =
+                client.call(&view, "Runtime.evaluate", &json!({"expression": "Date.now()", "returnByValue": true}))?;
+            client.call(&view, "Runtime.discardConsoleEntries", &json!({}))?;
+            let mut console = client.console.lock().expect("CEF console lock");
+            console.entries.clear();
+            console.cleared = now["result"]["value"].as_f64().ok_or("CEF clock is unavailable")?;
+            return Ok(json!({"cleared": true}));
+        }
+        Ok(client.console.lock().expect("CEF console lock").list(&params))
+    }));
+}
+
 pub(crate) fn hooks(
     app: &tauri::AppHandle, engine: EvalEngine,
 ) -> Result<(EvalFn, PressHooksRef), Box<dyn std::error::Error>> {
@@ -453,6 +593,7 @@ pub(crate) fn hooks(
         let view = target(&action_app, label)?;
         action_clients.get(&view)?.action(&view, method, params, command.lock().expect("executor command").clone())
     }));
+    register_console(app, &engine, &clients);
     let eval = eval_hook(app, engine, clients.clone());
 
     register_captures(app, &clients);
@@ -526,6 +667,55 @@ pub(crate) fn hooks(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn console_log_deduplicates_replays_filters_and_honors_clear() {
+        let event = |kind: &str, timestamp: f64, text: &str| {
+            json!({"type": kind, "timestamp": timestamp, "args": [{"type": "string", "value": text}],
+                   "stackTrace": {"callFrames": [{"url": "http://h/p.html", "lineNumber": 4, "columnNumber": 8}]}})
+        };
+        let mut log = super::ConsoleLog::default();
+        log.record(&event("warning", 10.5, "first"));
+        log.record(&event("warning", 10.5, "first"));
+        log.record(&event("log", 11.0, "second"));
+        log.record(&event("debug", 12.0, "ignored level"));
+        let all = log.list(&json!({}));
+        assert_eq!(all.as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            all[0],
+            json!({"id": 1, "timestamp": 10, "level": "warn", "args": ["first"], "source": "http://h/p.html:5:9"})
+        );
+        assert_eq!(log.list(&json!({"level": "log"}))[0]["id"], 2);
+        assert_eq!(log.list(&json!({"sinceId": 1}))[0]["id"], 2);
+        assert_eq!(log.list(&json!({"last": 1}))[0]["id"], 2);
+        log.entries.clear();
+        log.cleared = 11.0;
+        log.record(&event("log", 11.0, "second"));
+        assert_eq!(log.list(&json!({})), json!([]));
+        log.record(&event("error", 11.5, "third"));
+        assert_eq!(log.list(&json!({}))[0]["id"], 3);
+    }
+
+    #[test]
+    fn console_arguments_use_values_then_shallow_previews() {
+        assert_eq!(super::console_argument(&json!({"type": "number", "value": 3})), json!(3));
+        assert_eq!(super::console_argument(&json!({"type": "number", "unserializableValue": "NaN"})), json!("NaN"));
+        assert_eq!(
+            super::console_argument(&json!({"type": "object", "description": "Object", "preview": {"properties": [
+                {"name": "remote", "type": "boolean", "value": "true"},
+                {"name": "count", "type": "number", "value": "2"},
+                {"name": "nested", "type": "object", "value": "Object"},
+            ]}})),
+            json!({"remote": true, "count": 2.0, "nested": "Object"})
+        );
+        assert_eq!(
+            super::console_argument(&json!({"type": "object", "subtype": "array", "preview": {"properties": [
+                {"name": "0", "type": "string", "value": "a"},
+            ]}})),
+            json!(["a"])
+        );
+        assert_eq!(super::console_argument(&json!({"type": "function", "description": "f(){}"})), json!("f(){}"));
+    }
+
     use super::*;
     #[test]
     fn closing_a_host_cleans_its_children_and_exit_cleans_remaining_targets() {

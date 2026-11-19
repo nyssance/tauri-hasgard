@@ -13,7 +13,8 @@ document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML='<b
 document.querySelector('#shadow-host').shadowRoot.querySelector('button').onclick=e=>document.body.dataset.shadowTrusted=String(e.isTrusted);
 document.querySelector('#foreign-frame').src='http://localhost:'+location.port+'/guest-frame.html';
 window.addEventListener('message',e=>{if(e.source===document.querySelector('#foreign-frame').contentWindow){document.body.dataset.frameValue=e.data.frameValue;document.body.dataset.frameTrusted=String(e.data.trusted);document.body.dataset.frameShift=String(e.data.shift)}});
-document.querySelector('#trusted').onclick=e=>document.querySelector('#trusted-result').textContent=String(e.isTrusted);
+console.warn('guest loaded',{remote:true});
+document.querySelector('#trusted').onclick=e=>{console.log('trusted click',{trusted:e.isTrusted});document.querySelector('#trusted-result').textContent=String(e.isTrusted)};
 document.querySelector('#covered').onclick=()=>document.body.dataset.coveredClicked="true";
 document.querySelector('#delayed').onclick=e=>document.querySelector('#delayed-result').textContent=String(e.isTrusted);
 </script>

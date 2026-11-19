@@ -58,6 +58,8 @@ pub(crate) struct EvalEngine {
     next_id: Arc<AtomicU64>,
     pub(crate) cef: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) action: Arc<Mutex<Option<ActionFn>>>,
+    /// Console capture owned by the runtime when the page bridge cannot observe the main world.
+    pub(crate) console: Arc<Mutex<Option<ActionFn>>>,
     #[cfg(feature = "cef")]
     pub(crate) executor: Arc<Mutex<Option<crate::playwright::ExecutorCommand>>>,
     pub(crate) cancel: Arc<Mutex<Option<CancelFn>>>,
@@ -76,6 +78,7 @@ impl EvalEngine {
             next_id: Arc::new(AtomicU64::new(1)),
             cef: Arc::default(),
             action: Arc::default(),
+            console: Arc::default(),
             cancel: Arc::default(),
             cleanup: Arc::default(),
             #[cfg(feature = "cef")]

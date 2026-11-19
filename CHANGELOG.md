@@ -1,3 +1,8 @@
+# Unreleased
+
+- CEF: implement `console.getLogs` and `console.clear` from CDP console events, including output written before the first automation request. Object arguments are shallow; see `docs/cef.md`.
+- CI: build the Playwright executor before Rust tests, and poll click results in the CEF native test.
+
 # 0.6.8 (2026-11-15)
 
 - CEF: `ipc` runs through the page's own Tauri bridge in the top frame's main world and returns real command results; other automation stays in the isolated world.

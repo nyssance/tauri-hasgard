@@ -71,10 +71,17 @@ capability enforcement. Pages without that bridge fail explicitly; Hasgard does
 not grant remote guests native command access. IPC never installs the automation
 bridge in the main world or falls back to another window after navigation.
 
-This backend explicitly rejects heap snapshots, console/network
-observation, network routing and JavaScript dialog interception. Those operations
-need additional main-world/CDP integration; returning isolated-world empty logs
-would be misleading. HTML dialogs are ordinary DOM and can be inspected.
+`console.getLogs` and `console.clear` report the page's main-world console through
+CDP `Runtime.consoleAPICalled`, with the same entry shape, levels (`log`, `info`,
+`warn`, `error`), filters and 500-entry bound as Wry. Output written before the
+first automation request to a webview is included. Object arguments carry one
+level of own properties; nested values, and every object in output that predates
+the first request, are reported by their description (for example `"Object"`).
+Entries survive navigation until cleared, and each webview has its own log.
+
+This backend explicitly rejects heap snapshots, network observation, network
+routing and JavaScript dialog interception. Those operations need additional
+main-world/CDP integration; returning isolated-world empty data would be misleading. HTML dialogs are ordinary DOM and can be inspected.
 CEF-owned popups without Tauri webview labels are not currently routed.
 
 ## Screenshots and occlusion
