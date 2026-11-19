@@ -46,9 +46,13 @@ struct Routes {
     rules: Vec<Route>,
     intercepted: std::collections::VecDeque<Value>,
     sequence: u64,
-    /// Paused requests are answered from the CDP callback, which has no webview of its own.
-    view: Option<View>,
+    /// Sends a CDP command to the routed webview. Paused requests are answered from the CDP
+    /// callback, which has no webview of its own. A closure keeps this type and the event path
+    /// free of CEF symbols, so unit tests do not load the CEF runtime library.
+    send: Option<RouteSender>,
 }
+
+type RouteSender = Arc<dyn Fn(&'static str, Value) + Send + Sync>;
 
 struct Route {
     id: u64,
@@ -418,7 +422,7 @@ impl ConsoleLog {
 impl Client {
     fn stop(&self) -> Result<(), String> {
         *self.revoked.lock().expect("CEF input gate") = true;
-        self.routes.lock().expect("CEF routes lock").view = None;
+        self.routes.lock().expect("CEF routes lock").send = None;
         let stopped = self.executor.lock().expect("executor").take().map(|executor| executor.stop());
         self.executor_pending.lock().expect("executor CDP").clear();
         self.cancel("CEF control was stopped");
@@ -591,20 +595,14 @@ impl Client {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX));
-        let (view, (method, params)) = {
+        let (send, (method, params)) = {
             let mut routes = self.routes.lock().expect("CEF routes lock");
-            (routes.view.clone(), routes.answer(paused, log_id, now_ms))
+            (routes.send.clone(), routes.answer(paused, log_id, now_ms))
         };
         // This runs on the CEF thread that sending a message waits for, so answer from another
         // thread; the reply itself is not awaited.
-        if let Some(view) = view {
-            std::thread::spawn(move || {
-                if let Ok(id) = allocate_devtools_message_id()
-                    && let Ok(message) = serde_json::to_vec(&json!({"id": id, "method": method, "params": params}))
-                {
-                    let _ = view.send_dev_tools_message(&message);
-                }
-            });
+        if let Some(send) = send {
+            std::thread::spawn(move || send(method, params));
         }
     }
 
@@ -862,7 +860,18 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
             let added = client.routes.lock().expect("CEF routes lock").add(&params)?;
             let first = {
                 let mut routes = client.routes.lock().expect("CEF routes lock");
-                routes.view.replace(view.clone()).is_none()
+                let native = view.clone();
+                routes
+                    .send
+                    .replace(Arc::new(move |method, params| {
+                        if let Ok(id) = allocate_devtools_message_id()
+                            && let Ok(message) =
+                                serde_json::to_vec(&json!({"id": id, "method": method, "params": params}))
+                        {
+                            let _ = native.send_dev_tools_message(&message);
+                        }
+                    }))
+                    .is_none()
             };
             if first {
                 // Only the request kinds the Wry bridge wraps are paused; documents and assets load untouched.
@@ -871,7 +880,7 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
                 if let Err(error) = client.call(&view, "Fetch.enable", &json!({"patterns": patterns})) {
                     let mut routes = client.routes.lock().expect("CEF routes lock");
                     routes.rules.clear();
-                    routes.view = None;
+                    routes.send = None;
                     return Err(error);
                 }
             }
@@ -886,12 +895,12 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
                 let removed = routes.rules.len();
                 routes.rules.clear();
                 routes.intercepted.clear();
-                (removed, routes.view.is_some())
+                (removed, routes.send.is_some())
             };
             if enabled {
                 // Requests paused meanwhile are still answered: the view stays until interception is off.
                 client.call(&view, "Fetch.disable", &json!({}))?;
-                client.routes.lock().expect("CEF routes lock").view = None;
+                client.routes.lock().expect("CEF routes lock").send = None;
             }
             return Ok(json!({"removed": removed}));
         }
