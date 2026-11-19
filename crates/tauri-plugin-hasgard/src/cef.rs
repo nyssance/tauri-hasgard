@@ -17,6 +17,7 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const WORLD: &str = "tauri-hasgard";
 /// Same bound as the page bridge keeps on Wry.
 const MAX_LOGS: usize = 500;
+const MAX_REQUESTS: usize = 200;
 
 #[derive(Clone)]
 struct ExecutionContext {
@@ -35,6 +36,122 @@ struct Client {
     action_order: Mutex<()>,
     revoked: Mutex<bool>,
     console: Mutex<ConsoleLog>,
+    network: Mutex<NetworkLog>,
+}
+
+/// Completed `fetch` and `XMLHttpRequest` exchanges, collected from the CDP Network domain.
+#[derive(Default)]
+struct NetworkLog {
+    entries: std::collections::VecDeque<Value>,
+    /// Requests still in flight, by CDP request identifier.
+    open: HashMap<String, OpenRequest>,
+    sequence: u64,
+}
+
+struct OpenRequest {
+    wall_ms: f64,
+    started: f64,
+    method: String,
+    url: String,
+    request_size: u64,
+    status: u64,
+    content_length: Option<u64>,
+}
+
+impl NetworkLog {
+    fn record(&mut self, method: &str, event: &Value) {
+        let Some(id) = event["requestId"].as_str() else { return };
+        match method {
+            "Network.requestWillBeSent" => {
+                // The page bridge on Wry wraps fetch and XMLHttpRequest only; report the same set.
+                if !matches!(event["type"].as_str(), Some("Fetch" | "XHR")) {
+                    return;
+                }
+                let request = &event["request"];
+                // A redirect reuses the identifier; keep the original start and follow the new URL.
+                let previous = self.open.remove(id);
+                self.open.insert(
+                    id.to_owned(),
+                    OpenRequest {
+                        wall_ms: previous
+                            .as_ref()
+                            .map_or(event["wallTime"].as_f64().unwrap_or_default() * 1000.0, |open| open.wall_ms),
+                        started: previous
+                            .as_ref()
+                            .map_or(event["timestamp"].as_f64().unwrap_or_default(), |open| open.started),
+                        method: request["method"].as_str().unwrap_or_default().to_owned(),
+                        url: request["url"].as_str().unwrap_or_default().to_owned(),
+                        request_size: request["postData"].as_str().map_or(0, |body| body.len() as u64),
+                        status: 0,
+                        content_length: None,
+                    },
+                );
+            }
+            "Network.responseReceived" => {
+                if let Some(open) = self.open.get_mut(id) {
+                    let response = &event["response"];
+                    open.status = response["status"].as_u64().unwrap_or_default();
+                    open.content_length = response["headers"].as_object().and_then(|headers| {
+                        headers
+                            .iter()
+                            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                            .and_then(|(_, value)| value.as_str()?.trim().parse().ok())
+                    });
+                }
+            }
+            "Network.loadingFinished" | "Network.loadingFailed" => {
+                let Some(open) = self.open.remove(id) else { return };
+                // Once response headers arrived the page already observed that status, as a
+                // resolved fetch does on Wry; only a request without a response is a failure.
+                let failed = method == "Network.loadingFailed" && open.status == 0;
+                let elapsed = (event["timestamp"].as_f64().unwrap_or(open.started) - open.started).max(0.0) * 1000.0;
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let (timestamp, duration, transferred) = (
+                    open.wall_ms as u64,
+                    elapsed as u64,
+                    event["encodedDataLength"].as_f64().unwrap_or_default() as u64,
+                );
+                self.sequence += 1;
+                self.entries.push_back(json!({
+                    "id": self.sequence,
+                    "timestamp": timestamp,
+                    "method": open.method,
+                    "url": open.url,
+                    "status": if failed { 0 } else { open.status },
+                    "duration_ms": duration,
+                    "error": if failed { json!(event["errorText"].as_str().unwrap_or("Network error")) } else { Value::Null },
+                    "request_size": open.request_size,
+                    "response_size": if failed { 0 } else { open.content_length.unwrap_or(transferred) },
+                }));
+                if self.entries.len() > MAX_REQUESTS {
+                    self.entries.pop_front();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn list(&self, options: &Value) -> Value {
+        let filter = options["filter"].as_str().filter(|filter| !filter.is_empty());
+        let failed_only = options["failedOnly"] == true;
+        let since_id = options["sinceId"].as_u64().filter(|id| *id > 0);
+        let mut result: Vec<&Value> = self
+            .entries
+            .iter()
+            .filter(|entry| filter.is_none_or(|filter| entry["url"].as_str().is_some_and(|url| url.contains(filter))))
+            .filter(|entry| {
+                !failed_only
+                    || entry["status"].as_u64().is_some_and(|status| status >= 400 || status == 0)
+                    || !entry["error"].is_null()
+            })
+            .filter(|entry| since_id.is_none_or(|id| entry["id"].as_u64() > Some(id)))
+            .collect();
+        if let Some(last) = options["last"].as_u64().filter(|last| *last > 0) {
+            let skip = result.len().saturating_sub(usize::try_from(last).unwrap_or(usize::MAX));
+            result.drain(..skip);
+        }
+        json!(result)
+    }
 }
 
 /// Main-world console output, collected from `Runtime.consoleAPICalled`.
@@ -267,6 +384,10 @@ impl Client {
                             self.console.lock().expect("CEF console lock").record(&value);
                         }
                     }
+                } else if method.starts_with("Network.") {
+                    if let Ok(value) = serde_json::from_slice::<Value>(&params) {
+                        self.network.lock().expect("CEF network lock").record(&method, &value);
+                    }
                 } else if method == "Runtime.executionContextDestroyed" {
                     if let Ok(value) = serde_json::from_slice::<Value>(&params)
                         && let Some(id) = value["executionContextId"].as_i64()
@@ -461,6 +582,7 @@ impl Clients {
         // evaluation to a unique context; enable alone is idempotent.
         client.call(view, "Runtime.disable", &json!({}))?;
         client.call(view, "Runtime.enable", &json!({}))?;
+        client.call(view, "Network.enable", &json!({}))?;
         clients.insert(view.label().to_owned(), (browser_id, client.clone()));
         Ok(client)
     }
@@ -545,9 +667,16 @@ fn register_captures(app: &tauri::AppHandle, clients: &Arc<Clients>) {
 fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<Clients>) {
     let console_clients = clients.clone();
     let console_app = app.clone();
-    *engine.console.lock().expect("CEF console hook") = Some(Arc::new(move |label, method, params| {
+    *engine.observe.lock().expect("CEF observation hook") = Some(Arc::new(move |label, method, params| {
         let view = target(&console_app, label)?;
         let client = console_clients.get(&view)?;
+        if method == "network.getRequests" {
+            return Ok(client.network.lock().expect("CEF network lock").list(&params));
+        }
+        if method == "network.clear" {
+            client.network.lock().expect("CEF network lock").entries.clear();
+            return Ok(json!({"cleared": true}));
+        }
         if method == "console.clear" {
             // Stamp before discarding: a later Runtime.enable must not resurrect these entries.
             let now =
@@ -667,6 +796,49 @@ pub(crate) fn hooks(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn network_log_reports_fetch_and_xhr_outcomes_with_filters() {
+        let mut log = super::NetworkLog::default();
+        let sent = |id: &str, kind: &str, method: &str, url: &str, body: Option<&str>| {
+            json!({"requestId": id, "type": kind, "wallTime": 1700.5, "timestamp": 10.0,
+                   "request": {"method": method, "url": url, "postData": body}})
+        };
+        log.record("Network.requestWillBeSent", &sent("a", "Fetch", "POST", "http://h/api", Some("abcd")));
+        log.record("Network.requestWillBeSent", &sent("b", "XHR", "GET", "http://h/missing", None));
+        log.record("Network.requestWillBeSent", &sent("c", "Fetch", "GET", "http://down/", None));
+        log.record("Network.requestWillBeSent", &sent("d", "Image", "GET", "http://h/logo.png", None));
+        log.record(
+            "Network.responseReceived",
+            &json!({"requestId": "a", "response": {"status": 200, "headers": {"Content-Length": "12"}}}),
+        );
+        log.record("Network.responseReceived", &json!({"requestId": "b", "response": {"status": 404, "headers": {}}}));
+        log.record("Network.loadingFinished", &json!({"requestId": "a", "timestamp": 10.25, "encodedDataLength": 90}));
+        log.record(
+            "Network.loadingFailed",
+            &json!({"requestId": "b", "timestamp": 10.5, "errorText": "net::ERR_ABORTED"}),
+        );
+        log.record(
+            "Network.loadingFailed",
+            &json!({"requestId": "c", "timestamp": 11.0, "errorText": "net::ERR_FAILED"}),
+        );
+        log.record("Network.loadingFinished", &json!({"requestId": "d", "timestamp": 11.0, "encodedDataLength": 5}));
+        let all = log.list(&json!({}));
+        assert_eq!(
+            all[0],
+            json!({"id": 1, "timestamp": 1_700_500, "method": "POST", "url": "http://h/api", "status": 200,
+                   "duration_ms": 250, "error": null, "request_size": 4, "response_size": 12})
+        );
+        assert_eq!((&all[1]["status"], &all[1]["error"]), (&json!(404), &Value::Null));
+        assert_eq!(all[2]["status"], 0);
+        assert_eq!(all[2]["error"], "net::ERR_FAILED");
+        assert_eq!(all.as_array().map(Vec::len), Some(3));
+        assert_eq!(log.list(&json!({"failedOnly": true})).as_array().map(Vec::len), Some(2));
+        assert_eq!(log.list(&json!({"filter": "missing"}))[0]["id"], 2);
+        assert_eq!(log.list(&json!({"sinceId": 2}))[0]["id"], 3);
+        assert_eq!(log.list(&json!({"last": 1}))[0]["id"], 3);
+        assert!(log.open.is_empty());
+    }
+
     #[test]
     fn console_log_deduplicates_replays_filters_and_honors_clear() {
         let event = |kind: &str, timestamp: f64, text: &str| {

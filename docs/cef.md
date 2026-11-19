@@ -79,8 +79,17 @@ level of own properties; nested values, and every object in output that predates
 the first request, are reported by their description (for example `"Object"`).
 Entries survive navigation until cleared, and each webview has its own log.
 
-This backend explicitly rejects heap snapshots, network observation, network
-routing and JavaScript dialog interception. Those operations need additional
+`network.getRequests` and `network.clear` report completed `fetch` and
+`XMLHttpRequest` exchanges from the CDP Network domain, with the Wry entry shape,
+filters and 200-entry bound. Observation starts with the first automation request
+to a webview; earlier requests are not listed. A request whose response headers
+arrived keeps that status even if the body is then aborted; `status: 0` with an
+`error` means no response was received. `response_size` is `Content-Length`, or
+the transferred size when the header is absent. A Tauri page's own IPC calls are
+real requests to `ipc.localhost` and appear in its log.
+
+This backend explicitly rejects heap snapshots, network routing and JavaScript
+dialog interception. Those operations need additional
 main-world/CDP integration; returning isolated-world empty data would be misleading. HTML dialogs are ordinary DOM and can be inspected.
 CEF-owned popups without Tauri webview labels are not currently routed.
 

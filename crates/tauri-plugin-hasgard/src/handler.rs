@@ -118,8 +118,6 @@ pub(crate) async fn dispatch(
         && matches!(
             method,
             "heap.snapshot"
-                | "network.getRequests"
-                | "network.clear"
                 | "dialog.list"
                 | "dialog.clear"
                 | "dialog.handle"
@@ -143,7 +141,7 @@ pub(crate) async fn dispatch(
     let win = window.as_deref();
 
     let action = engine.action.lock().expect("action hook").clone();
-    let console = engine.console.lock().expect("console hook").clone();
+    let observe = engine.observe.lock().expect("observation hook").clone();
     let result = match method {
         "click" | "dblclick" | "hover" | "fill" | "type" | "check" | "select" if action.is_some() => {
             let action = action.expect("action was checked");
@@ -156,8 +154,8 @@ pub(crate) async fn dispatch(
                 .and_then(std::convert::identity)
                 .map_err(|message| RpcError { code: -32603, message, data: None })
         }
-        "console.getLogs" | "console.clear" if console.is_some() => {
-            let console = console.expect("console was checked");
+        "console.getLogs" | "console.clear" | "network.getRequests" | "network.clear" if observe.is_some() => {
+            let console = observe.expect("observation was checked");
             let method = method.to_owned();
             let params = params.cloned().unwrap_or_else(|| serde_json::json!({}));
             let label = window.clone();

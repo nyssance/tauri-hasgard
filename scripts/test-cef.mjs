@@ -70,6 +70,11 @@ async function until(check, label, ms = 20000) {
 }
 const server = createServer((req, res) => {
   const name = req.url?.split("?")[0]?.slice(1)
+  if (name === "echo") {
+    res.setHeader("Content-Type", "text/plain")
+    res.end("echoed")
+    return
+  }
   if (!["guest.html", "guest-next.html", "guest-frame.html"].includes(name)) {
     res.writeHead(404).end()
     return
@@ -139,7 +144,7 @@ try {
   )
   assert.match(loaded[0].source, /guest\.html:\d+:\d+$/)
   assert.deepEqual(await rpc("console.getLogs", {}, "second"), [])
-  await assert.rejects(rpc("network.getRequests", {}, "guest"), /not implemented/)
+  await assert.rejects(rpc("dialog.list", {}, "guest"), /not implemented/)
   await assert.rejects(rpc("ipc", { command: "close_guest" }, "guest"), /unavailable|not allowed|denied/i)
   const escaped = '";throw new Error("injected");//\n中文'
   assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: escaped } }, "main"), `main:${escaped}`)
@@ -198,6 +203,42 @@ try {
   await until(async () => (await rpc("console.getLogs", {}, "guest")).length === 1, "Console after clear")
   assert.deepEqual((await rpc("console.getLogs", {}, "guest"))[0].args, ["trusted click", { trusted: true }])
   pass("CEF console: load-time output, live object previews, replay without duplicates, filters, clear and isolation")
+  await rpc("network.clear", {}, "guest")
+  await evaluate(
+    "guest",
+    `fetch("/echo",{method:"POST",body:"abcd"});fetch("/missing");fetch("http://127.0.0.1:1/refused").catch(()=>{});
+     const x=new XMLHttpRequest();x.open("GET","/echo?xhr=1");x.send();null`
+  )
+  await until(async () => (await rpc("network.getRequests", {}, "guest")).length === 4, "CEF network requests")
+  const requests = await rpc("network.getRequests", {}, "guest")
+  const request = (part) => requests.find(({ url }) => url.includes(part))
+  assert.deepEqual(
+    (({ method, status, error, request_size, response_size }) => ({
+      method,
+      status,
+      error,
+      request_size,
+      response_size
+    }))(requests.find(({ method }) => method === "POST") ?? {}),
+    { method: "POST", status: 200, error: null, request_size: 4, response_size: 6 }
+  )
+  assert.equal(request("/missing").status, 404)
+  assert.equal(request("/refused").status, 0)
+  assert.match(request("/refused").error, /ERR_/)
+  assert.equal(request("xhr=1").method, "GET")
+  assert.ok(requests.every(({ id, timestamp, duration_ms }) => id > 0 && timestamp > 1e12 && duration_ms >= 0))
+  assert.deepEqual(
+    (await rpc("network.getRequests", { failedOnly: true }, "guest")).map(({ url }) => new URL(url).pathname).sort(),
+    ["/missing", "/refused"]
+  )
+  assert.equal((await rpc("network.getRequests", { filter: "xhr=1" }, "guest")).length, 1)
+  // Each webview keeps its own log; this one holds only its own Tauri IPC fetches.
+  assert.ok(
+    (await rpc("network.getRequests", {}, "second")).every(({ url }) => url.startsWith("http://ipc.localhost/"))
+  )
+  assert.deepEqual(await rpc("network.clear", {}, "guest"), { cleared: true })
+  assert.deepEqual(await rpc("network.getRequests", {}, "guest"), [])
+  pass("CEF network: fetch and XHR outcomes, sizes, failures, filters, clear and isolation")
   await rpc("fill", { selector: "#editor", value: "Replacement draft" }, "guest")
   assert.equal(await evaluate("guest", 'document.querySelector("#editor").textContent'), "Replacement draft")
   await rpc("check", { selector: "#checked", checked: true }, "guest")
