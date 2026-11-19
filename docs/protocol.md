@@ -1,145 +1,81 @@
-# JSON-RPC protocol
+# Protocol reference
 
-Hasgard uses JSON-RPC 2.0 over a platform-native byte stream. Every request and response is one UTF-8 JSON object followed by `\n`.
+Every Hasgard client speaks the same JSON-RPC 2.0 to the plugin. Use this page to write a client, or to look up the exact behavior of a method.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"snapshot","params":{"window":"main","interactive":true}}
 {"jsonrpc":"2.0","id":1,"result":{"elements":[]}}
 ```
 
-Response IDs are authoritative: clients must support multiple in-flight requests and may not assume response order.
+## Envelope
 
-## Envelope contract and limits
+- One UTF-8 JSON object per line, terminated by `\n`.
+- IDs are nonnegative safe integers. Responses can arrive out of order; match them by ID.
+- A response has exactly one of `result` or `error`. `result: null` is success; a missing result is a protocol error.
+- A `null` ID marks an error that could not be tied to a request. Clients surface it and fail their pending calls.
+- A request is at most **1,048,576 bytes** including the newline, base64 payloads included. Clients check the size before sending and fail locally, leaving the connection usable.
 
-`crates/tauri-plugin-hasgard/src/protocol.rs` is the canonical Rust envelope
-definition, formatted normally by `cargo fmt`. Run `bun run protocol:sync` after
-changing it or `protocol/responses.json`. The generator copies the definition
-into the CLI crate and the response vectors into both Rust crates,
-so published crates build and test without sibling workspace directories or a
-new registry dependency. `bun run protocol:check` rejects stale generated files
-in CI and before release.
+Error codes:
 
-`protocol/responses.json` exercises the same response cases in the plugin, the
-CLI transport used by MCP, and the TypeScript parser and transport. Responses
-must contain JSON-RPC version `2.0`, an ID, and exactly one of `result` or `error`.
-Explicit `result: null` is successful; an absent result is a protocol error.
-Hasgard uses nonnegative safe integer IDs. A null ID is reserved for errors that
-cannot be correlated to a request; clients surface that error instead of hiding
-it behind an ID mismatch. TypeScript rejects all pending calls for such errors.
+| Code     | Meaning                                                    |
+| -------- | ---------------------------------------------------------- |
+| `-32601` | Unknown method, or one the active backend does not support |
+| `-32602` | Invalid parameters                                         |
+| `-32603` | The operation failed                                       |
+| `-32002` | Webview not ready yet; retry until your deadline           |
 
-The protocol module's `MAX_REQUEST_BYTES` defines a **1,048,576-byte request
-limit**, including the trailing newline, and generates the TypeScript constant.
-CLI, MCP, and TypeScript requests are checked after JSON and
-UTF-8 encoding, before transmission. Base64 file payloads and other parameters
-count toward the same limit. Oversized requests fail locally with the actual
-and maximum byte counts, leaving the connection usable. This does not add
-chunked file transfer or change the server's existing limit.
+The CLI with `--json` prints `{"error":{"code":...,"message":...,"data":...}}` and exits unsuccessfully. MCP tool failures keep their `error` text and carry the original code, message and data as `rpcError` in `structuredContent`.
 
-These checks cover envelopes and the transport limit. Method-specific parameter
-and result contracts remain covered by their existing operation tests.
-The internal Tauri eval callback also requires exactly one result or error;
-its result must be JSON-encoded. Missing, conflicting, or malformed callback
-data rejects the eval instead of becoming a successful null or raw string.
+## Endpoint
 
-## Transport
+| Platform     | Transport   | Default                                   |
+| ------------ | ----------- | ----------------------------------------- |
+| macOS, Linux | Unix socket | Path derived from the Tauri app identifier |
+| Windows      | Named pipe  | Name derived from the Tauri app identifier |
 
-- macOS/Linux: private Unix socket. A managed test supplies `TAURI_HASGARD_SOCKET`; otherwise the plugin derives a path from the Tauri application identifier.
-- The native test fixtures use `TAURI_HASGARD_DISPLAY` (`secondary`, a display index from 0, or a display name) to select their display. Window placement belongs to the fixture; the plugin never moves application windows.
-- `TAURI_HASGARD_PRESS` (macOS, Wry) chooses where `press` sends its key events: `system` (the default) or `window`; any other value fails the press. See [Native keyboard completion](#native-keyboard-completion).
-- Windows: named pipe. A managed test supplies the full named-pipe path through the same environment variable.
+Environment variables:
 
-## Window routing
+| Variable                                   | Read by       | Effect                                                                                              |
+| ------------------------------------------ | ------------- | --------------------------------------------------------------------------------------------------- |
+| `TAURI_HASGARD_SOCKET`                     | app, CLI, MCP | Endpoint path or pipe name. Set the same value on both sides.                                       |
+| `TAURI_HASGARD_WINDOW`                     | CLI, MCP      | Default window label.                                                                               |
+| `TAURI_HASGARD_PRESS`                      | app           | macOS Wry: `system` (default) or `window`. See [keyboard](#native-keyboard-completion).             |
+| `TAURI_HASGARD_PLAYWRIGHT`                 | app           | CEF: absolute path of the Playwright executor during development.                                   |
+| `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS` | MCP           | `1` exposes the `eval`, `ipc` and `drop` tools, which are hidden by default.                        |
+| `TAURI_HASGARD_DISPLAY`                    | test fixtures | `secondary`, a display index from 0, or a display name. The plugin itself never moves a window.     |
 
-`params.window` is a Tauri webview label. Public Playwright APIs always send it. Low-level CLI calls without one target `main`; a missing `main` is an error.
+## Windows and targets
 
-Supplied parameters must be an object. An explicit `window` must be a non-empty
-string; invalid values never route to `main`. `wait` and `watch` accept integer
-timeouts from 0 through 2,147,483,647 milliseconds, matching JavaScript timers.
+`params.window` is a Tauri webview label. A call without one targets `main`, and a missing `main` is an error. An explicit `window` must be a non-empty string; an invalid value never falls back to `main`. `params` must be an object.
 
-## Native keyboard completion
+An element target takes one of three forms:
 
-`press` takes `key`, optional `completion`, optional `waitFor`, and an optional
-postcondition `timeout`. On macOS it activates and reveals the target window,
-restores it if minimized, and focuses the actual native WebView before posting
-OS keyboard events. Focus failure stops the operation before injection.
-Each modifier may occur only once, including aliases such as `Ctrl`/`Control`.
-Duplicate modifiers are invalid parameters, preventing an unbounded sequence of
-OS events from a single malformed gesture.
+| Target             | JSON                                   |
+| ------------------ | -------------------------------------- |
+| Snapshot reference | `{ "ref": "e12" }`                     |
+| CSS selector       | `{ "selector": "[data-testid=save]" }` |
+| Viewport point     | `{ "x": 120, "y": 80 }`                |
 
-With `TAURI_HASGARD_PRESS=window` the macOS Wry backend does not post to the
-system input layer. It builds the same key events and hands them to the target
-window on the main thread, in the order `NSApplication` uses: a Command or
-Control key-down is offered to the window's key equivalents, then to the main
-menu, and is sent to the first responder only when neither takes it. Modifier
-presses and releases are delivered as flag changes around the main key. The
-application is never activated; the target window is made key among the
-application's own windows and its text input context is made current, so typed
-text lands in that window. A run in this mode does not take keyboard focus
-from, or lose it to, whoever is using the machine. Keys are looked up on the
-current keyboard layout, and a character the layout cannot type is an error.
-System-wide shortcuts (`tauri-plugin-global-shortcut`) are registered below
-`AppKit` and are not triggered by window delivery; the held-modifier rejection
-below does not apply, since the events carry their own flags. CEF rejects
-`window`.
+## Methods
 
-The default `completion: "webview"` observes a trusted `keyup` in the target
-document or its accessible same-origin frames. The plugin serializes native
-presses across connections through this acknowledgement, so its next press
-cannot switch windows while WebKit is still processing the preceding key.
-Only keyups paired with trusted keydowns observed after registration count;
-late modifier releases from the preceding press cannot satisfy a new one.
-Both halves of each pair must arrive, including modifiers. WebKit may deliver
-the DOM keyup before its keydown; completion accepts either delivery order.
-Confirmation expires after 10 seconds. No synthetic DOM keyboard events are
-used to satisfy it. Navigation, native menu interception, or a closed document
-can prevent a DOM acknowledgement; they never silently downgrade completion.
+| Area      | Methods                                                                                              |
+| --------- | ---------------------------------------------------------------------------------------------------- |
+| App       | `ping`, `windows.list`, `state`, `url`, `title`, `navigate`, `ipc`, `eval`                           |
+| Read      | `snapshot`, `diff`, `query`, `filter`, `text`, `html`, `value`, `attrs`, `boundingBox`, `forms.dump` |
+| State     | `visible`, `count`, `checked`, `disabled`                                                            |
+| Act       | `click`, `dblclick`, `hover`, `focus`, `blur`, `fill`, `type`, `check`, `select`, `scroll`, `drag`   |
+| Input     | `press`, `wheel`, `setInputFiles`, `drop`                                                            |
+| Wait      | `wait`, `watch`                                                                                      |
+| Capture   | `screenshot`, `screenshot_native`, `heap.snapshot`, `video.start`, `video.stop`, `video.status`      |
+| Console   | `console.getLogs`, `console.clear`                                                                   |
+| Network   | `network.getRequests`, `network.clear`, `route.add`, `route.list`, `route.clear`                     |
+| Dialogs   | `dialog.list`, `dialog.handle`, `dialog.clear`                                                       |
+| Storage   | `storage.get`, `storage.set`, `storage.list`, `storage.clear`                                        |
+| Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
-Use `completion: "native"` for native menus, global shortcuts, or keys that
-navigate or close the document. This explicitly confirms OS posting only,
-not application receipt or completion. Bare modifier keys also use posting
-completion because they have no text-producing keyup. Native completion does
-not provide the default mode's protection against unfinished WebKit text edits.
-In this mode `window` constrains focus before posting, not the eventual OS
-dispatch target. Do not immediately switch windows after a window-specific
-native action without observing its application result.
-
-`waitFor` is a JavaScript expression evaluated in the target window after
-completion. The same ordering lock is retained until it becomes truthy or
-fails. Its timeout defaults to 10,000 ms and must be an integer from 0 through
-10,000; `timeout` without `waitFor` is invalid. Use a separate `wait` for longer
-application work that need not retain keyboard ownership.
-
-Errors report their phase. A postcondition or WebView-completion failure has
-`data: {phase: "postcondition" | "completion", injected: true}`. An injection
-failure may have `injected: "unknown"` because some OS events may already have
-been posted. Focus and observer-setup (`prepare`) failures report
-`injected: false`. Do not automatically
-retry a press after an uncertain or completed injection.
-
-The Rust client preserves the complete RPC error. CLI commands with `--json`
-emit `{"error":{"code":...,"message":...,"data":...}}` for plugin errors and
-still exit unsuccessfully; human-readable diagnostics remain on stderr. MCP
-tool failures retain their `error` text and include `rpcError` with the original
-code, message, and optional data in `structuredContent`.
-
-Native keys respect the active keyboard layout and input method. A keyup does
-not commit an IME composition or acknowledge arbitrary asynchronous application
-work; declare a suitable `waitFor` when that matters. Use `fill` for exact text.
-Hasgard does not switch the user's system input source. Concurrent physical
-user input is outside these ordering guarantees.
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "press",
-  "params": { "window": "main", "key": "Tab", "waitFor": "document.activeElement.id === 'save'", "timeout": 1000 }
-}
-```
+Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms. CEF differences are listed in the [CEF guide](cef.md#what-works).
 
 ## Snapshot
-
-Snapshot elements contain:
 
 ```ts
 interface SnapshotElement {
@@ -153,28 +89,76 @@ interface SnapshotElement {
 }
 ```
 
-Refs are valid until the next snapshot in that webview. The Playwright client therefore holds a per-window lock across `snapshot → unique match → action`; this sequence may not interleave with another semantic action in the same window.
+- Refs are valid until the next snapshot in that webview. The Playwright client holds a per-window lock across `snapshot → unique match → action`.
+- Role locators take a fresh snapshot, require exactly one match, then send that ref.
+- `diff` baselines are kept per window. Reference and returned snapshots must include their `elements` arrays.
 
-Implicit `diff` baselines are stored separately per window. A snapshot of
-`settings` never replaces `main`'s baseline. Reference and returned snapshots
-must include their `elements` arrays; missing data is an error.
+## Native keyboard completion
 
-On macOS, a press is rejected before injection if Shift, Control, Option, or
-Command remains held at dispatch time. Release modifiers before retrying an
-`injected: false` failure. A failure after dispatch starts remains `injected: "unknown"`; the client must not automatically resend the gesture.
+`press` takes `key`, optional `completion`, optional `waitFor` and an optional `timeout` for `waitFor`.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "press",
+  "params": { "window": "main", "key": "Tab", "waitFor": "document.activeElement.id === 'save'", "timeout": 1000 }
+}
+```
+
+### Delivery
+
+`system` (default). On macOS the plugin activates and reveals the target window, restores it if minimized, focuses the native webview, then posts OS keyboard events. A focus failure stops before anything is posted. A press is rejected if Shift, Control, Option or Command is physically held.
+
+`window` (`TAURI_HASGARD_PRESS=window`, macOS Wry only). The events go straight to the target window on the main thread and the application is never activated, so a run neither takes keyboard focus from the person using the machine nor loses it to them.
+
+- A Command or Control key-down is offered to the window's key equivalents, then the main menu, then the first responder, as `NSApplication` does.
+- The window is made key among the application's own windows, so typed text lands there.
+- Keys are looked up on the current keyboard layout; a character the layout cannot type is an error.
+- System-wide shortcuts (`tauri-plugin-global-shortcut`) are not triggered.
+- CEF rejects this mode.
+
+Each modifier may appear once, aliases included (`Ctrl`/`Control`).
+
+### Completion
+
+| `completion`        | Confirms                                                              | Use for                                                    |
+| ------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `webview` (default) | A trusted `keyup` in the target document or its same-origin frames    | Ordinary keys and text                                     |
+| `native`            | Only that the OS accepted the events                                  | Native menus, global shortcuts, keys that close a document |
+
+With `webview`:
+
+- Presses are serialized across connections until acknowledged, so the next press cannot switch windows mid-key.
+- Only keyups paired with trusted keydowns seen after registration count, modifiers included, in either delivery order.
+- Confirmation expires after 10 seconds. Navigation, a native menu or a closed document can prevent it; completion is never silently downgraded.
+
+With `native`, application receipt is not confirmed and unfinished WebKit text edits are not protected. Bare modifier keys always use it. Observe the application result before switching windows.
+
+### Postcondition
+
+`waitFor` is a JavaScript expression evaluated in the target window after completion. The ordering lock is held until it is truthy or fails. `timeout` defaults to 10,000 ms, must be an integer from 0 through 10,000, and is invalid without `waitFor`. Use a separate `wait` for longer application work.
+
+### Errors
+
+| `data.phase`       | `data.injected` | Retry                                |
+| ------------------ | --------------- | ------------------------------------ |
+| `focus`, `prepare` | `false`         | Safe once the cause is fixed         |
+| `injection`        | `"unknown"`     | Do not resend automatically          |
+| `completion`       | `true`          | Do not resend; the key was delivered |
+| `postcondition`    | `true`          | Do not resend; the key was delivered |
+
+### Limits
+
+Native keys follow the active keyboard layout and input method. A keyup does not commit an IME composition or wait for asynchronous application work; declare a `waitFor` when that matters, and use `fill` for exact text. Hasgard does not switch the system input source. Physical input from a person during a run is outside these guarantees.
 
 ## Origin binding
 
-Before automation, each webview completes an IPC handshake subject to the app's
-Tauri capabilities after the native page-load event. Each window accepts only
-its latest one-use handshake token. Navigation start and window destruction
-revoke authorization and fail pending evaluations. Hasgard binds every pending evaluation to an unpredictable token, that window and
-origin, rechecks the origin inside queued JavaScript before executing it, and
-rejects callbacks after an origin change. A callback from another window cannot
-consume the request, nor can an iframe guess a request token. Initial readiness
-returns RPC `-32002` until the handshake completes; the fixture retries only this
-explicit readiness error within its deadline. Opaque origins are rejected. The `navigate` method permits
-same-origin destinations only; external pages must not inherit automation access.
+- Each webview completes an IPC handshake after the native page-load event, subject to the app's Tauri capabilities. Until then calls return `-32002`.
+- A window accepts only its latest one-use handshake token. Navigation start and window destruction revoke it and fail pending evaluations.
+- Every evaluation is bound to an unpredictable token, its window and its origin. The origin is rechecked inside the queued JavaScript, and callbacks after an origin change are rejected. Another window cannot consume the request, and an iframe cannot guess its token.
+- Opaque origins are rejected. `navigate` allows same-origin destinations only.
+- The eval callback must carry exactly one JSON-encoded result or error; anything else rejects the evaluation.
 
 ## Native video (macOS)
 
@@ -217,3 +201,7 @@ An existing empty string is a valid value, including `expected = ""`.
 
 The `focus` action also activates the native application window and its webview
 before focusing the DOM element, so focus events work on an inactive window.
+
+## Maintaining the protocol
+
+`crates/tauri-plugin-hasgard/src/protocol.rs` is the canonical envelope definition and holds `MAX_REQUEST_BYTES`. `protocol/responses.json` holds response vectors exercised by the plugin, the CLI transport used by MCP, and the TypeScript parser. After changing either, run `bun run protocol:sync`; it copies the definition into the CLI crate and the vectors into both Rust crates so published crates build without sibling directories. `bun run protocol:check` rejects stale generated files in CI and before release.

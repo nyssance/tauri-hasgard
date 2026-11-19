@@ -1,8 +1,10 @@
-# Unreleased
+# 0.6.10 (2026-11-19)
 
 - CEF: implement `console.getLogs` and `console.clear` from CDP console events, including output written before the first automation request. Object arguments are shallow; see `docs/cef.md`.
 - CEF: implement `network.getRequests` and `network.clear` from the CDP Network domain for `fetch` and `XMLHttpRequest`.
 - CEF: implement `route.add`, `route.list` and `route.clear` through the CDP Fetch domain with the Wry rule semantics.
+- Docs: rewrite the README, walkthrough, CEF guide and protocol reference. The README leads with the MCP setup for Claude Code and Codex; the protocol reference lists every method, error code and environment variable; MCP tool naming and the `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS` gate are documented. Troubleshooting no longer claims release builds disable the plugin.
+- Versions are aligned again: 0.6.9 was published for the plugin crate only.
 - CI: build the Playwright executor before Rust tests, and poll click results in the CEF native test.
 
 # 0.6.8 (2026-11-15)

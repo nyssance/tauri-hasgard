@@ -1,46 +1,53 @@
 # Tauri Hasgard
 
-Automate a running Tauri application through its real native webviews. The CLI, MCP server, and Playwright Test fixture share one JSON-RPC plugin.
+[![crates.io](https://img.shields.io/crates/v/tauri-plugin-hasgard)](https://crates.io/crates/tauri-plugin-hasgard)
+[![npm](https://img.shields.io/npm/v/@nyssance/tauri-hasgard)](https://www.npmjs.com/package/@nyssance/tauri-hasgard)
+[![CI](https://github.com/nyssance/tauri-hasgard/actions/workflows/ci.yml/badge.svg)](https://github.com/nyssance/tauri-hasgard/actions/workflows/ci.yml)
 
-This repository supports **Tauri 3 + Wry** and an opt-in **CEF backend**. Tauri 2 projects use Hasgard 0.5.x. CLI binaries are published for macOS Apple Silicon, Windows x64, and Linux x64. Registering the plugin enables automation in debug and release builds. See [CEF setup and limits](docs/cef.md) for native child-webview automation.
+Automation for Tauri 3 applications. Hasgard drives the real native webviews of a running app, so an AI client, a terminal or a Playwright test sees and clicks what a user would.
 
-## Choose a client
+```console
+$ tauri-hasgard windows
+main       tauri://localhost                 Hasgard Fixture
+settings   tauri://localhost/settings.html   Settings
+$ tauri-hasgard --window main snapshot -i
+- textbox "Display name" [ref=e1]
+- button "Save" [ref=e2]
+- button "Open dialog" [ref=e3]
+- button "Open settings" [ref=e4]
+$ tauri-hasgard --window main click '@e2'
+```
 
-Every setup requires the Rust plugin in your application.
+| You want to                    | Use                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| Let Claude Code or Codex drive | [`tauri-hasgard mcp`](#connect-claude-code-or-codex)                      |
+| Inspect and click by hand      | [`tauri-hasgard` CLI](#use-the-cli)                                       |
+| Write E2E tests                | [`@nyssance/tauri-hasgard`](packages/playwright/README.md) for Playwright |
 
-| Task                       | Install alongside the plugin                     |
-| -------------------------- | ------------------------------------------------ |
-| Inspect and control an app | `tauri-hasgard` CLI                              |
-| Connect an AI client       | Same CLI, launched with `tauri-hasgard mcp`      |
-| Run E2E tests              | `@nyssance/tauri-hasgard` and `@playwright/test` |
+All three talk to one plugin inside your app.
 
-There is no `init` command or Hasgard project configuration file.
+|         | Supported                                   |
+| ------- | ------------------------------------------- |
+| Tauri   | 3 (Tauri 2: use Hasgard 0.5.x)              |
+| Webview | Wry by default, [CEF](docs/cef.md) opt-in   |
+| Desktop | macOS Apple Silicon, Windows x64, Linux x64 |
 
 ## Register the plugin
 
 ```sh
 cd src-tauri
-cargo add tauri-plugin-hasgard@0.6.8
-```
-
-```toml
-[dependencies]
-tauri = "3.0.0-alpha.5"
-tauri-runtime-wry = "3.0.0-alpha.5"
-tauri-plugin-hasgard = "0.6.8"
+cargo add tauri-plugin-hasgard tauri-runtime-wry@3.0.0-alpha.6
 ```
 
 ```rust
-fn run() {
-    tauri::Builder::default()
-        .runtime(tauri_runtime_wry::Wry::default())
-        .plugin(tauri_plugin_hasgard::init())
-        .run(tauri::generate_context!())
-        .expect("failed to run Tauri application");
-}
+tauri::Builder::default()
+    .runtime(tauri_runtime_wry::Wry::default())
+    .plugin(tauri_plugin_hasgard::init())
+    .run(tauri::generate_context!())
+    .expect("failed to run Tauri application");
 ```
 
-Add `hasgard:default` to the existing permissions in `src-tauri/capabilities/default.json`, covering every window under test. Keep your other permissions; this is only the Hasgard fragment:
+Add `hasgard:default` to a capability that covers every window you automate, for example `src-tauri/capabilities/default.json`:
 
 ```json
 {
@@ -49,19 +56,66 @@ Add `hasgard:default` to the existing permissions in `src-tauri/capabilities/def
 }
 ```
 
-`hasgard:default` grants only the internal `callback` and `__callback` commands used to return WebView evaluation results. Without it, the native server can accept connections, but evaluation, locators, screenshots, and Playwright assertions fail with `hasgard.__callback not allowed`.
+Without that permission the client connects but every read fails with `hasgard.__callback not allowed`.
 
-When registered, the plugin creates an application-scoped Unix socket or Windows named pipe and injects the Hasgard bridge into each webview.
+The plugin is active in every build that registers it, release builds included. Gate the `.plugin(...)` call yourself if shipped builds must not expose automation.
 
-## Start here
+## Install the CLI
 
-- [CLI and MCP tutorial](docs/getting-started.md): start the app, inspect a window, click, and capture a screenshot.
-- [Playwright tutorial](packages/playwright/README.md): configure, launch, and test your app.
-- [Troubleshooting](docs/troubleshooting.md): connection, permissions, readiness, and keyboard input.
-- [Contributing](CONTRIBUTING.md): run the repository's example and checks.
-- [Architecture](docs/architecture.md) · [Protocol reference](docs/protocol.md) · [Changelog](CHANGELOG.md)
+```sh
+brew install nyssance/tap/tauri-hasgard        # macOS Apple Silicon
+scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
+scoop install nyssance/tauri-hasgard           # Windows x64
+cargo install tauri-hasgard-cli                # anywhere with Rust
+```
 
-Hasgard exposes `HasgardApplication → HasgardWindow → HasgardLocator`, not a Playwright `Page`. Tests drive the native app; there is no mocked browser mode. For frontend-only browser tests, use stock Playwright against your dev server.
+Prebuilt archives for macOS Apple Silicon, Windows x64 and Linux x64 are on each [release](https://github.com/nyssance/tauri-hasgard/releases).
+
+## Connect Claude Code or Codex
+
+Start your app, then:
+
+```sh
+claude mcp add tauri-hasgard -- tauri-hasgard mcp   # Claude Code
+codex mcp add tauri-hasgard -- tauri-hasgard mcp    # Codex
+```
+
+Project configuration files and options are in the [walkthrough](docs/getting-started.md#4-hand-it-to-an-ai-client).
+
+## Use the CLI
+
+```sh
+tauri-hasgard ping                              # is an app reachable
+tauri-hasgard windows                           # window labels
+tauri-hasgard --window main snapshot -i         # interactive elements with refs
+tauri-hasgard --window main click '@e3'         # by ref from the last snapshot
+tauri-hasgard --window main fill '#name' 'Ny'   # by CSS selector
+tauri-hasgard --window main press Enter
+tauri-hasgard --window main screenshot out.png
+tauri-hasgard --window main logs
+tauri-hasgard --window main ipc my_command
+```
+
+A target is a snapshot ref (`@e3`) or a CSS selector. Refs expire when the UI changes; take a new snapshot. Add `--json` for machine-readable output. `tauri-hasgard --help` lists every command.
+
+## Write Playwright tests
+
+```ts
+test("opens settings", async ({ hasgard, window }) => {
+  await window.getByRole("button", { name: "Settings", exact: true }).click()
+  const settings = await hasgard.waitForWindow("settings", 5_000)
+  await expect(settings.getByRole("heading", { name: "Settings" })).toBeVisible()
+})
+```
+
+Setup is in the [Playwright guide](packages/playwright/README.md). Tests run against the real application; there is no `page` fixture and no mocked browser mode.
+
+## More
+
+- [CEF backend](docs/cef.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Protocol reference](docs/protocol.md) · [Architecture](docs/architecture.md)
+- [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 ## License
 

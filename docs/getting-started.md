@@ -1,82 +1,57 @@
-# CLI and MCP tutorial
+# CLI and MCP walkthrough
 
-First [register the plugin](../README.md#register-the-plugin) in an existing Tauri 3 Wry app. Run the following commands from your app root.
+Prerequisites: the plugin is [registered](../README.md#register-the-plugin) and the CLI is [installed](../README.md#install-the-cli).
 
-## Install the CLI
-
-Install the native client:
-
-```sh
-# macOS
-brew install nyssance/tap/tauri-hasgard
-
-# Windows
-scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
-scoop install nyssance/tauri-hasgard
-
-# Linux, or any platform with a Rust toolchain
-cargo install tauri-hasgard-cli
-```
-
-The Homebrew formula lives in `nyssance/tap`, not in homebrew-core, so the
-`nyssance/tap/` prefix is required. Prebuilt archives for macOS Apple Silicon, Windows x64, and Linux x64 are attached to each [GitHub Release](https://github.com/nyssance/tauri-hasgard/releases).
-
-## Start and inspect the app
-
-In one terminal, start your app in debug mode and leave it running:
+## 1. Start the app
 
 ```sh
 bun run tauri dev
 ```
 
-This assumes your app has a `tauri` script. Otherwise use your existing Tauri development command.
+Leave it running. Hasgard attaches to a running app; it never launches one.
 
-In another terminal:
+## 2. Inspect it
 
 ```sh
 tauri-hasgard ping
 tauri-hasgard windows
-tauri-hasgard --window main snapshot
+tauri-hasgard --window main snapshot -i
 ```
 
-Use a window label returned by `windows`. From the snapshot, choose the ref of an element you want to click; replace `@e3` below with that ref:
+`windows` prints the labels to pass to `--window`. `snapshot -i` prints the interactive elements, each with a ref such as `@e3`.
+
+## 3. Act on it
 
 ```sh
 tauri-hasgard --window main click '@e3'
-tauri-hasgard --window main snapshot
+tauri-hasgard --window main fill 'input[name=email]' 'me@example.com'
+tauri-hasgard --window main press Enter
+tauri-hasgard --window main wait '#saved'
 tauri-hasgard --window main screenshot screen.png
 ```
 
-Take a fresh snapshot after UI changes. `screenshot` renders the DOM; for rendered viewport pixels use `screenshot-native --output viewport.png`. See the [protocol](protocol.md) for platform-specific capture support.
+A target is a ref from the latest snapshot or a CSS selector. Refs are invalid after the UI changes.
 
-If several apps are running, select the endpoint explicitly:
+`screenshot` redraws the document from the DOM. `screenshot-native --output viewport.png` captures the pixels actually on screen; platform support is listed in the [protocol](protocol.md).
+
+## 4. Hand it to an AI client
 
 ```sh
-tauri-hasgard --socket /path/to/app.sock --window main snapshot
+claude mcp add tauri-hasgard -- tauri-hasgard mcp   # Claude Code
+codex mcp add tauri-hasgard -- tauri-hasgard mcp    # Codex
 ```
 
-The endpoint is a Unix socket on macOS/Linux and a named pipe on Windows. You can set `TAURI_HASGARD_SOCKET` before starting the app, then pass the same path to the CLI. See [troubleshooting](troubleshooting.md) if discovery fails.
-
-## Connect an AI client
-
-Keep the debug app running. The AI client starts the CLI as a stdio server; it does not launch your application.
-
-`tauri-hasgard mcp` is a standard stdio MCP server. ALwith, Claude Code, and Codex are first-class AI clients; all three launch the same command and receive the same tools.
-
-For ALwith and Claude Code, add the server to the project `.mcp.json`:
+Or write the configuration by hand. `.mcp.json` in the project, for Claude Code and clients that read the same format:
 
 ```json
 {
   "mcpServers": {
-    "tauri-hasgard": {
-      "command": "tauri-hasgard",
-      "args": ["mcp"]
-    }
+    "tauri-hasgard": { "command": "tauri-hasgard", "args": ["mcp"] }
   }
 }
 ```
 
-For Codex, add it to the project `.codex/config.toml`:
+`~/.codex/config.toml` for Codex, which is what `codex mcp add` writes:
 
 ```toml
 [mcp_servers.tauri-hasgard]
@@ -84,8 +59,25 @@ command = "tauri-hasgard"
 args = ["mcp"]
 ```
 
-For an explicit endpoint, use CLI arguments `--socket`, your endpoint path, then `mcp`. Restart the MCP connection after changing its configuration.
+- The server attaches to the running app and does not start it.
+- Tools are named `hasgard.<command>`, for example `hasgard.snapshot`, and each takes an optional `window` label. Set a default with `args = ["mcp", "--window", "main"]`.
+- `eval`, `ipc` and `drop` are hidden by default. Expose them with `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1` in the server's environment: `codex mcp add tauri-hasgard --env TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1 -- tauri-hasgard mcp`, or `-e` for `claude mcp add`.
+- If the client cannot find the binary, use its absolute path (`which tauri-hasgard`) as `command`.
+- Restart the client's MCP connection after changing the configuration.
 
-## Next steps
+## Several apps at once
 
-Use `tauri-hasgard --help` or `tauri-hasgard <command> --help` for command options. The [protocol reference](protocol.md) covers scenarios, dialogs, storage, recording, native video, and their limits.
+Each app listens on its own endpoint: a Unix socket on macOS and Linux, a named pipe on Windows. The CLI finds a single running app by itself. With more than one, choose explicitly:
+
+```sh
+TAURI_HASGARD_SOCKET=/tmp/my-app.sock bun run tauri dev
+tauri-hasgard --socket /tmp/my-app.sock --window main snapshot
+```
+
+`--socket` goes before the command, including before `mcp`.
+
+## Next
+
+- `tauri-hasgard <command> --help` for options.
+- [Protocol reference](protocol.md) for dialogs, routes, storage, recording, video and their limits.
+- [Troubleshooting](troubleshooting.md) when a command cannot connect.

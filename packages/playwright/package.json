@@ -1,6 +1,6 @@
 {
   "name": "@nyssance/tauri-hasgard",
-  "version": "0.6.8",
+  "version": "0.6.10",
   "description": "Playwright Test fixtures for native Tauri Hasgard automation",
   "type": "module",
   "main": "./dist/index.js",
@@ -34,7 +34,7 @@
     "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "keywords": [
     "tauri",

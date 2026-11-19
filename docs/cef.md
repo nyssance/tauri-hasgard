@@ -1,14 +1,14 @@
 # CEF backend
 
-CEF support is opt-in. It uses the same CLI, MCP and Playwright JSON-RPC protocol
-as Wry. `init()` remains the Wry entry point; use `init_cef()` for an app using
-Tauri's default `DynRuntime` and CEF.
+Opt-in backend for apps built on `tauri-runtime-cef`. The CLI, MCP server and Playwright fixture work unchanged; only the plugin registration differs.
+
+## Setup
 
 ```toml
 [dependencies]
 tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
 tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"] }
-tauri-plugin-hasgard = { version = "0.6.8", features = ["cef"] }
+tauri-plugin-hasgard = { version = "0.6", features = ["cef"] }
 ```
 
 ```rust
@@ -17,28 +17,24 @@ let builder = tauri::Builder::default()
     .plugin(tauri_plugin_hasgard::init_cef());
 ```
 
-Keep the application's usual CEF entry point and bundling setup. Do not enable a
-remote debugging port for Hasgard. CEF uses an in-process CDP observer; external
-pages need neither `hasgard:default` nor permission to invoke Tauri commands.
-`init_cef()` works in both debug and release builds and does not move application windows.
+Then bundle the Playwright executor, which performs click, hover, fill, type, check and select:
 
-CEF interactions require the packaged Playwright executor. Build it with
-`bun run --cwd packages/executor build` and include the generated native binary
-as a Tauri `externalBin`, as in `examples/cef-fixture-app`. The resulting app
-contains `hasgard-playwright` beside its executable (`.exe` on Windows); users
-do not install Node or Bun. For local development, `TAURI_HASGARD_PLAYWRIGHT`
-may name an absolute executor path. Missing or failed executors return an error,
-never a synthetic-click fallback.
+```sh
+bun run --cwd packages/executor build
+```
 
-The shared [executor](../packages/executor/README.md) can also be used by a
-release application through `init_cef_with_executor`; its code selects
-whether the local transport is enabled. It neither starts a second browser nor creates another login profile.
+Add the generated binary as a Tauri `externalBin`, as `examples/cef-fixture-app` does. The app then carries `hasgard-playwright` (`.exe` on Windows) beside its executable; users install neither Node nor Bun. During development `TAURI_HASGARD_PLAYWRIGHT` may point at an absolute executor path. A missing executor is an error; there is no synthetic-click fallback.
 
-## Routing and results
+Notes:
 
-`windows` lists page routing labels, including native child webviews. Each entry
-has `window_label`, the native host label, and on macOS `native_id`, its OS window
-number. A parent and child may share a native ID but have different routing labels.
+- No remote debugging port is needed or opened. The plugin observes CDP in process.
+- Remote pages need neither `hasgard:default` nor Tauri IPC access.
+- `init_cef()` works in debug and release builds and does not move application windows.
+- A host that already ships a JavaScript runtime and Playwright can supply its own executor with `init_cef_with_executor`; see the [executor](../packages/executor/README.md).
+
+## Targeting webviews
+
+`windows` lists every page label, native child webviews included. Each entry has `window_label`, the native host label, and on macOS `native_id`, its OS window number. A parent and a child can share a native ID and still have different labels.
 
 ```sh
 tauri-hasgard windows
@@ -47,76 +43,47 @@ tauri-hasgard --window guest fill '#search' 'query'
 tauri-hasgard --window guest screenshot-native --output /tmp/guest.png
 ```
 
-DOM reads, selectors, click/fill/type, navigation and native keyboard input use the
-selected webview. The DOM bridge runs in a CDP isolated world: `eval` shares the
-DOM but does not expose the application's main-world JavaScript globals or Tauri
-IPC objects. It is not a complete Playwright `Page`. Requests use CEF's shared
-message-ID allocator and a unique execution-context ID; navigation cannot redirect
-an already submitted evaluation into another renderer context. A new request can
-attach to the next document. Recreating a view with the same label creates a fresh
-CDP session. A request to a closed label fails explicitly.
+A request to a closed label fails. Recreating a view under the same label starts a fresh session.
 
-Click, double-click, hover, fill, type, check and select use Playwright over the
-selected webview's CDP stream. They perform browser input with actionability
-checks, including visibility, stability and hit testing. A covered target can
-therefore fail where Wry's synthetic DOM interaction succeeds. CEF selectors can
-pierce open shadow roots and frame selectors can reach cross-origin documents;
-the existing snapshot/ref reader still has its documented frame limits. Do not
-infer equivalent input fidelity or capabilities on WKWebView from the shared
-method names. Native window focus, keyboard shortcuts and IPC remain native.
+## What works
 
-`ipc` executes in the selected webview's top-level main world and calls its
-existing Tauri invoke bridge. It preserves command results, rejections and Tauri
-capability enforcement. Pages without that bridge fail explicitly; Hasgard does
-not grant remote guests native command access. IPC never installs the automation
-bridge in the main world or falls back to another window after navigation.
+| Operation                                  | Behavior on CEF                                                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| snapshot, query, text, html, attrs, `eval` | Run in an isolated world: same DOM, none of the page's JavaScript globals or Tauri objects.                                  |
+| click, hover, fill, type, check, select    | Real browser input through Playwright with actionability checks. A covered element fails where Wry's DOM event would pass.   |
+| press                                      | Native keyboard input to the selected webview. `TAURI_HASGARD_PRESS=window` is rejected.                                     |
+| navigate                                   | Supported. An evaluation already submitted is never redirected into the new document.                                        |
+| `ipc`                                      | Calls the page's own Tauri bridge in its main world. Capability checks apply; a page without the bridge fails.               |
+| logs                                       | Main-world console, including output from before the first request. Objects are one level deep.                             |
+| network                                    | Completed `fetch` and `XMLHttpRequest` exchanges, from the first request to that webview onward.                             |
+| route                                      | `fetch` and `XMLHttpRequest` only, with the Wry rule semantics. Tauri IPC is never routed.                                   |
+| screenshot                                 | Compositor pixels through `Page.captureScreenshot`.                                                                          |
+| screenshot-native                          | macOS only. See [Screenshots](#screenshots-and-occlusion).                                                                   |
+| dialog (`alert`, `confirm`, `prompt`)      | Not implemented; returns an error. HTML dialogs are ordinary DOM and work.                                                   |
+| heap-snapshot                              | Not implemented; returns an error.                                                                                           |
+| CEF-owned popups without a Tauri label     | Not routed.                                                                                                                  |
 
-`console.getLogs` and `console.clear` report the page's main-world console through
-CDP `Runtime.consoleAPICalled`, with the same entry shape, levels (`log`, `info`,
-`warn`, `error`), filters and 500-entry bound as Wry. Output written before the
-first automation request to a webview is included. Object arguments carry one
-level of own properties; nested values, and every object in output that predates
-the first request, are reported by their description (for example `"Object"`).
-Entries survive navigation until cleared, and each webview has its own log.
+Selectors pierce open shadow roots, and frame selectors reach cross-origin documents. Snapshot refs keep the frame limits documented in the [protocol](protocol.md). The same method name does not imply the same input fidelity on Wry.
 
-`network.getRequests` and `network.clear` report completed `fetch` and
-`XMLHttpRequest` exchanges from the CDP Network domain, with the Wry entry shape,
-filters and 200-entry bound. Observation starts with the first automation request
-to a webview; earlier requests are not listed. A request whose response headers
-arrived keeps that status even if the body is then aborted; `status: 0` with an
-`error` means no response was received. `response_size` is `Content-Length`, or
-the transferred size when the header is absent. A Tauri page's own IPC calls are
-real requests to `ipc.localhost` and appear in its log.
+### Console
 
-`route.add`, `route.list` and `route.clear` use the CDP Fetch domain with the Wry
-rule semantics: anchored globs, optional method, `fulfill` or `abort`, `times`,
-first match wins, and Tauri IPC is never routed. Interception is enabled only while
-a webview has rules, and only `fetch` and `XMLHttpRequest` are paused; documents
-and assets load untouched. A fulfilled response carries
-`Access-Control-Allow-Origin: *` so the page can read it from any origin. A
-cross-origin request that needs a CORS preflight sends that `OPTIONS` request
-first; it is routed like any other request, so match it with its own rule or it
-reaches the network. Rules belong to the webview's browser and survive navigation.
+Same entry shape, levels (`log`, `info`, `warn`, `error`), filters and 500-entry bound as Wry. Nested values, and every object in output that predates the first request, are reported by description (for example `"Object"`). Entries survive navigation until cleared. Each webview has its own log.
 
-This backend explicitly rejects heap snapshots and JavaScript dialog interception. Those operations need additional
-main-world/CDP integration; returning isolated-world empty data would be misleading. HTML dialogs are ordinary DOM and can be inspected.
-CEF-owned popups without Tauri webview labels are not currently routed.
+### Network
+
+Same entry shape, filters and 200-entry bound as Wry. A request whose response headers arrived keeps that status even if the body is then aborted; `status: 0` with an `error` means no response was received. `response_size` is `Content-Length`, or the transferred size when the header is absent. A Tauri page's own IPC calls are real requests to `ipc.localhost` and appear in its log.
+
+### Routes
+
+Anchored globs, optional method, `fulfill` or `abort`, `times`, first match wins. Interception is enabled only while a webview has rules; documents and assets load untouched. A fulfilled response carries `Access-Control-Allow-Origin: *`. A cross-origin request that needs a CORS preflight sends its `OPTIONS` request first; match it with its own rule or it reaches the network. Rules survive navigation.
 
 ## Screenshots and occlusion
 
-On macOS, `screenshot-native` without `--window-id` captures the selected CEF
-viewport via `Page.captureScreenshot` and reports `backend: "cef-cdp"`. Supply
-an OS window ID from `windows` to capture the entire native window instead,
-including an always-on-top or floating window.
+On macOS, `screenshot-native` without `--window-id` captures the selected CEF viewport and reports `backend: "cef-cdp"`. Pass an OS window ID from `windows` to capture the whole native window, including an always-on-top or floating one.
 
-A viewport screenshot is **not evidence of visibility on screen**. A host HTML
-modal can appear in its page screenshot while a native child covers it in the
-whole-window image. Use both captures for overlap tests. SurfaceEmbed is not
-implemented by this backend and is not needed for CDP automation.
+A viewport screenshot is **not evidence of visibility on screen**. A host HTML modal can appear in its page screenshot while a native child covers it in the whole-window image. Use both captures for overlap tests.
 
-The existing native screenshot platform restriction remains: this first
-implementation captures viewport and whole-window images on macOS. Windows native
-CEF validation is still required; no Linux native E2E is added.
+Native screenshots of CEF are macOS only for now.
 
 ## Native test
 

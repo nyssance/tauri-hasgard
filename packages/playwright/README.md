@@ -1,6 +1,6 @@
 # @nyssance/tauri-hasgard
 
-Playwright Test fixtures for real Tauri 3 Wry applications. Playwright handles scheduling, retries, assertions, and reports; Hasgard controls native webviews through the plugin.
+Playwright Test fixtures for real Tauri 3 applications. Playwright schedules, retries, asserts and reports; Hasgard drives the app's native webviews through its plugin. No browser download is involved.
 
 ## 1. Prepare your app
 
@@ -16,7 +16,7 @@ Set a readiness marker in your frontend **after initialization finishes**:
 document.documentElement.dataset.appReady = "true"
 ```
 
-Hasgard waits for this marker before tests start. No Playwright browser download is needed.
+Hasgard waits for this marker before tests start.
 
 ## 2. Configure the fixture
 

@@ -4,13 +4,13 @@ Tauri Hasgard is one automation system with three public clients, not three inde
 
 ```text
 Playwright Test fixture ─┐
-CLI ────────────────────┼─ newline-delimited JSON-RPC 2.0 ─ Tauri debug plugin ─ real webviews
+CLI ────────────────────┼─ newline-delimited JSON-RPC 2.0 ─ Tauri plugin ─ real webviews
 MCP server ─────────────┘
 ```
 
-## Product boundary
+## Why a plugin
 
-`tauri-hasgard` is the complete product and repository. `tauri-plugin-hasgard` is the required in-process bridge package because WKWebView and WebKitGTK do not expose Chromium CDP. Calling the product a plugin would be inaccurate; removing the plugin would make native macOS and Linux automation impossible.
+WKWebView and WebKitGTK expose no Chromium CDP, so automation has to run inside the application. `tauri-plugin-hasgard` is that in-process bridge; the CLI, MCP server and fixture are clients of it.
 
 ## Why there is no fake Page
 
