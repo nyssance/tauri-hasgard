@@ -41,6 +41,8 @@ claude mcp add tauri-hasgard -- npx -y tauri-hasgard mcp   # Claude Code
 codex mcp add tauri-hasgard -- npx -y tauri-hasgard mcp    # Codex
 ```
 
+Check the connection with `claude mcp list` or `codex mcp list`, then ask the client to list your app's windows.
+
 Configuration files, options, and serving the tools from inside your app or over ACP are in the [MCP guide](mcp.md).
 
 ## Several apps at once

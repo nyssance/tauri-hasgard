@@ -19,6 +19,16 @@ claude mcp add tauri-hasgard -- npx -y tauri-hasgard mcp   # Claude Code
 codex mcp add tauri-hasgard -- npx -y tauri-hasgard mcp    # Codex
 ```
 
+Check that it works, with your app running:
+
+```console
+$ npx -y tauri-hasgard ping
+✓ Connected. Plugin and CLI both 0.7.0.
+$ claude mcp list        # or: codex mcp list
+```
+
+`ping` proves the CLI reaches your app; the list should show `tauri-hasgard` as connected. If `ping` fails, see [troubleshooting](troubleshooting.md).
+
 With the CLI [installed](../README.md#install-the-cli), `tauri-hasgard mcp` is the same server without the `npx` startup cost.
 
 Or write the configuration by hand. `.mcp.json` in the project, for Claude Code and clients that read the same format:

@@ -69,6 +69,16 @@ claude mcp add tauri-hasgard -- npx -y tauri-hasgard mcp   # Claude Code
 codex mcp add tauri-hasgard -- npx -y tauri-hasgard mcp    # Codex
 ```
 
+Check that it works, with your app running:
+
+```console
+$ npx -y tauri-hasgard ping
+✓ Connected. Plugin and CLI both 0.7.0.
+$ claude mcp list        # or: codex mcp list
+```
+
+`ping` proves the CLI reaches your app; the list should show `tauri-hasgard` as connected. Then ask the client: "List the windows of my app."
+
 An app that hosts its own agent can serve the same tools in process or over ACP, with no setup for its users. See the [MCP guide](docs/mcp.md).
 
 ## Install the CLI
