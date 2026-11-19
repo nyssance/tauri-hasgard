@@ -46,6 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-windows-rust
+      - run: bun install --frozen-lockfile
       # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
       - run: bun scripts/test-rust.mjs
         env:

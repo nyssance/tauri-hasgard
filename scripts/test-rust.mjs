@@ -9,6 +9,11 @@ function run(args) {
   if (child.error) throw child.error
   if (child.status !== 0) process.exit(child.status ?? 1)
 }
+// The CEF fixture bundles the Playwright executor as an external binary; its build script
+// fails when target/hasgard-playwright-<triple> is absent.
+const executor = spawnSync(process.execPath, ["run", "--cwd", "packages/executor", "build"], { stdio: "inherit" })
+if (executor.error) throw executor.error
+if (executor.status !== 0) process.exit(executor.status ?? 1)
 run(["test", "--workspace", "--all-features", "--locked", "--no-run"])
 if (process.platform === "darwin") {
   const frameworks = []

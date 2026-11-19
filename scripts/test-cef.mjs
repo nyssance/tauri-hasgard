@@ -161,7 +161,11 @@ try {
   collectExecutors()
   assert.ok(executorPids.size >= 3, "Each exercised native view must use its packaged Playwright executor")
   await rpc("click", { selector: "#trusted" }, "guest")
-  assert.equal(await evaluate("guest", 'document.querySelector("#trusted-result").textContent'), "true")
+  // The click reply and this read travel on separate CDP clients; the handler may not have run yet.
+  await until(
+    async () => (await evaluate("guest", 'document.querySelector("#trusted-result").textContent')) === "true",
+    "Trusted click on #trusted"
+  )
   await rpc("fill", { selector: "#editor", value: "Replacement draft" }, "guest")
   assert.equal(await evaluate("guest", 'document.querySelector("#editor").textContent'), "Replacement draft")
   await rpc("check", { selector: "#checked", checked: true }, "guest")
@@ -176,7 +180,11 @@ try {
   assert.notEqual(await evaluate("guest", 'document.body.dataset.coveredClicked === "true"'), true)
   await evaluate("guest", 'setTimeout(()=>document.querySelector("#delayed").disabled=false,350);null')
   await rpc("click", { selector: "#delayed" }, "guest")
-  assert.equal(await evaluate("guest", 'document.querySelector("#delayed-result").textContent'), "true")
+  // The click reply and this read travel on separate CDP clients; the handler may not have run yet.
+  await until(
+    async () => (await evaluate("guest", 'document.querySelector("#delayed-result").textContent')) === "true",
+    "Trusted click on #delayed"
+  )
   const referenced = await rpc("query", { by: "selector", value: "#trusted" }, "guest")
   await rpc("click", { ref: referenced.elements[0].ref }, "guest")
   assert.equal(await evaluate("guest", 'document.querySelectorAll("[data-hasgard-action]").length'), 0)

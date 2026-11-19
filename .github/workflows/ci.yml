@@ -36,6 +36,7 @@ jobs:
           bun-version-file: package.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - run: bun install --frozen-lockfile
       # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
       - run: bun scripts/test-rust.mjs
         env:
