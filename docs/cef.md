@@ -88,8 +88,17 @@ arrived keeps that status even if the body is then aborted; `status: 0` with an
 the transferred size when the header is absent. A Tauri page's own IPC calls are
 real requests to `ipc.localhost` and appear in its log.
 
-This backend explicitly rejects heap snapshots, network routing and JavaScript
-dialog interception. Those operations need additional
+`route.add`, `route.list` and `route.clear` use the CDP Fetch domain with the Wry
+rule semantics: anchored globs, optional method, `fulfill` or `abort`, `times`,
+first match wins, and Tauri IPC is never routed. Interception is enabled only while
+a webview has rules, and only `fetch` and `XMLHttpRequest` are paused; documents
+and assets load untouched. A fulfilled response carries
+`Access-Control-Allow-Origin: *` so the page can read it from any origin. A
+cross-origin request that needs a CORS preflight sends that `OPTIONS` request
+first; it is routed like any other request, so match it with its own rule or it
+reaches the network. Rules belong to the webview's browser and survive navigation.
+
+This backend explicitly rejects heap snapshots and JavaScript dialog interception. Those operations need additional
 main-world/CDP integration; returning isolated-world empty data would be misleading. HTML dialogs are ordinary DOM and can be inspected.
 CEF-owned popups without Tauri webview labels are not currently routed.
 

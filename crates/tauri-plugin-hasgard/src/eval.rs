@@ -58,7 +58,7 @@ pub(crate) struct EvalEngine {
     next_id: Arc<AtomicU64>,
     pub(crate) cef: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) action: Arc<Mutex<Option<ActionFn>>>,
-    /// Console and network observation owned by the runtime when the page bridge cannot see the main world.
+    /// Console, network observation and routing owned by the runtime when the page bridge cannot see the main world.
     pub(crate) observe: Arc<Mutex<Option<ActionFn>>>,
     #[cfg(feature = "cef")]
     pub(crate) executor: Arc<Mutex<Option<crate::playwright::ExecutorCommand>>>,

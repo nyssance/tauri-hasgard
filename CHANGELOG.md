@@ -2,6 +2,7 @@
 
 - CEF: implement `console.getLogs` and `console.clear` from CDP console events, including output written before the first automation request. Object arguments are shallow; see `docs/cef.md`.
 - CEF: implement `network.getRequests` and `network.clear` from the CDP Network domain for `fetch` and `XMLHttpRequest`.
+- CEF: implement `route.add`, `route.list` and `route.clear` through the CDP Fetch domain with the Wry rule semantics.
 - CI: build the Playwright executor before Rust tests, and poll click results in the CEF native test.
 
 # 0.6.8 (2026-11-15)

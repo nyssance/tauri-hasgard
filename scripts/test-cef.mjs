@@ -239,6 +239,71 @@ try {
   assert.deepEqual(await rpc("network.clear", {}, "guest"), { cleared: true })
   assert.deepEqual(await rpc("network.getRequests", {}, "guest"), [])
   pass("CEF network: fetch and XHR outcomes, sizes, failures, filters, clear and isolation")
+  assert.deepEqual(
+    await rpc(
+      "route.add",
+      {
+        pattern: "**/echo",
+        method: "post",
+        status: 201,
+        body: '{"routed":true}',
+        contentType: "application/json",
+        times: 1
+      },
+      "guest"
+    ),
+    { id: 1, pattern: "**/echo", action: "fulfill" }
+  )
+  await rpc("route.add", { pattern: "**/blocked", action: "abort" }, "guest")
+  const dataset = (name) => evaluate("guest", `document.body.dataset.${name}`)
+  await evaluate(
+    "guest",
+    `fetch("/echo",{method:"POST"}).then(async r=>{document.body.dataset.routed=r.status+":"+r.headers.get("content-type")+":"+await r.text()});
+     fetch("/blocked").catch(()=>{document.body.dataset.blocked="failed"});
+     fetch("/echo?unrouted").then(r=>r.text()).then(t=>{document.body.dataset.passed=t});null`
+  )
+  await until(
+    async () => (await dataset("routed")) && (await dataset("blocked")) && (await dataset("passed")),
+    "CEF routes"
+  )
+  assert.equal(await dataset("routed"), '201:application/json:{"routed":true}')
+  assert.equal(await dataset("blocked"), "failed")
+  assert.equal(await dataset("passed"), "echoed")
+  // The single-use rule is spent; the same request now reaches the server.
+  await evaluate(
+    "guest",
+    `fetch("/echo",{method:"POST"}).then(r=>r.text()).then(t=>{document.body.dataset.spent=t});null`
+  )
+  await until(() => dataset("spent"), "Spent route")
+  assert.equal(await dataset("spent"), "echoed")
+  const routed = await rpc("route.list", {}, "guest")
+  assert.deepEqual(
+    routed.routes.map(({ id, method, action, status, times, used }) => ({ id, method, action, status, times, used })),
+    [
+      { id: 1, method: "POST", action: "fulfill", status: 201, times: 1, used: 1 },
+      { id: 2, method: null, action: "abort", status: 200, times: null, used: 1 }
+    ]
+  )
+  assert.deepEqual(
+    routed.intercepted
+      .map(({ route_id, action, status, url }) => ({ route_id, action, status, path: new URL(url).pathname }))
+      .sort((a, b) => a.route_id - b.route_id),
+    [
+      { route_id: 1, action: "fulfill", status: 201, path: "/echo" },
+      { route_id: 2, action: "abort", status: 0, path: "/blocked" }
+    ]
+  )
+  // A catch-all on the Tauri page must not swallow the application's own commands.
+  await rpc("route.add", { pattern: "**", action: "abort" }, "main")
+  assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: "routed" } }, "main"), "main:routed")
+  assert.deepEqual(await rpc("route.clear", {}, "main"), { removed: 1 })
+  assert.deepEqual(await rpc("route.clear", {}, "guest"), { removed: 2 })
+  assert.deepEqual(await rpc("route.list", {}, "guest"), { routes: [], intercepted: [] })
+  await evaluate("guest", `fetch("/blocked").then(r=>{document.body.dataset.cleared=String(r.status)});null`)
+  await until(() => dataset("cleared"), "Cleared route")
+  assert.equal(await dataset("cleared"), "404")
+  pass("CEF routes: fulfill, abort, method and times, pass-through, Tauri IPC exemption and clear")
+  await rpc("network.clear", {}, "guest")
   await rpc("fill", { selector: "#editor", value: "Replacement draft" }, "guest")
   assert.equal(await evaluate("guest", 'document.querySelector("#editor").textContent'), "Replacement draft")
   await rpc("check", { selector: "#checked", checked: true }, "guest")

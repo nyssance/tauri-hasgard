@@ -37,6 +37,160 @@ struct Client {
     revoked: Mutex<bool>,
     console: Mutex<ConsoleLog>,
     network: Mutex<NetworkLog>,
+    routes: Mutex<Routes>,
+}
+
+/// Declarative request routing through the CDP Fetch domain; the rules mirror the Wry bridge.
+#[derive(Default)]
+struct Routes {
+    rules: Vec<Route>,
+    intercepted: std::collections::VecDeque<Value>,
+    sequence: u64,
+    /// Paused requests are answered from the CDP callback, which has no webview of its own.
+    view: Option<View>,
+}
+
+struct Route {
+    id: u64,
+    pattern: String,
+    method: Option<String>,
+    abort: bool,
+    status: u64,
+    body: String,
+    content_type: String,
+    times: Option<u64>,
+    used: u64,
+}
+
+/// Anchored glob: `**` crosses path separators, `*` and `?` stay within a segment.
+fn glob_matches(pattern: &[char], text: &[char]) -> bool {
+    match pattern {
+        [] => text.is_empty(),
+        ['*', '*', rest @ ..] => (0..=text.len()).any(|skip| glob_matches(rest, &text[skip..])),
+        ['*', rest @ ..] => (0..=text.len())
+            .take_while(|skip| *skip == 0 || text[skip - 1] != '/')
+            .any(|skip| glob_matches(rest, &text[skip..])),
+        ['?', rest @ ..] => text.first().is_some_and(|c| *c != '/') && glob_matches(rest, &text[1..]),
+        [literal, rest @ ..] => text.first() == Some(literal) && glob_matches(rest, &text[1..]),
+    }
+}
+
+/// Tauri's own IPC is never routed: a catch-all rule would otherwise swallow the application's commands.
+fn is_tauri_ipc(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("ipc://")
+        || ["http://ipc.localhost", "https://ipc.localhost"].iter().any(|prefix| {
+            lower.strip_prefix(prefix).is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/', '?', '#']))
+        })
+}
+
+impl Routes {
+    fn add(&mut self, params: &Value) -> Result<Value, String> {
+        let pattern =
+            params["pattern"].as_str().filter(|p| !p.is_empty()).ok_or("route requires a non-empty 'pattern'")?;
+        let action = params["action"].as_str().unwrap_or("fulfill");
+        if !matches!(action, "fulfill" | "abort") {
+            return Err(format!(
+                "route 'action' must be 'fulfill' or 'abort', got: {}",
+                action.chars().take(32).collect::<String>()
+            ));
+        }
+        let status = match &params["status"] {
+            Value::Null => 200,
+            value => value
+                .as_u64()
+                .filter(|status| (100..=599).contains(status))
+                .ok_or("route 'status' must be an HTTP status code between 100 and 599")?,
+        };
+        let times = match &params["times"] {
+            Value::Null => None,
+            value => {
+                Some(value.as_u64().filter(|times| *times >= 1).ok_or("route 'times' must be a positive integer")?)
+            }
+        };
+        self.sequence += 1;
+        let route = Route {
+            id: self.sequence,
+            pattern: pattern.to_owned(),
+            method: params["method"].as_str().filter(|m| !m.is_empty()).map(str::to_ascii_uppercase),
+            abort: action == "abort",
+            status,
+            body: match &params["body"] {
+                Value::Null => String::new(),
+                Value::String(body) => body.clone(),
+                other => other.to_string(),
+            },
+            content_type: params["contentType"].as_str().filter(|c| !c.is_empty()).unwrap_or("text/plain").to_owned(),
+            times,
+            used: 0,
+        };
+        let added = json!({"id": route.id, "pattern": route.pattern, "action": action});
+        self.rules.push(route);
+        Ok(added)
+    }
+
+    fn list(&self) -> Value {
+        let routes: Vec<Value> = self
+            .rules
+            .iter()
+            .map(|route| {
+                json!({
+                    "id": route.id, "pattern": route.pattern, "method": route.method,
+                    "action": if route.abort { "abort" } else { "fulfill" },
+                    "status": route.status, "times": route.times, "used": route.used,
+                })
+            })
+            .collect();
+        json!({"routes": routes, "intercepted": self.intercepted})
+    }
+
+    /// The CDP command that answers a paused request; the first matching rule wins.
+    fn answer(&mut self, paused: &Value, log_id: u64, now_ms: u64) -> (&'static str, Value) {
+        use base64::Engine;
+        let request_id = &paused["requestId"];
+        let url = paused["request"]["url"].as_str().unwrap_or_default();
+        let method = paused["request"]["method"].as_str().unwrap_or_default().to_ascii_uppercase();
+        let text: Vec<char> = url.chars().collect();
+        let matched = if is_tauri_ipc(url) {
+            None
+        } else {
+            self.rules.iter_mut().find(|route| {
+                route.times.is_none_or(|times| route.used < times)
+                    && route.method.as_ref().is_none_or(|wanted| *wanted == method)
+                    && glob_matches(&route.pattern.chars().collect::<Vec<_>>(), &text)
+            })
+        };
+        let Some(route) = matched else {
+            return ("Fetch.continueRequest", json!({"requestId": request_id}));
+        };
+        route.used += 1;
+        let answer = if route.abort {
+            ("Fetch.failRequest", json!({"requestId": request_id, "errorReason": "Failed"}))
+        } else {
+            (
+                "Fetch.fulfillRequest",
+                json!({
+                    "requestId": request_id,
+                    "responseCode": route.status,
+                    // The page reads a fulfilled body from any origin, as it does a constructed Response on Wry.
+                    "responseHeaders": [
+                        {"name": "Content-Type", "value": route.content_type},
+                        {"name": "Access-Control-Allow-Origin", "value": "*"},
+                    ],
+                    "body": base64::engine::general_purpose::STANDARD.encode(&route.body),
+                }),
+            )
+        };
+        self.intercepted.push_back(json!({
+            "id": log_id, "timestamp": now_ms, "route_id": route.id, "method": method, "url": url,
+            "action": if route.abort { "abort" } else { "fulfill" },
+            "status": if route.abort { 0 } else { route.status },
+        }));
+        if self.intercepted.len() > MAX_REQUESTS {
+            self.intercepted.pop_front();
+        }
+        answer
+    }
 }
 
 /// Completed `fetch` and `XMLHttpRequest` exchanges, collected from the CDP Network domain.
@@ -264,6 +418,7 @@ impl ConsoleLog {
 impl Client {
     fn stop(&self) -> Result<(), String> {
         *self.revoked.lock().expect("CEF input gate") = true;
+        self.routes.lock().expect("CEF routes lock").view = None;
         let stopped = self.executor.lock().expect("executor").take().map(|executor| executor.stop());
         self.executor_pending.lock().expect("executor CDP").clear();
         self.cancel("CEF control was stopped");
@@ -384,6 +539,10 @@ impl Client {
                             self.console.lock().expect("CEF console lock").record(&value);
                         }
                     }
+                } else if method == "Fetch.requestPaused" {
+                    if let Ok(value) = serde_json::from_slice::<Value>(&params) {
+                        self.answer_paused(&value);
+                    }
                 } else if method.starts_with("Network.") {
                     if let Ok(value) = serde_json::from_slice::<Value>(&params) {
                         self.network.lock().expect("CEF network lock").record(&method, &value);
@@ -412,11 +571,40 @@ impl Client {
                             value["id"] = original;
                             let _ = executor.receive(&value, root);
                         }
-                    } else {
+                    } else if !value["method"].as_str().is_some_and(|method| method.starts_with("Fetch.")) {
+                        // Interception belongs to the host's rules. Playwright would otherwise
+                        // answer the same paused request and race the configured route.
                         let _ = executor.receive(&value, false);
                     }
                 }
             }
+        }
+    }
+
+    /// Every paused request gets exactly one answer; an unanswered one would hang the page.
+    fn answer_paused(&self, paused: &Value) {
+        let log_id = {
+            let mut network = self.network.lock().expect("CEF network lock");
+            network.sequence += 1;
+            network.sequence
+        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX));
+        let (view, (method, params)) = {
+            let mut routes = self.routes.lock().expect("CEF routes lock");
+            (routes.view.clone(), routes.answer(paused, log_id, now_ms))
+        };
+        // This runs on the CEF thread that sending a message waits for, so answer from another
+        // thread; the reply itself is not awaited.
+        if let Some(view) = view {
+            std::thread::spawn(move || {
+                if let Ok(id) = allocate_devtools_message_id()
+                    && let Ok(message) = serde_json::to_vec(&json!({"id": id, "method": method, "params": params}))
+                {
+                    let _ = view.send_dev_tools_message(&message);
+                }
+            });
         }
     }
 
@@ -670,6 +858,43 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
     *engine.observe.lock().expect("CEF observation hook") = Some(Arc::new(move |label, method, params| {
         let view = target(&console_app, label)?;
         let client = console_clients.get(&view)?;
+        if method == "route.add" {
+            let added = client.routes.lock().expect("CEF routes lock").add(&params)?;
+            let first = {
+                let mut routes = client.routes.lock().expect("CEF routes lock");
+                routes.view.replace(view.clone()).is_none()
+            };
+            if first {
+                // Only the request kinds the Wry bridge wraps are paused; documents and assets load untouched.
+                let patterns =
+                    json!([{"urlPattern": "*", "resourceType": "Fetch"}, {"urlPattern": "*", "resourceType": "XHR"}]);
+                if let Err(error) = client.call(&view, "Fetch.enable", &json!({"patterns": patterns})) {
+                    let mut routes = client.routes.lock().expect("CEF routes lock");
+                    routes.rules.clear();
+                    routes.view = None;
+                    return Err(error);
+                }
+            }
+            return Ok(added);
+        }
+        if method == "route.list" {
+            return Ok(client.routes.lock().expect("CEF routes lock").list());
+        }
+        if method == "route.clear" {
+            let (removed, enabled) = {
+                let mut routes = client.routes.lock().expect("CEF routes lock");
+                let removed = routes.rules.len();
+                routes.rules.clear();
+                routes.intercepted.clear();
+                (removed, routes.view.is_some())
+            };
+            if enabled {
+                // Requests paused meanwhile are still answered: the view stays until interception is off.
+                client.call(&view, "Fetch.disable", &json!({}))?;
+                client.routes.lock().expect("CEF routes lock").view = None;
+            }
+            return Ok(json!({"removed": removed}));
+        }
         if method == "network.getRequests" {
             return Ok(client.network.lock().expect("CEF network lock").list(&params));
         }
@@ -796,6 +1021,53 @@ pub(crate) fn hooks(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn glob_is_anchored_and_segment_aware() {
+        let matches = |pattern: &str, text: &str| {
+            super::glob_matches(&pattern.chars().collect::<Vec<_>>(), &text.chars().collect::<Vec<_>>())
+        };
+        assert!(matches("**/api", "http://h/v1/api"));
+        assert!(!matches("**/api", "http://h/v2/api-docs"));
+        assert!(matches("http://h/*/users", "http://h/v1/users"));
+        assert!(!matches("http://h/*/users", "http://h/v1/x/users"));
+        assert!(matches("http://h/item?", "http://h/item7"));
+        assert!(!matches("http://h/item?", "http://h/item/"));
+        assert!(matches("**", "anything/at/all"));
+    }
+
+    #[test]
+    fn routes_answer_first_match_respect_method_times_and_never_route_tauri_ipc() {
+        let mut routes = super::Routes::default();
+        assert!(routes.add(&json!({})).is_err());
+        assert!(routes.add(&json!({"pattern": "**", "action": "drop"})).is_err());
+        assert!(routes.add(&json!({"pattern": "**", "status": 99})).is_err());
+        assert!(routes.add(&json!({"pattern": "**", "times": 0})).is_err());
+        assert_eq!(
+            routes.add(&json!({"pattern": "**/api", "method": "post", "status": 201, "body": "{}", "contentType": "application/json", "times": 1})),
+            Ok(json!({"id": 1, "pattern": "**/api", "action": "fulfill"}))
+        );
+        routes.add(&json!({"pattern": "**", "action": "abort"})).expect("catch-all");
+        let paused = |method: &str, url: &str| json!({"requestId": "r", "request": {"method": method, "url": url}});
+        let (command, params) = routes.answer(&paused("POST", "http://h/api"), 7, 1000);
+        assert_eq!(command, "Fetch.fulfillRequest");
+        assert_eq!((&params["responseCode"], &params["body"]), (&json!(201), &json!("e30=")));
+        // The single-use rule is spent, so the later catch-all takes the next request.
+        assert_eq!(routes.answer(&paused("POST", "http://h/api"), 8, 1001).0, "Fetch.failRequest");
+        assert_eq!(routes.answer(&paused("POST", "http://ipc.localhost/cmd"), 9, 1002).0, "Fetch.continueRequest");
+        assert_eq!(routes.answer(&paused("GET", "ipc://localhost/cmd"), 10, 1003).0, "Fetch.continueRequest");
+        let listed = routes.list();
+        assert_eq!(
+            listed["routes"][0],
+            json!({"id": 1, "pattern": "**/api", "method": "POST", "action": "fulfill", "status": 201, "times": 1, "used": 1})
+        );
+        assert_eq!(
+            listed["intercepted"][0],
+            json!({"id": 7, "timestamp": 1000, "route_id": 1, "method": "POST", "url": "http://h/api", "action": "fulfill", "status": 201})
+        );
+        assert_eq!(listed["intercepted"][1]["status"], 0);
+        assert_eq!(listed["intercepted"].as_array().map(Vec::len), Some(2));
+    }
+
     #[test]
     fn network_log_reports_fetch_and_xhr_outcomes_with_filters() {
         let mut log = super::NetworkLog::default();

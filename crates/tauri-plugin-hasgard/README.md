@@ -30,8 +30,9 @@ CEF click, double-click, hover, fill, type, check and select operations. These u
 Playwright actionability and browser input instead of synthetic DOM events.
 `ipc` uses the selected page's real Tauri bridge in its main world and preserves
 application capability checks; remote pages gain no IPC permissions.
-Console output and completed fetch/XHR requests are read from CDP events. Network
-routing and JavaScript dialog interception are not implemented and return explicit errors. See [CEF setup and limits](../../docs/cef.md).
+Console output and completed fetch/XHR requests are read from CDP events, and routes
+use the CDP Fetch domain. JavaScript dialog interception is not implemented and returns
+an explicit error. See [CEF setup and limits](../../docs/cef.md).
 
 ## Application integration
 
