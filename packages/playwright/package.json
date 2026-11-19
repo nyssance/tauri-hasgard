@@ -20,8 +20,8 @@
   "scripts": {
     "build": "bun run clean && bun build src/index.ts src/process-supervisor.js --target node --format esm --outdir dist --packages external && bun node_modules/typescript/bin/tsc -p tsconfig.build.json --noEmit false --emitDeclarationOnly --declaration true",
     "dev": "bun run --parallel dev:js dev:types",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "bun --bun vitest run",
+    "test:watch": "bun --bun vitest",
     "typecheck": "bun check --no-script",
     "clean": "rm -rf dist",
     "dev:js": "bun build src/index.ts src/process-supervisor.js --target node --format esm --outdir dist --packages external --watch",
