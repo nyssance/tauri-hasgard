@@ -33,7 +33,7 @@
     },
     "packages/playwright": {
       "name": "@nyssance/tauri-hasgard",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "devDependencies": {
         "@playwright/test": "^1.65.1",
         "@types/node": "^26.6.6",

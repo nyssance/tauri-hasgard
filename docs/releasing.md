@@ -13,6 +13,12 @@
    `DISTRIBUTION_APP_PRIVATE_KEY`.
 5. Confirm the `nyssance` npm organization exists and the publishing account can publish public packages.
 
+6. For a crate or npm package added later, the registry accepts trusted publishing only for a name that
+   already exists. Publish the crate once by hand with `cargo publish -p <crate>`, and create each npm
+   package once by publishing a placeholder version under a non-`latest` tag, then add this workflow
+   as its trusted publisher. This applies to `tauri-hasgard-mcp`, `@nyssance/tauri-hasgard-cli` and its
+   three platform packages (`-darwin-arm64`, `-win32-x64`, `-linux-x64`).
+
 ## Release
 
 Keep these three versions identical:
@@ -49,10 +55,11 @@ git tag -d v0.2.1 && git tag -a v0.2.1 -m "tauri-hasgard v0.2.1" <commit>
 git push origin --force v0.2.1
 ```
 
-The release workflow validates the version, tests the workspace, publishes both Rust crates and the
-npm package, builds three CLI archives (macOS Apple Silicon, Windows x64, Linux x64), creates checksums and GitHub provenance attestations, creates
+The release workflow validates the version, tests the workspace, publishes the three Rust crates
+(`tauri-hasgard-mcp` first, since the others depend on it) and the Playwright npm package, builds three CLI archives (macOS Apple Silicon, Windows x64, Linux x64), creates checksums and GitHub provenance attestations, creates
 the GitHub Release, then updates the Homebrew Tap and Scoop Bucket with a short-lived GitHub App
-installation token. Every CLI archive and the npm package include `LICENSE` and `NOTICE.md`.
+installation token. It then assembles the CLI npm packages from those archives with
+`scripts/build-cli-npm.mjs` and publishes the three platform packages before the launcher. Every CLI archive and the npm package include `LICENSE` and `NOTICE.md`.
 
 ## User installation
 
@@ -63,6 +70,9 @@ brew install nyssance/tap/tauri-hasgard
 # Windows
 scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
 scoop install nyssance/tauri-hasgard
+
+# npm, with a prebuilt binary
+npm install -g @nyssance/tauri-hasgard-cli
 
 # Any Rust toolchain
 cargo install tauri-hasgard-cli

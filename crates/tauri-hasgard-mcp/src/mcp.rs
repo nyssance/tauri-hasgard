@@ -18,20 +18,55 @@ use rmcp::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Scope, build_wait_params, client::Client, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
-    run_set_input_files_command, target_params, with_scope,
+    client::{Client, InProcessCall},
+    protocol::RpcError,
+    support::{
+        Scope, build_wait_params, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
+        run_set_input_files_command, target_params, with_scope,
+    },
 };
 
-#[derive(Debug, Clone)]
-pub(crate) struct HasgardMcpServer {
-    socket: Option<PathBuf>,
-    window: Option<String>,
-    resolved_socket: Arc<OnceLock<PathBuf>>,
+#[derive(Clone)]
+enum App {
+    Endpoint { socket: Option<PathBuf>, resolved: Arc<OnceLock<PathBuf>> },
+    InProcess(InProcessCall),
 }
 
-pub(crate) async fn run_mcp_server(socket: Option<PathBuf>, window: Option<String>) -> Result<()> {
+/// The Hasgard tools as an MCP server.
+///
+/// Serve it over any `rmcp` transport, or hand it to an ACP bridge that accepts an
+/// `rmcp` service. Each tool takes an optional `window` label that overrides the default.
+#[derive(Clone)]
+pub struct HasgardMcpServer {
+    app: App,
+    window: Option<String>,
+    dangerous: bool,
+}
+
+impl std::fmt::Debug for HasgardMcpServer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let app = match &self.app {
+            App::Endpoint { socket, .. } => format!("endpoint {socket:?}"),
+            App::InProcess(_) => "in process".to_owned(),
+        };
+        formatter
+            .debug_struct("HasgardMcpServer")
+            .field("app", &app)
+            .field("window", &self.window)
+            .field("dangerous", &self.dangerous)
+            .finish()
+    }
+}
+
+/// Serve the Hasgard tools on this process's stdin and stdout until the client disconnects.
+///
+/// `socket` is the plugin endpoint; `None` discovers the running application on the first tool call.
+///
+/// # Errors
+/// Returns an error when the MCP handshake fails or the transport breaks.
+pub async fn serve_stdio(socket: Option<PathBuf>, window: Option<String>) -> Result<()> {
     print_startup_banner(socket.as_deref(), window.as_deref());
-    let service = HasgardMcpServer::new(socket, window)
+    let service = HasgardMcpServer::endpoint(socket, window)
         .serve(stdio())
         .await
         .map_err(|e| anyhow::anyhow!("failed to initialize MCP server: {e}"))?;
@@ -64,22 +99,62 @@ Configure your MCP client to launch this command instead of typing requests here
 }
 
 impl HasgardMcpServer {
-    fn new(socket: Option<PathBuf>, window: Option<String>) -> Self {
-        Self { socket, window, resolved_socket: Arc::new(OnceLock::new()) }
+    /// Reach the application through the plugin's local endpoint.
+    ///
+    /// `socket` is a Unix socket path or Windows named pipe; `None` discovers the running
+    /// application on the first tool call.
+    #[must_use]
+    pub fn endpoint(socket: Option<PathBuf>, window: Option<String>) -> Self {
+        Self {
+            app: App::Endpoint { socket, resolved: Arc::new(OnceLock::new()) },
+            window,
+            dangerous: dangerous_mcp_tools_enabled(),
+        }
+    }
+
+    /// Reach the application through a function in the host process, with no endpoint.
+    ///
+    /// `call` receives a Hasgard protocol method and its params object and returns the
+    /// result or the protocol error. The plugin's `Automation::call` has this shape.
+    pub fn in_process<F, Fut>(call: F, window: Option<String>) -> Self
+    where
+        F: Fn(String, Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, RpcError>> + Send + 'static,
+    {
+        Self {
+            app: App::InProcess(Arc::new(move |method, params| Box::pin(call(method, params)))),
+            window,
+            dangerous: dangerous_mcp_tools_enabled(),
+        }
+    }
+
+    /// Expose or hide the `eval`, `ipc` and `drop` tools, which run arbitrary code or
+    /// commands in the application.
+    ///
+    /// Without this call the choice follows `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS`,
+    /// read when the server is created, and they are hidden when it is unset.
+    #[must_use]
+    pub fn with_dangerous_tools(mut self, enabled: bool) -> Self {
+        self.dangerous = enabled;
+        self
     }
 
     async fn connect_client(&self) -> Result<Client> {
-        if let Some(socket) = &self.socket {
+        let (socket, resolved) = match &self.app {
+            App::Endpoint { socket, resolved } => (socket, resolved),
+            App::InProcess(call) => return Ok(Client::in_process(call.clone())),
+        };
+        if let Some(socket) = socket {
             return Client::connect(socket).await;
         }
 
-        if let Some(socket) = self.resolved_socket.get() {
+        if let Some(socket) = resolved.get() {
             return Client::connect(socket).await;
         }
 
         let socket = resolve_socket(None)?;
         let client = Client::connect(&socket).await?;
-        let _ = self.resolved_socket.set(socket);
+        let _ = resolved.set(socket);
         Ok(client)
     }
 
@@ -102,7 +177,7 @@ impl HasgardMcpServer {
     #[expect(clippy::too_many_lines)]
     async fn call_tool_by_name(&self, name: &str, args: JsonObject) -> Result<CallToolResult, McpError> {
         let name = normalize_tool_name(name);
-        if DANGEROUS_MCP_TOOLS.contains(&name) && !dangerous_mcp_tools_enabled() {
+        if DANGEROUS_MCP_TOOLS.contains(&name) && !self.dangerous {
             return Err(invalid_params(format!(
                 "tool '{name}' is disabled by default. Set {ENABLE_DANGEROUS_MCP_TOOLS_ENV}=1 to enable dangerous MCP tools."
             )));
@@ -684,7 +759,7 @@ impl ServerHandler for HasgardMcpServer {
     fn list_tools(
         &self, _request: Option<PaginatedRequestParams>, _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, McpError>> + MaybeSendFuture + '_ {
-        std::future::ready(Ok(ListToolsResult::with_all_items(tools())))
+        std::future::ready(Ok(ListToolsResult::with_all_items(cached_tools(self.dangerous).clone())))
     }
 
     fn call_tool(
@@ -697,7 +772,7 @@ impl ServerHandler for HasgardMcpServer {
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
         let name = namespaced_tool_name(name);
-        cached_tools().iter().find(|tool| tool.name == name.as_str()).cloned()
+        cached_tools(self.dangerous).iter().find(|tool| tool.name == name.as_str()).cloned()
     }
 }
 
@@ -1258,17 +1333,14 @@ fn tool_specs() -> Vec<ToolSpec> {
     ]
 }
 
-fn tools() -> Vec<Tool> {
-    cached_tools().clone()
-}
-
-fn cached_tools() -> &'static Vec<Tool> {
-    static TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
-    TOOLS.get_or_init(build_tools)
-}
-
-fn build_tools() -> Vec<Tool> {
-    build_tools_with_flag(dangerous_mcp_tools_enabled())
+fn cached_tools(dangerous: bool) -> &'static Vec<Tool> {
+    static SAFE: OnceLock<Vec<Tool>> = OnceLock::new();
+    static ALL: OnceLock<Vec<Tool>> = OnceLock::new();
+    if dangerous {
+        ALL.get_or_init(|| build_tools_with_flag(true))
+    } else {
+        SAFE.get_or_init(|| build_tools_with_flag(false))
+    }
 }
 
 fn build_tools_with_flag(enable_dangerous_tools: bool) -> Vec<Tool> {
@@ -1999,8 +2071,47 @@ fn enum_prop(description: &str, values: &[&str]) -> Value {
 #[cfg(test)]
 mod tests {
     #[tokio::test]
+    async fn in_process_server_routes_tools_to_the_host_function() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let server = HasgardMcpServer::in_process(
+            move |method, params| {
+                log.lock().expect("log").push((method.clone(), params));
+                async move {
+                    if method == "state" {
+                        Ok(json!({"url": "tauri://localhost"}))
+                    } else {
+                        Err(RpcError { code: -32601, message: format!("{method} unavailable"), data: None })
+                    }
+                }
+            },
+            Some("main".to_owned()),
+        )
+        .with_dangerous_tools(false);
+
+        let state = server.call_tool_by_name("hasgard.state", JsonObject::new()).await.expect("state");
+        assert_eq!(state.structured_content, Some(json!({"result": {"url": "tauri://localhost"}})));
+        // The default window is applied, and an explicit one overrides it.
+        let args = json!({"window": "settings"}).as_object().expect("object").clone();
+        let failed = server.call_tool_by_name("title", args).await.expect("title");
+        assert_eq!(failed.is_error, Some(true));
+        assert_eq!(
+            failed.structured_content.expect("content")["rpcError"],
+            json!({"code": -32601, "message": "title unavailable"})
+        );
+        assert_eq!(
+            *calls.lock().expect("log"),
+            [("state".to_owned(), json!({"window": "main"})), ("title".to_owned(), json!({"window": "settings"}))]
+        );
+        // Dangerous tools follow the server's own setting, not a process-wide one.
+        assert!(server.call_tool_by_name("eval", JsonObject::new()).await.is_err());
+        assert!(server.get_tool("eval").is_none());
+        assert!(server.with_dangerous_tools(true).get_tool("eval").is_some());
+    }
+
+    #[tokio::test]
     async fn scenario_rejects_invalid_input_before_connecting() {
-        let server = super::HasgardMcpServer::new(Some(std::path::PathBuf::from("/no-such-application")), None);
+        let server = super::HasgardMcpServer::endpoint(Some(std::path::PathBuf::from("/no-such-application")), None);
         for toml in
             ["", "[[step]]\naction='fill'\ntarget='#x'", "[connect]\nsocket='/another-app'\n[[step]]\naction='wait'"]
         {
@@ -2121,7 +2232,7 @@ mod tests {
 
     #[test]
     fn get_tool_resolves_bare_and_prefixed_names_to_same_tool() {
-        let hasgard = HasgardMcpServer::new(None, None);
+        let hasgard = HasgardMcpServer::endpoint(None, None);
         let bare = hasgard.get_tool("click").expect("bare name resolves");
         let prefixed = hasgard.get_tool("hasgard.click").expect("prefixed name resolves");
         assert_eq!(bare.name, prefixed.name);
@@ -2161,7 +2272,7 @@ mod tests {
 
     #[test]
     fn hasgard_screenshot_tool_advertises_path_only_contract() {
-        let tool = cached_tools()
+        let tool = cached_tools(false)
             .iter()
             .find(|t| t.name == "hasgard.screenshot_native")
             .expect("hasgard.screenshot_native tool registered");
@@ -2197,11 +2308,11 @@ mod tests {
         // CLI/scenario callers. This test pins the surface so a future
         // refactor cannot silently fold the two tools together and resurrect
         // the bytes-inline payload shape.
-        let bridge = cached_tools()
+        let bridge = cached_tools(false)
             .iter()
             .find(|t| t.name == "hasgard.screenshot")
             .expect("bridge hasgard.screenshot tool still registered");
-        let native = cached_tools()
+        let native = cached_tools(false)
             .iter()
             .find(|t| t.name == "hasgard.screenshot_native")
             .expect("hasgard.screenshot_native tool registered");
@@ -2248,7 +2359,7 @@ mod tests {
             writer.write_all(&bytes).await.expect("write response");
         });
 
-        let hasgard = HasgardMcpServer::new(Some(socket.clone()), None);
+        let hasgard = HasgardMcpServer::endpoint(Some(socket.clone()), None);
         let mut args = Map::new();
         args.insert("window_id".to_owned(), json!(42_u32));
         args.insert("output_path".to_owned(), json!("/tmp/out.png"));
@@ -2318,7 +2429,7 @@ mod tests {
         ];
 
         for payload in payloads {
-            let hasgard = HasgardMcpServer::new(None, None);
+            let hasgard = HasgardMcpServer::endpoint(None, None);
             let mut args = Map::new();
             args.insert("url".to_owned(), json!(payload));
 
@@ -2356,7 +2467,7 @@ mod tests {
 
         let missing_socket =
             std::env::temp_dir().join(format!("tauri-hasgard-mcp-missing-{}.sock", std::process::id()));
-        let hasgard = HasgardMcpServer::new(Some(missing_socket), None);
+        let hasgard = HasgardMcpServer::endpoint(Some(missing_socket), None);
         let mut args = Map::new();
         args.insert("path".to_owned(), json!(recording.display().to_string()));
         args.insert("export".to_owned(), json!("sh"));
@@ -2395,7 +2506,7 @@ mod tests {
         // SAFETY: serial attribute serializes tests that touch XDG_RUNTIME_DIR.
         unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
 
-        let hasgard = HasgardMcpServer::new(None, None);
+        let hasgard = HasgardMcpServer::endpoint(None, None);
         let first = call_click(&hasgard).await;
         assert_eq!(tool_result_source(&first), Some("old"));
 
@@ -2432,7 +2543,7 @@ mod tests {
             writer.write_all(&response).await.expect("write response");
         });
 
-        let hasgard = HasgardMcpServer::new(Some(socket.clone()), None);
+        let hasgard = HasgardMcpServer::endpoint(Some(socket.clone()), None);
         let mut args = Map::new();
         args.insert("target".to_owned(), json!("@e3"));
         let result = hasgard.call_tool_by_name("click", args).await.expect("tool call succeeds");

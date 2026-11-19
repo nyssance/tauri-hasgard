@@ -26,13 +26,11 @@ tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros", "io-
 tracing.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
+tauri-hasgard-mcp = { version = "0.7.0", path = "../tauri-hasgard-mcp" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.23"
 owo-colors = { version = "4", features = ["supports-colors"] }
 indicatif = "0.18"
-rmcp = { version = "3", default-features = false, features = ["server", "transport-io"] }
-quick-xml = "0.42"
-toml = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

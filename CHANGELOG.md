@@ -1,3 +1,11 @@
+# 0.7.0 (2026-11-19)
+
+- Add the `tauri-hasgard-mcp` crate: the Hasgard tools as an `rmcp` `ServerHandler`, reaching the application through the plugin's endpoint (`HasgardMcpServer::endpoint`) or a host-supplied function (`HasgardMcpServer::in_process`). `tauri-hasgard mcp` is now this library over stdio; its tools and behavior are unchanged.
+- Add the plugin's `mcp` feature with `Automation::mcp_server`, which serves the tools from inside the application with no endpoint and no CLI. The server attaches to an ACP session through the official `agent-client-protocol-rmcp` bridge (MCP over ACP, a draft), verified by an end-to-end test.
+- Publish the CLI to npm as `@nyssance/tauri-hasgard-cli` with prebuilt binaries for macOS Apple Silicon, Windows x64 and Linux x64, so an MCP client is connected with one command: `npx -y @nyssance/tauri-hasgard-cli mcp`.
+- `HasgardMcpServer::with_dangerous_tools` sets the `eval`, `ipc` and `drop` gate per server; the environment variable remains the default.
+- Docs: add the MCP guide (`docs/mcp.md`).
+
 # 0.6.10 (2026-11-19)
 
 - CEF: implement `console.getLogs` and `console.clear` from CDP console events, including output written before the first automation request. Object arguments are shallow; see `docs/cef.md`.

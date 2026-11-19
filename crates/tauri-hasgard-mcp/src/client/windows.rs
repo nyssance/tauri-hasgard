@@ -41,7 +41,7 @@ pub async fn connect(path: &Path) -> Result<Client> {
         }
     };
     let (reader, writer) = tokio::io::split(client);
-    Ok(Client { reader: BufReader::new(reader), writer, next_id: 1 })
+    Ok(Client::endpoint(BufReader::new(reader), writer))
 }
 
 #[cfg(test)]

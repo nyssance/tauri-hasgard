@@ -1,3 +1,10 @@
+#![allow(
+    clippy::must_use_candidate,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    reason = "shared with the tauri-hasgard CLI; not a stable API"
+)]
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -7,35 +14,34 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::client::Client;
-use crate::{Scope, build_wait_params, target_params, with_scope};
+use crate::support::{Scope, build_wait_params, target_params, with_scope};
 
 // ── TOML schema ──────────────────────────────────────────────────────────────
 
-#[expect(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Scenario {
-    pub(crate) connect: Option<Connect>,
+pub struct Scenario {
+    pub connect: Option<Connect>,
     #[serde(default)]
-    pub(crate) scenario: ScenarioMeta,
+    pub scenario: ScenarioMeta,
     #[serde(default)]
-    pub(crate) step: Vec<Step>,
+    pub step: Vec<Step>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Connect {
-    pub(crate) socket: Option<PathBuf>,
-    pub(crate) timeout_ms: Option<u64>,
+pub struct Connect {
+    pub socket: Option<PathBuf>,
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ScenarioMeta {
-    pub(crate) name: Option<String>,
+pub struct ScenarioMeta {
+    pub name: Option<String>,
     #[serde(default = "default_true")]
-    pub(crate) fail_fast: bool,
-    pub(crate) global_timeout_ms: Option<u64>,
+    pub fail_fast: bool,
+    pub global_timeout_ms: Option<u64>,
 }
 
 impl Default for ScenarioMeta {
@@ -48,30 +54,29 @@ fn default_true() -> bool {
     true
 }
 
-#[expect(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Step {
-    pub(crate) name: Option<String>,
-    pub(crate) action: String,
-    pub(crate) timeout_ms: Option<u64>,
-    pub(crate) target: Option<String>,
-    pub(crate) value: Option<String>,
-    pub(crate) text: Option<String>,
-    pub(crate) key: Option<String>,
-    pub(crate) session: Option<bool>,
-    pub(crate) url: Option<String>,
-    pub(crate) script: Option<String>,
-    pub(crate) expected: Option<String>,
-    pub(crate) selector: Option<String>,
-    pub(crate) direction: Option<String>,
-    pub(crate) amount: Option<i32>,
+pub struct Step {
+    pub name: Option<String>,
+    pub action: String,
+    pub timeout_ms: Option<u64>,
+    pub target: Option<String>,
+    pub value: Option<String>,
+    pub text: Option<String>,
+    pub key: Option<String>,
+    pub session: Option<bool>,
+    pub url: Option<String>,
+    pub script: Option<String>,
+    pub expected: Option<String>,
+    pub selector: Option<String>,
+    pub direction: Option<String>,
+    pub amount: Option<i32>,
     #[serde(rename = "ref")]
-    pub(crate) step_ref: Option<String>,
-    pub(crate) gone: Option<bool>,
-    pub(crate) stable: Option<u64>,
-    pub(crate) require_mutation: Option<bool>,
-    pub(crate) path: Option<PathBuf>,
+    pub step_ref: Option<String>,
+    pub gone: Option<bool>,
+    pub stable: Option<u64>,
+    pub require_mutation: Option<bool>,
+    pub path: Option<PathBuf>,
 }
 
 impl Step {
@@ -83,56 +88,56 @@ impl Step {
 // ── Execution result types ────────────────────────────────────────────────────
 
 #[derive(Debug)]
-pub(crate) enum StepOutcome {
+pub enum StepOutcome {
     Passed { duration: Duration },
     Failed { duration: Duration, message: String },
     Skipped,
 }
 
 #[derive(Debug)]
-pub(crate) struct StepResult {
-    pub(crate) name: String,
-    pub(crate) outcome: StepOutcome,
+pub struct StepResult {
+    pub name: String,
+    pub outcome: StepOutcome,
 }
 
 #[derive(Debug)]
-pub(crate) struct ScenarioReport {
-    pub(crate) name: String,
-    pub(crate) results: Vec<StepResult>,
-    pub(crate) total_duration: Duration,
+pub struct ScenarioReport {
+    pub name: String,
+    pub results: Vec<StepResult>,
+    pub total_duration: Duration,
 }
 
 impl ScenarioReport {
     #[must_use]
-    pub(crate) fn passed(&self) -> usize {
+    pub fn passed(&self) -> usize {
         self.results.iter().filter(|r| matches!(r.outcome, StepOutcome::Passed { .. })).count()
     }
 
     #[must_use]
-    pub(crate) fn failed(&self) -> usize {
+    pub fn failed(&self) -> usize {
         self.results.iter().filter(|r| matches!(r.outcome, StepOutcome::Failed { .. })).count()
     }
 
     #[must_use]
-    pub(crate) fn skipped(&self) -> usize {
+    pub fn skipped(&self) -> usize {
         self.results.iter().filter(|r| matches!(r.outcome, StepOutcome::Skipped)).count()
     }
 
     #[must_use]
-    pub(crate) fn all_passed(&self) -> bool {
+    pub fn all_passed(&self) -> bool {
         self.failed() == 0
     }
 }
 
 // ── Main runner ───────────────────────────────────────────────────────────────
 
-pub(crate) fn load_scenario(path: &Path) -> Result<Scenario> {
+pub fn load_scenario(path: &Path) -> Result<Scenario> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read scenario file: {}", path.display()))?;
     parse_scenario(&content).with_context(|| format!("Failed to parse scenario TOML: {}", path.display()))
 }
 
-pub(crate) fn parse_scenario(content: &str) -> Result<Scenario> {
+pub fn parse_scenario(content: &str) -> Result<Scenario> {
     let scenario: Scenario = toml::from_str(content)?;
     anyhow::ensure!(!scenario.step.is_empty(), "scenario requires at least one step");
     for (index, step) in scenario.step.iter().enumerate() {
@@ -160,7 +165,7 @@ fn validate_step(step: &Step) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn run_scenario(
+pub async fn run_scenario(
     client: &mut Client, scenario: &Scenario, window: Option<&str>, fail_fast_override: Option<bool>,
 ) -> Result<ScenarioReport> {
     let run = run_scenario_steps(client, scenario, window, fail_fast_override);
@@ -490,7 +495,7 @@ fn print_step_fail(idx: usize, total: usize, name: &str, msg: &str) {
     eprintln!("  [{step_num}/{total}] {name} {fail_label}\n    {fail_msg}");
 }
 
-pub(crate) fn print_report(report: &ScenarioReport) {
+pub fn print_report(report: &ScenarioReport) {
     let passed = report.passed();
     let failed = report.failed();
     let skipped = report.skipped();
@@ -505,7 +510,7 @@ pub(crate) fn print_report(report: &ScenarioReport) {
 
 // ── JUnit XML output ──────────────────────────────────────────────────────────
 
-pub(crate) fn write_junit_xml(report: &ScenarioReport, path: &Path) -> Result<()> {
+pub fn write_junit_xml(report: &ScenarioReport, path: &Path) -> Result<()> {
     use quick_xml::Writer;
     use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 

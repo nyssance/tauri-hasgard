@@ -1,12 +1,19 @@
+#![allow(
+    clippy::must_use_candidate,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    reason = "shared with the tauri-hasgard CLI; not a stable API"
+)]
+
 use crate::protocol::{MAX_REQUEST_BYTES, Request, Response, RpcError};
 
 use anyhow::{Result, bail};
-use std::path::Path;
+use std::{future::Future, path::Path, pin::Pin, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Preserve the plugin's error data across CLI and MCP presentation layers.
 #[derive(Debug)]
-pub(crate) struct RpcFailure(pub RpcError);
+pub struct RpcFailure(pub RpcError);
 
 impl std::fmt::Display for RpcFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -20,21 +27,32 @@ impl std::fmt::Display for RpcFailure {
 
 impl std::error::Error for RpcFailure {}
 
-/// JSON-RPC client over a platform-specific transport (Unix socket or Named Pipe).
-pub(crate) struct Client {
-    #[cfg(unix)]
-    reader: BufReader<tokio::net::unix::OwnedReadHalf>,
-    #[cfg(unix)]
-    writer: tokio::net::unix::OwnedWriteHalf,
-    #[cfg(windows)]
-    reader: BufReader<tokio::io::ReadHalf<tokio::net::windows::named_pipe::NamedPipeClient>>,
-    #[cfg(windows)]
-    writer: tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeClient>,
-    next_id: u64,
+/// A host-supplied path to the application: method and params in, result or protocol error out.
+pub type InProcessCall = Arc<
+    dyn Fn(String, serde_json::Value) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, RpcError>> + Send>>
+        + Send
+        + Sync,
+>;
+
+#[cfg(unix)]
+type Reader = BufReader<tokio::net::unix::OwnedReadHalf>;
+#[cfg(unix)]
+type Writer = tokio::net::unix::OwnedWriteHalf;
+#[cfg(windows)]
+type Reader = BufReader<tokio::io::ReadHalf<tokio::net::windows::named_pipe::NamedPipeClient>>;
+#[cfg(windows)]
+type Writer = tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeClient>;
+
+enum Transport {
+    Endpoint { reader: Reader, writer: Writer, next_id: u64 },
+    InProcess(InProcessCall),
 }
 
+/// Hasgard protocol client: the plugin's local endpoint, or a call into the host process.
+pub struct Client(Transport);
+
 impl Client {
-    /// Connect to the tauri-hasgard transport.
+    /// Connect to the plugin's Unix socket or Windows named pipe.
     pub async fn connect(path: &Path) -> Result<Self> {
         #[cfg(unix)]
         {
@@ -46,10 +64,27 @@ impl Client {
         }
     }
 
-    /// Send a JSON-RPC request and return the result value.
+    /// Reach the application through a function in this process instead of an endpoint.
+    pub fn in_process(call: InProcessCall) -> Self {
+        Self(Transport::InProcess(call))
+    }
+
+    fn endpoint(reader: Reader, writer: Writer) -> Self {
+        Self(Transport::Endpoint { reader, writer, next_id: 1 })
+    }
+
+    /// Send one request and return its result value.
     pub async fn call(&mut self, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
-        let id = self.next_id;
-        self.next_id += 1;
+        let (reader, writer, next_id) = match &mut self.0 {
+            Transport::Endpoint { reader, writer, next_id } => (reader, writer, next_id),
+            Transport::InProcess(call) => {
+                // The in-process executor takes an object; an absent params value is the empty object.
+                let params = params.unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+                return call(method.to_owned(), params).await.map_err(|error| RpcFailure(error).into());
+            }
+        };
+        let id = *next_id;
+        *next_id += 1;
 
         let request = Request { jsonrpc: "2.0".to_owned(), id, method: method.to_owned(), params };
 
@@ -58,11 +93,11 @@ impl Client {
         if bytes.len() > MAX_REQUEST_BYTES {
             bail!("Hasgard request is {} bytes; maximum is {MAX_REQUEST_BYTES} bytes including newline", bytes.len());
         }
-        self.writer.write_all(&bytes).await?;
-        self.writer.flush().await?;
+        writer.write_all(&bytes).await?;
+        writer.flush().await?;
 
         let mut line = String::new();
-        let n = self.reader.read_line(&mut line).await?;
+        let n = reader.read_line(&mut line).await?;
         if n == 0 {
             bail!("Server closed the connection");
         }

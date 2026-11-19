@@ -1,0 +1,44 @@
+[package]
+name = "tauri-hasgard-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "MCP server for Tauri Hasgard automation, usable over stdio, in process, or over ACP"
+keywords = ["tauri", "mcp", "testing", "automation", "acp"]
+categories = ["development-tools::testing"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "macros", "io-util", "time"] }
+tracing.workspace = true
+anyhow = "1"
+base64 = "0.23"
+owo-colors = { version = "4", features = ["supports-colors"] }
+rmcp = { version = "3", default-features = false, features = ["server", "transport-io"] }
+quick-xml = "0.42"
+toml = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
+serial_test = "4"
+tempfile = "3"
+# Proves the server plugs into the official ACP bridge; MCP over ACP is still a draft there.
+agent-client-protocol-rmcp = { version = "5.4", features = ["rmcp_3", "unstable_mcp_over_acp"] }
+agent-client-protocol = { version = "5.4", features = ["unstable_mcp_over_acp", "unstable_protocol_v2"] }

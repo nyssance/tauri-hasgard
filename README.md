@@ -60,27 +60,28 @@ Without that permission the client connects but every read fails with `hasgard._
 
 The plugin is active in every build that registers it, release builds included. Gate the `.plugin(...)` call yourself if shipped builds must not expose automation.
 
+## Connect Claude Code or Codex
+
+Start your app, then run one command. Nothing else to install:
+
+```sh
+claude mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp   # Claude Code
+codex mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp    # Codex
+```
+
+An app that hosts its own agent can serve the same tools in process or over ACP, with no setup for its users. See the [MCP guide](docs/mcp.md).
+
 ## Install the CLI
 
 ```sh
 brew install nyssance/tap/tauri-hasgard        # macOS Apple Silicon
 scoop bucket add nyssance https://github.com/nyssance/scoop-bucket
 scoop install nyssance/tauri-hasgard           # Windows x64
+npm install -g @nyssance/tauri-hasgard-cli     # any of the three platforms
 cargo install tauri-hasgard-cli                # anywhere with Rust
 ```
 
-Prebuilt archives for macOS Apple Silicon, Windows x64 and Linux x64 are on each [release](https://github.com/nyssance/tauri-hasgard/releases).
-
-## Connect Claude Code or Codex
-
-Start your app, then:
-
-```sh
-claude mcp add tauri-hasgard -- tauri-hasgard mcp   # Claude Code
-codex mcp add tauri-hasgard -- tauri-hasgard mcp    # Codex
-```
-
-Project configuration files and options are in the [walkthrough](docs/getting-started.md#4-hand-it-to-an-ai-client).
+Prebuilt binaries cover macOS Apple Silicon, Windows x64 and Linux x64; archives are on each [release](https://github.com/nyssance/tauri-hasgard/releases).
 
 ## Use the CLI
 
@@ -112,6 +113,7 @@ Setup is in the [Playwright guide](packages/playwright/README.md). Tests run aga
 
 ## More
 
+- [MCP guide](docs/mcp.md): stdio, in process, over ACP
 - [CEF backend](docs/cef.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Protocol reference](docs/protocol.md) · [Architecture](docs/architecture.md)

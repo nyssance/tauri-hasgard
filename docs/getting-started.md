@@ -37,33 +37,11 @@ A target is a ref from the latest snapshot or a CSS selector. Refs are invalid a
 ## 4. Hand it to an AI client
 
 ```sh
-claude mcp add tauri-hasgard -- tauri-hasgard mcp   # Claude Code
-codex mcp add tauri-hasgard -- tauri-hasgard mcp    # Codex
+claude mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp   # Claude Code
+codex mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp    # Codex
 ```
 
-Or write the configuration by hand. `.mcp.json` in the project, for Claude Code and clients that read the same format:
-
-```json
-{
-  "mcpServers": {
-    "tauri-hasgard": { "command": "tauri-hasgard", "args": ["mcp"] }
-  }
-}
-```
-
-`~/.codex/config.toml` for Codex, which is what `codex mcp add` writes:
-
-```toml
-[mcp_servers.tauri-hasgard]
-command = "tauri-hasgard"
-args = ["mcp"]
-```
-
-- The server attaches to the running app and does not start it.
-- Tools are named `hasgard.<command>`, for example `hasgard.snapshot`, and each takes an optional `window` label. Set a default with `args = ["mcp", "--window", "main"]`.
-- `eval`, `ipc` and `drop` are hidden by default. Expose them with `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1` in the server's environment: `codex mcp add tauri-hasgard --env TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1 -- tauri-hasgard mcp`, or `-e` for `claude mcp add`.
-- If the client cannot find the binary, use its absolute path (`which tauri-hasgard`) as `command`.
-- Restart the client's MCP connection after changing the configuration.
+Configuration files, options, and serving the tools from inside your app or over ACP are in the [MCP guide](mcp.md).
 
 ## Several apps at once
 

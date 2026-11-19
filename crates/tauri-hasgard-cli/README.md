@@ -22,10 +22,10 @@ tauri-hasgard --window main screenshot out.png
 ## MCP
 
 ```sh
-claude mcp add tauri-hasgard -- tauri-hasgard mcp   # Claude Code
-codex mcp add tauri-hasgard -- tauri-hasgard mcp    # Codex
+claude mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp   # Claude Code
+codex mcp add tauri-hasgard -- npx -y @nyssance/tauri-hasgard-cli mcp    # Codex
 ```
 
-Any other MCP client: launch `tauri-hasgard mcp` as a stdio server. Tools are named `hasgard.<command>` and take an optional `window` label. `eval`, `ipc` and `drop` appear only with `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1`.
+With the binary installed, `tauri-hasgard mcp` is the same stdio server. Tools are named `hasgard.<command>` and take an optional `window` label. `eval`, `ipc` and `drop` appear only with `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1`.
 
-[Setup](https://github.com/nyssance/tauri-hasgard#readme) · [Walkthrough](https://github.com/nyssance/tauri-hasgard/blob/main/docs/getting-started.md) · [Protocol](https://github.com/nyssance/tauri-hasgard/blob/main/docs/protocol.md)
+[MCP guide](https://github.com/nyssance/tauri-hasgard/blob/main/docs/mcp.md) · [Setup](https://github.com/nyssance/tauri-hasgard#readme) · [Walkthrough](https://github.com/nyssance/tauri-hasgard/blob/main/docs/getting-started.md) · [Protocol](https://github.com/nyssance/tauri-hasgard/blob/main/docs/protocol.md)

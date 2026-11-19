@@ -8,6 +8,8 @@ CLI ────────────────────┼─ newline-d
 MCP server ─────────────┘
 ```
 
+The MCP server is the `tauri-hasgard-mcp` library. `tauri-hasgard mcp` serves it over stdio through the plugin's endpoint. An application can also serve it from its own process, where it calls the plugin directly with no endpoint, including over an ACP connection; see the [MCP guide](mcp.md).
+
 ## Why a plugin
 
 WKWebView and WebKitGTK expose no Chromium CDP, so automation has to run inside the application. `tauri-plugin-hasgard` is that in-process bridge; the CLI, MCP server and fixture are clients of it.

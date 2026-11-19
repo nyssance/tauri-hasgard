@@ -46,6 +46,30 @@ impl Automation {
         }
     }
 
+    /// The Hasgard tools as an MCP server that calls this application in process.
+    ///
+    /// Nothing listens and no CLI is involved: serve the result over any `rmcp` transport,
+    /// or give it to an ACP bridge that accepts an `rmcp` service. `window` is the label
+    /// used by tool calls that name none.
+    #[cfg(feature = "mcp")]
+    #[must_use]
+    pub fn mcp_server(&self, window: Option<String>) -> tauri_hasgard_mcp::HasgardMcpServer {
+        let automation = self.clone();
+        tauri_hasgard_mcp::HasgardMcpServer::in_process(
+            move |method, params| {
+                let automation = automation.clone();
+                async move {
+                    automation.call(&method, params).await.map_err(|error| tauri_hasgard_mcp::RpcError {
+                        code: error.code,
+                        message: error.message,
+                        data: error.data,
+                    })
+                }
+            },
+            window,
+        )
+    }
+
     /// Execute a previously authorized request using the shared Hasgard protocol.
     /// Every surface operation requires an explicit window or child-webview label.
     ///

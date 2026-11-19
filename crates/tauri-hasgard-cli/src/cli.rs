@@ -497,32 +497,10 @@ pub(crate) enum RecordAction {
     Status,
 }
 
-/// Parsed target for element-targeting commands.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Target {
-    Ref(String),
-    Selector(String),
-    Coords(i32, i32),
-}
-
-/// Parse a target string into a `Target` variant.
-pub(crate) fn parse_target(s: &str) -> Target {
-    if let Some(r) = s.strip_prefix('@') {
-        return Target::Ref(r.to_owned());
-    }
-
-    if let Some((x_str, y_str)) = s.split_once(',')
-        && let (Ok(x), Ok(y)) = (x_str.trim().parse::<i32>(), y_str.trim().parse::<i32>())
-    {
-        return Target::Coords(x, y);
-    }
-
-    Target::Selector(s.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri_hasgard_mcp::support::{Target, parse_target};
 
     #[test]
     fn test_parse_target_ref() {

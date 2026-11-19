@@ -6,6 +6,9 @@ mod cef;
 pub use automation::{Automation, Options, RpcError, init, init_with_options};
 #[cfg(all(feature = "cef", any(unix, windows)))]
 pub use automation::{init_cef, init_cef_with_executor};
+/// The MCP server crate behind [`Automation::mcp_server`].
+#[cfg(feature = "mcp")]
+pub use tauri_hasgard_mcp as mcp;
 
 pub mod diff;
 mod error;

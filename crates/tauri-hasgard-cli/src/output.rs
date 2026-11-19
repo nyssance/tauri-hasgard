@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::time::Duration;
 
 use anyhow::Result;
+use tauri_hasgard_mcp::support::strip_ansi;
 
 /// Print a value as pretty JSON.
 pub(crate) fn format_json(value: &serde_json::Value) -> Result<()> {
@@ -614,62 +615,6 @@ pub(crate) fn format_record(value: &serde_json::Value) -> String {
     // caller (which only prints non-empty strings) does not double-print.
     format_text(value);
     String::new()
-}
-
-/// Format a single replay step.
-///
-/// Returns a string like "[3/10] click @e3 → ok" with color based on result.
-pub(crate) fn format_replay_step(step: usize, total: usize, action: &str, result: &str) -> String {
-    let action_safe = strip_ansi(action);
-    let result_display = if result == "ok" { crate::style::success(result) } else { crate::style::error(result) };
-    format!(
-        "{} {} \u{2192} {result_display}",
-        crate::style::dim(format!("[{step}/{total}]")),
-        crate::style::info(action_safe)
-    )
-}
-
-/// Strip ANSI escape sequences and C0 control characters from a string
-/// to prevent terminal injection.
-fn strip_ansi(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip CSI sequences: ESC [ ... final_byte
-            if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next.is_ascii_alphabetic() || next == '~' {
-                        break;
-                    }
-                }
-            // Skip OSC sequences: ESC ] ... BEL or ESC \ (ST)
-            } else if chars.peek() == Some(&']') {
-                chars.next();
-                let mut prev_was_esc = false;
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next == '\x07' {
-                        break;
-                    }
-                    if prev_was_esc && next == '\\' {
-                        break;
-                    }
-                    prev_was_esc = next == '\x1b';
-                }
-            } else {
-                // Skip single-char escape (ESC + one char)
-                chars.next();
-            }
-        } else if c.is_control() && c != '\n' && c != '\t' && c != '\r' {
-            // Strip C0/C1 control characters (except common whitespace)
-        } else {
-            result.push(c);
-        }
-    }
-    result
 }
 
 #[cfg(test)]
