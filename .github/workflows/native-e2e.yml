@@ -2,12 +2,18 @@ name: Native Tauri E2E
 
 on:
   workflow_call:
+    inputs:
+      run_native_e2e:
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 jobs:
   native-e2e:
+    if: ${{ inputs.run_native_e2e }}
     env:
       TAURI_HASGARD_DISPLAY: "0"
     strategy:
@@ -50,6 +56,7 @@ jobs:
           if-no-files-found: ignore
 
   cef-native-e2e:
+    if: ${{ inputs.run_native_e2e }}
     runs-on: macos-26
     timeout-minutes: 30
     env:
