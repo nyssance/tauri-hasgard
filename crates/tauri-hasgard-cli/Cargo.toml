@@ -25,7 +25,7 @@ tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros", "io-
 tracing.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
-tauri-hasgard-mcp = { version = "0.7.0", path = "../tauri-hasgard-mcp" }
+tauri-hasgard-mcp = { version = "0.7.1", path = "../tauri-hasgard-mcp" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.23"
 owo-colors = { version = "4", features = ["supports-colors"] }
@@ -38,6 +38,7 @@ libc = "0.2"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]

@@ -5310,7 +5310,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-hasgard-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -5346,7 +5346,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-hasgard-mcp"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-rmcp",
@@ -5413,7 +5413,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-hasgard"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "base64 0.23.1",
  "block2",

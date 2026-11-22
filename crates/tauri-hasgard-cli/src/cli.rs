@@ -112,6 +112,13 @@ pub(crate) enum Command {
     Dblclick { target: String },
     /// Move the pointer over an element.
     Hover { target: String },
+    /// Move the real OS pointer to screen coordinates (Windows native testing).
+    NativeMove {
+        /// Screen X coordinate in physical pixels.
+        x: i32,
+        /// Screen Y coordinate in physical pixels.
+        y: i32,
+    },
     /// Focus an element.
     Focus { target: String },
     /// Remove focus from an element.
@@ -813,6 +820,12 @@ mod tests {
     fn test_windows_command() {
         let cli = Cli::parse_from(["tauri-hasgard", "--socket", "/tmp/test.sock", "windows"]);
         assert!(matches!(cli.command, Command::Windows));
+    }
+
+    #[test]
+    fn test_parse_native_move_command() {
+        let cli = Cli::parse_from(["tauri-hasgard", "native-move", "1598", "142"]);
+        assert!(matches!(cli.command, Command::NativeMove { x: 1598, y: 142 }));
     }
 
     #[test]

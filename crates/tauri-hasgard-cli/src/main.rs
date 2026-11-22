@@ -334,6 +334,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
     match command {
         Command::Mcp => anyhow::bail!("mcp must be handled before run_command"),
         Command::Run { .. } => anyhow::bail!("run must be handled before run_command"),
+        Command::NativeMove { x, y } => native_move(x, y),
         Command::Windows => client.call("windows.list", None).await,
         Command::Ping => client.call("ping", with_scope(None, scope)).await,
         Command::State => client.call("state", with_scope(None, scope)).await,
@@ -406,6 +407,21 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
         Command::Record { action } => run_record_command(client, action, scope).await,
         Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), scope.window).await,
         cmd => run_dom_command(client, cmd, scope).await,
+    }
+}
+
+fn native_move(x: i32, y: i32) -> Result<serde_json::Value> {
+    #[cfg(windows)]
+    {
+        anyhow::ensure!(x >= 0 && y >= 0, "native pointer coordinates must be non-negative");
+        unsafe { windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y) }
+            .map_err(|error| anyhow::anyhow!("SetCursorPos failed: {error}"))?;
+        return Ok(json!({"x": x, "y": y, "native": true}));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (x, y);
+        anyhow::bail!("native-move is only supported on Windows");
     }
 }
 
