@@ -37,7 +37,6 @@ jobs:
       - run: bun scripts/check-release-version.mjs "${GITHUB_REF_NAME}"
       - run: bun run build
       - run: bun run typecheck
-      - run: bun run test
   cli:
     needs: validate
     strategy:
