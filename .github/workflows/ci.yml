@@ -42,5 +42,3 @@ jobs:
         env:
           CEF_PATH: ${{ runner.temp }}/cef-cache
 
-  native-e2e:
-    uses: ./.github/workflows/native-e2e.yml

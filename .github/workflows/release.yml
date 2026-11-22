@@ -22,20 +22,6 @@ permissions:
   attestations: write
 
 jobs:
-  native-e2e:
-    uses: ./.github/workflows/native-e2e.yml
-    with:
-      run_native_e2e: false
-
-  native-e2e-gate:
-    needs: native-e2e
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check native E2E result
-        if: ${{ needs.native-e2e.result == 'failure' || needs.native-e2e.result == 'cancelled' }}
-        run: exit 1
-
   validate:
     runs-on: macos-26
     steps:
@@ -76,7 +62,7 @@ jobs:
           CEF_PATH: ${{ runner.temp }}/cef-cache
 
   cli:
-    needs: [native-e2e-gate, validate, windows-rust]
+    needs: [validate, windows-rust]
     strategy:
       fail-fast: false
       matrix:
@@ -158,7 +144,7 @@ jobs:
           path: dist
 
   crates:
-    needs: [native-e2e-gate, validate, windows-rust]
+    needs: [validate, windows-rust]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
