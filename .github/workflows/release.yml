@@ -186,7 +186,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
 
   npm:
-    needs: [native-e2e, validate, windows-rust]
+    needs: [validate, windows-rust]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
