@@ -47,6 +47,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: bun install --frozen-lockfile
       - run: bun run protocol:check
+      - run: bun scripts/sync-release-version.mjs "${GITHUB_REF_NAME#v}"
       - run: bun scripts/check-release-version.mjs "${GITHUB_REF_NAME}"
       - run: bun run build
       - run: bun run typecheck
