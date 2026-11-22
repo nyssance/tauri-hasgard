@@ -15,7 +15,6 @@ rust-version = "1.95"
 license = "Apache-2.0"
 authors = ["Nyssance"]
 repository = "https://github.com/nyssance/tauri-hasgard"
-homepage = "https://github.com/nyssance/tauri-hasgard"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

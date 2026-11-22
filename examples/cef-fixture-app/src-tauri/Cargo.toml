@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[lints]
+workspace = true
+
 [build-dependencies]
 tauri-build = { version = "3.0.0-alpha.4", features = [] }
 

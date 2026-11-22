@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "Native automation and testing bridge for Tauri 3 Wry and CEF applications"
 keywords = ["tauri", "plugin", "testing", "automation", "accessibility"]
 categories = ["development-tools::testing", "gui"]

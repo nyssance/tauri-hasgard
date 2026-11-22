@@ -5,6 +5,9 @@ edition = "2024"
 rust-version.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [lib]
 name = "tauri_hasgard_fixture_app"
 crate-type = ["rlib"]
@@ -18,9 +21,11 @@ hasgard-testing = ["dep:tauri-plugin-global-shortcut", "dep:rmcp", "dep:serde_js
 [dependencies]
 tauri = { version = "3.0.0-alpha.6", features = [] }
 tauri-runtime-wry = "3.0.0-alpha.6"
-tauri-plugin-global-shortcut = { version = "3.0.0-alpha.3", optional = true }
 tauri-plugin-hasgard = { path = "../../../crates/tauri-plugin-hasgard" }
 # The in-process MCP check drives the plugin's server with an rmcp client over an in-memory pipe.
 rmcp = { version = "3", default-features = false, features = ["client", "server", "transport-async-rw"], optional = true }
 serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["io-util"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-global-shortcut = { version = "3.0.0-alpha.3", optional = true }

@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "CLI and MCP server for Tauri Hasgard automation"
 keywords = ["tauri", "cli", "testing", "automation", "accessibility"]
 categories = ["command-line-utilities", "development-tools::testing"]
