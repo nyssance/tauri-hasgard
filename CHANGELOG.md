@@ -1,4 +1,4 @@
-# 0.8.0 (2026-11-23)
+# 0.7.3 (2026-11-23)
 
 - Requests on one connection are pipelined: a response is written when its request finishes, matched by `id`. Requests for the same window keep their arrival order; other windows and the observers `wait` and `watch` run alongside. A pending `watch` no longer holds later requests until it times out.
 - A ref whose element left the document fails with `Stale ref` instead of acting on the detached node and reporting success; `wait` with `gone` on a ref now resolves. A node keeps one ref across repeated queries, and detached nodes are swept from the ref table.
