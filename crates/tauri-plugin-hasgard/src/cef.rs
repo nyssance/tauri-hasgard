@@ -1007,9 +1007,14 @@ pub(crate) fn hooks(
                     std::thread::sleep(Duration::from_millis(5));
                 }
             }
+            #[cfg(windows)]
+            let before = crate::windows_focus::current();
             #[cfg(not(target_os = "macos"))]
             view.window().set_focus().map_err(|e| e.to_string())?;
-            view.set_focus().map_err(|e| e.to_string())
+            view.set_focus().map_err(|e| e.to_string())?;
+            #[cfg(windows)]
+            crate::windows_focus::confirm(view.window().hwnd().map_err(|e| e.to_string())?.0 as isize, before)?;
+            Ok(())
         }),
         run_injection: Box::new(move |label, marker, confirm, task| {
             let view = target(&inject_app, label)

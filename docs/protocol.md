@@ -11,9 +11,10 @@ Every Hasgard client speaks the same JSON-RPC 2.0 to the plugin. Use this page t
 
 - One UTF-8 JSON object per line, terminated by `\n`.
 - IDs are nonnegative safe integers. Responses can arrive out of order; match them by ID.
+- A connection is pipelined: send the next request without waiting for the previous response. Requests for the same `window` run one at a time in arrival order. Requests for different windows, and the observers `wait` and `watch`, run alongside them, so a pending `watch` sees the action sent after it. At most 64 requests are in flight per connection; the plugin stops reading past that.
 - A response has exactly one of `result` or `error`. `result: null` is success; a missing result is a protocol error.
 - A `null` ID marks an error that could not be tied to a request. Clients surface it and fail their pending calls.
-- A request is at most **1,048,576 bytes** including the newline, base64 payloads included. Clients check the size before sending and fail locally, leaving the connection usable.
+- A request is at most **1,048,576 bytes** including the newline, base64 payloads included. Clients check the size before sending and fail locally, leaving the connection usable. `setInputFiles` and `drop` carry their files in the request, so one call holds about 750 KB of file data in total.
 
 Error codes:
 
@@ -75,6 +76,17 @@ An element target takes one of three forms:
 
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms. CEF differences are listed in the [CEF guide](cef.md#what-works).
 
+Platform support for capture:
+
+| Method              | macOS                  | Windows                 | Linux                 |
+| ------------------- | ---------------------- | ----------------------- | --------------------- |
+| `screenshot`        | Document redrawn in the page | Composited pixels (WebView2) | Document redrawn in the page |
+| `screenshot_native` | Yes                    | `-32601`                | `-32601`              |
+| `heap.snapshot`     | Yes (`jsc`)            | Yes (`v8`)              | `-32601`              |
+| `video.*`           | Yes                    | `-32601`                | `-32601`              |
+
+A redrawn document cannot show cross-origin images, frames or native controls; composited pixels do. CEF takes composited pixels on every platform.
+
 ## Snapshot
 
 ```ts
@@ -89,8 +101,9 @@ interface SnapshotElement {
 }
 ```
 
-- Refs are valid until the next snapshot in that webview. The Playwright client holds a per-window lock across `snapshot → unique match → action`.
-- Role locators take a fresh snapshot, require exactly one match, then send that ref.
+- Refs are valid until the next snapshot in that webview, or until their element leaves the document. A ref whose element was removed or replaced fails with `Stale ref`; it never acts on the detached node. `wait` with `gone` resolves for such a ref.
+- `query` returns elements in the same shape without resetting refs. `by` is `text`, `label`, `placeholder`, `testid`, `alt`, `title`, `selector` or `role`. For `role`, `value` is the role and the optional `name` is a string (a case-sensitive substring, or equality with `exact`) or a `{ "source", "flags" }` pattern; it reports what a snapshot would report for that role.
+- The Playwright client holds a per-window lock across `query → unique match → action`. Role locators query by role, require exactly one match, then send that ref.
 - `diff` baselines are kept per window. Reference and returned snapshots must include their `elements` arrays.
 
 ## Native keyboard completion

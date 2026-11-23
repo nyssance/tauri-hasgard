@@ -7,14 +7,21 @@
     "url": "https://github.com/nyssance/tauri-hasgard",
     "source": "github"
   },
-  "version": "0.7.2",
+  "version": "0.8.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "tauri-hasgard",
-      "version": "0.7.2",
-      "transport": { "type": "stdio" },
-      "packageArguments": [{ "type": "positional", "value": "mcp" }],
+      "version": "0.8.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ],
       "environmentVariables": [
         {
           "name": "TAURI_HASGARD_SOCKET",

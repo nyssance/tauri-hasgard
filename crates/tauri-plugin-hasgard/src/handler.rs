@@ -12,8 +12,9 @@ use tokio::sync::Mutex as AsyncMutex;
 /// Delay after requesting window focus before injecting OS-level keyboard
 /// events, so the window manager has time to actually transfer focus. Tuned
 /// empirically — too short and the first key on Wayland drops; too long and
-/// press feels sluggish.
-#[cfg(not(target_os = "macos"))]
+/// press feels sluggish. macOS and Windows confirm focus in their hooks
+/// instead, so only the remaining backends pay it.
+#[cfg(not(any(target_os = "macos", windows)))]
 const FOCUS_SETTLE_MS: u64 = 80;
 
 /// Serializes the full `focus → settle → inject` sequence across concurrent
@@ -225,8 +226,14 @@ pub(crate) async fn dispatch(
             Some(capture) if eval_fn.is_some() => {
                 let area =
                     handle_eval_method("screenshotArea", params, engine, eval_fn, win, SCREENSHOT_TIMEOUT).await?;
-                let side = |name: &str| area[name].as_f64().unwrap_or(0.0);
-                let area = [side("x"), side("y"), side("width"), side("height")];
+                let side = |name: &str| {
+                    area[name].as_f64().ok_or_else(|| RpcError {
+                        code: -32603,
+                        message: format!("screenshot area has no numeric {name}"),
+                        data: None,
+                    })
+                };
+                let area = [side("x")?, side("y")?, side("width")?, side("height")?];
                 if area[2] < 1.0 || area[3] < 1.0 {
                     return Err(RpcError {
                         code: -32603,
@@ -316,8 +323,8 @@ pub(crate) async fn dispatch(
             #[cfg(not(target_os = "macos"))]
             {
                 Err(RpcError {
-                    code: -32603,
-                    message: "Native video recording is supported on macOS only".into(),
+                    code: crate::protocol::RPC_METHOD_NOT_FOUND,
+                    message: format!("{method} is only available on macOS"),
                     data: None,
                 })
             }
@@ -549,9 +556,10 @@ async fn handle_press(
         .await
         .map_err(|e| press_error(format!("focus task failed: {e}"), "focus", false))?
         .map_err(|e| press_error(format!("failed to focus target window: {e}"), "focus", false))?;
-    // The macOS hook confirms AppKit activation and key-window ownership.
-    // Other backends retain their existing settle interval.
-    #[cfg(not(target_os = "macos"))]
+    // The macOS hook confirms AppKit activation and key-window ownership, and
+    // the Windows hook confirms the foreground window. Neither has an
+    // equivalent on the remaining backends, which keep a settle interval.
+    #[cfg(not(any(target_os = "macos", windows)))]
     tokio::time::sleep(Duration::from_millis(FOCUS_SETTLE_MS)).await;
 
     let combo = key_str.to_owned();
@@ -1393,14 +1401,14 @@ mod tests {
         let output_path = std::env::temp_dir().join("x.png");
         let output_path = output_path.to_str().expect("UTF-8 temp dir");
         // Omitting `window_id` targets the scoped webview. Unit tests register
-        // no capture and non-macOS hosts have none, so the request passes
-        // validation and fails as a capture, never as a parameter error.
+        // no capture, so on macOS the request passes validation and fails as a
+        // capture; elsewhere the method is unsupported. Never a parameter error.
         let engine = EvalEngine::new();
         let params = json!({"output_path": output_path});
         let err = dispatch("screenshot_native", Some(&params), &engine, None, None, None, &Recorder::new())
             .await
             .expect_err("no capture is registered in tests");
-        assert_eq!(err.code, -32603);
+        assert_eq!(err.code, if cfg!(target_os = "macos") { -32603 } else { -32601 });
         assert!(!err.message.contains("window_id"), "omitting window_id must not be a parameter error");
     }
 

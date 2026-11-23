@@ -339,7 +339,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
         Command::Ping => client.call("ping", with_scope(None, scope)).await,
         Command::State => client.call("state", with_scope(None, scope)).await,
         Command::Snapshot { interactive, selector, depth, save } => {
-            run_snapshot_command(client, interactive, selector, depth, save, scope.window).await
+            run_snapshot_command(client, interactive, selector, depth, save, scope).await
         }
         Command::Diff { r#ref: ref_path, interactive, selector, depth } => {
             run_diff_command(client, ref_path, interactive, selector, depth, scope.window).await
@@ -393,7 +393,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
         Command::Assert(kind) => run_assert_command(client, kind, scope).await,
         Command::Storage(storage_args) => run_storage_command(client, storage_args, scope.window).await,
         Command::Forms(args) => run_forms_command(client, args, scope).await,
-        Command::Drop { target, file } => run_drop_command(client, &target, file, scope.window).await,
+        Command::Drop { target, file } => run_drop_command(client, &target, file, scope).await,
         Command::Video { action } => {
             let (method, params) = match action {
                 cli::VideoAction::Start { output, fps, max_duration_ms } => {
@@ -416,7 +416,7 @@ fn native_move(x: i32, y: i32) -> Result<serde_json::Value> {
         anyhow::ensure!(x >= 0 && y >= 0, "native pointer coordinates must be non-negative");
         unsafe { windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y) }
             .map_err(|error| anyhow::anyhow!("SetCursorPos failed: {error}"))?;
-        return Ok(json!({"x": x, "y": y, "native": true}));
+        Ok(json!({"x": x, "y": y, "native": true}))
     }
     #[cfg(not(windows))]
     {
@@ -427,7 +427,7 @@ fn native_move(x: i32, y: i32) -> Result<serde_json::Value> {
 
 async fn run_snapshot_command(
     client: &mut Client, interactive: bool, selector: Option<String>, depth: Option<u8>,
-    save: Option<std::path::PathBuf>, window: Option<&str>,
+    save: Option<std::path::PathBuf>, scope: Scope<'_>,
 ) -> Result<serde_json::Value> {
     tracing::info!(
         interactive,
@@ -442,7 +442,7 @@ async fn run_snapshot_command(
             "selector": selector,
             "depth": depth,
         })),
-        Scope { window, ..Scope::default() },
+        scope,
     );
     let mut result = client.call("snapshot", params).await?;
     if let Some(ref path) = save {
@@ -574,8 +574,13 @@ async fn run_click(
 #[expect(clippy::too_many_lines, reason = "one match keeps CLI-to-protocol mappings reviewable together")]
 async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>) -> Result<serde_json::Value> {
     match command {
-        Command::Query { by, value, exact } => {
-            client.call("query", with_scope(Some(json!({"by": by, "value": value, "exact": exact})), scope)).await
+        Command::Query { by, value, name, exact } => {
+            anyhow::ensure!(name.is_none() || by == "role", "--name applies to --by role only");
+            let mut params = json!({"by": by, "value": value, "exact": exact});
+            if let Some(name) = name {
+                params["name"] = json!(name);
+            }
+            client.call("query", with_scope(Some(params), scope)).await
         }
         Command::Click { target, modifiers, button, click_count, position } => {
             run_click(client, &target, &modifiers, button.as_deref(), click_count, position, scope).await
@@ -591,9 +596,7 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             params["value"] = json!("");
             client.call("fill", with_scope(Some(params), scope)).await
         }
-        Command::SetInputFiles { target, files } => {
-            run_set_input_files_command(client, &target, files, scope.window).await
-        }
+        Command::SetInputFiles { target, files } => run_set_input_files_command(client, &target, files, scope).await,
         Command::Wheel { target, delta_x, delta_y } => {
             let mut params = target.as_deref().map_or_else(|| json!({}), target_params);
             params["deltaX"] = json!(delta_x);
@@ -657,7 +660,15 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             client
                 .call(
                     "scroll",
-                    with_scope(Some(json!({"direction": direction, "amount": amount, "ref": r#ref})), scope),
+                    // `--ref` takes the ref as snapshots print it (`@e3`) or bare (`e3`).
+                    with_scope(
+                        Some(json!({
+                            "direction": direction,
+                            "amount": amount,
+                            "ref": r#ref.as_deref().map(|value| value.trim_start_matches('@')),
+                        })),
+                        scope,
+                    ),
                 )
                 .await
         }
@@ -1034,7 +1045,8 @@ mod tests {
         let script = super::export_shell_script(&[
             serde_json::json!({"action":"click","timestamp":0,"selector":"#save","window":"settings"}),
             serde_json::json!({"action":"click","timestamp":1,"selector":"#save","window":"main"}),
-        ]);
+        ])
+        .expect("complete entries export");
         assert!(script.contains("tauri-hasgard --window 'settings' click '#save'"));
         assert!(script.contains("tauri-hasgard --window 'main' click '#save'"));
     }

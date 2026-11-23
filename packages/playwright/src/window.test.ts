@@ -115,17 +115,12 @@ test("window readiness retries only the explicit handshake-pending error", async
   expect(attempts).toBe(1)
 })
 
-test("role locator refreshes the snapshot and sends the resolved ref to the requested window", async () => {
+test("role locator matches in the page and sends the resolved ref to the requested window", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   call.mockImplementation(async (method) => {
-    if (method === "snapshot") {
-      return {
-        elements: [
-          { ref: "e1", role: "button", depth: 1, name: "Cancel" },
-          { ref: "e2", role: "button", depth: 1, name: "Save" }
-        ]
-      }
+    if (method === "query") {
+      return { elements: [{ ref: "e2", role: "button", depth: 1, name: "Save" }] }
     }
     if (method === "click") return { ok: true }
     throw new Error(`Unexpected method: ${method}`)
@@ -134,10 +129,31 @@ test("role locator refreshes the snapshot and sends the resolved ref to the requ
   const window = new HasgardWindow(rpc, "settings")
   await window.getByRole("button", { name: "Save", exact: true }).click()
 
-  expect(call).toHaveBeenNthCalledWith(1, "snapshot", { window: "settings" })
+  expect(call).toHaveBeenNthCalledWith(1, "query", {
+    by: "role",
+    value: "button",
+    name: "Save",
+    exact: true,
+    window: "settings"
+  })
   expect(call).toHaveBeenNthCalledWith(2, "click", {
     ref: "e2",
     window: "settings"
+  })
+  expect(call).not.toHaveBeenCalledWith("snapshot", expect.anything())
+})
+
+test("role locator sends a regular expression name as its source and flags", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ elements: [] })
+
+  await new HasgardWindow(rpc, "main").getByRole("button", { name: /^save$/i }).count()
+
+  expect(call).toHaveBeenCalledWith("query", {
+    by: "role",
+    value: "button",
+    name: { source: "^save$", flags: "i" },
+    window: "main"
   })
 })
 
@@ -206,14 +222,15 @@ test("dragTo resolves source and destination inside one window lock", async () =
   const rpc = new HasgardRpcClient("/unused")
   const methods: string[] = []
   const call = vi.spyOn(rpc, "call")
-  call.mockImplementation(async (method) => {
+  call.mockImplementation(async (method, params) => {
     methods.push(method)
-    if (method === "snapshot") {
+    if (method === "query") {
+      const { value } = params as { value: string }
       return {
-        elements: [
-          { ref: "e1", role: "listitem", depth: 1, name: "Card" },
-          { ref: "e2", role: "list", depth: 1, name: "Done" }
-        ]
+        elements:
+          value === "listitem"
+            ? [{ ref: "e1", role: "listitem", depth: 1, name: "Card" }]
+            : [{ ref: "e2", role: "list", depth: 1, name: "Done" }]
       }
     }
     if (method === "drag") return { ok: true }
@@ -225,7 +242,7 @@ test("dragTo resolves source and destination inside one window lock", async () =
     .getByRole("listitem", { name: "Card", exact: true })
     .dragTo(window.getByRole("list", { name: "Done", exact: true }))
 
-  expect(methods).toEqual(["snapshot", "snapshot", "drag"])
+  expect(methods).toEqual(["query", "query", "drag"])
   expect(call).toHaveBeenLastCalledWith("drag", {
     source: { ref: "e1" },
     target: { ref: "e2" },
@@ -494,11 +511,11 @@ test("nth sends the ordinal with the selector so resolution and action share a r
   expect(call).toHaveBeenNthCalledWith(2, "click", { selector: ".row", index: -1, window: "main" })
 })
 
-test("nth on a role locator picks from the snapshot instead of erroring on ambiguity", async () => {
+test("nth on a role locator picks from the matches instead of erroring on ambiguity", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   call.mockImplementation(async (method) => {
-    if (method === "snapshot") {
+    if (method === "query") {
       return {
         elements: [
           { ref: "e1", role: "listitem", depth: 1, name: "Row" },
@@ -569,16 +586,16 @@ test("boundingBox validates every numeric field", async () => {
   )
 })
 
-test("keeps snapshot and action atomic for concurrent semantic locators in one window", async () => {
+test("keeps resolution and action atomic for concurrent semantic locators in one window", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const methods: string[] = []
-  let snapshot = 0
+  let resolved = 0
   vi.spyOn(rpc, "call").mockImplementation(async (method) => {
     methods.push(method)
-    if (method === "snapshot") {
-      snapshot += 1
+    if (method === "query") {
+      resolved += 1
       return {
-        elements: [{ ref: `e${snapshot}`, role: "button", depth: 1, name: "Run" }]
+        elements: [{ ref: `e${resolved}`, role: "button", depth: 1, name: "Run" }]
       }
     }
     if (method === "click") return { ok: true }
@@ -591,7 +608,7 @@ test("keeps snapshot and action atomic for concurrent semantic locators in one w
     window.getByRole("button", { name: "Run", exact: true }).click()
   ])
 
-  expect(methods).toEqual(["snapshot", "click", "snapshot", "click"])
+  expect(methods).toEqual(["query", "click", "query", "click"])
 })
 
 // --- filter ---------------------------------------------------------------
@@ -886,7 +903,7 @@ test("dblclick is a click with clickCount 2, and keeps the other options", async
 //
 // A frame is a document to search in, not an element to search under, so these
 // pin that the chain reaches every round trip a locator makes: the action, the
-// count, the wait, and the snapshot a role locator needs.
+// count, the wait, and the query a role locator needs.
 
 function frameRecorder(elements: { ref: string; role: string; name?: string }[] = []) {
   const rpc = new HasgardRpcClient("/unused")
@@ -945,7 +962,7 @@ test("waitFor inside a frame waits on the frame document", async () => {
   expect(sent).toEqual([["wait", { selector: ".row", window: "main", frame: ["#list"], gone: false, timeout: 100 }]])
 })
 
-test("a role locator inside a frame snapshots the frame, not the top document", async () => {
+test("a role locator inside a frame queries the frame, not the top document", async () => {
   const { rpc, sent } = frameRecorder([{ ref: "e1", role: "button", name: "Pay" }])
 
   await new HasgardWindow(rpc, "main")
@@ -953,7 +970,10 @@ test("a role locator inside a frame snapshots the frame, not the top document", 
     .getByRole("button", { name: "Pay", exact: true })
     .click()
 
-  expect(sent[0]).toEqual(["snapshot", { window: "main", frame: ["#checkout"] }])
+  expect(sent[0]).toEqual([
+    "query",
+    { by: "role", value: "button", name: "Pay", exact: true, window: "main", frame: ["#checkout"] }
+  ])
   // The action targets the resolved ref, which already identifies its document.
   expect(sent[1]).toEqual(["click", { ref: "e1", window: "main", frame: ["#checkout"] }])
 })

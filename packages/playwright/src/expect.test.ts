@@ -51,3 +51,53 @@ test("zero timeout performs one read and invalid timeouts reject", async () => {
     await expect(hasgardExpect(locator).not.toBeVisible({ timeout })).rejects.toThrow("finite non-negative")
   }
 })
+
+test("state, value, attribute and count assertions read through the locator", async () => {
+  const locator = {
+    isVisible: () => Promise.resolve(false),
+    isDisabled: () => Promise.resolve(true),
+    isChecked: () => Promise.resolve(true),
+    textContent: () => Promise.resolve("Saved Nyssance"),
+    inputValue: () => Promise.resolve("me@example.com"),
+    getAttribute: (name: string) => Promise.resolve(name === "href" ? "/settings" : null),
+    count: () => Promise.resolve(3)
+  } as unknown as HasgardLocator
+  const options = { timeout: 25 }
+
+  await hasgardExpect(locator).toBeHidden(options)
+  await hasgardExpect(locator).toBeDisabled(options)
+  await hasgardExpect(locator).not.toBeEnabled(options)
+  await hasgardExpect(locator).toBeChecked(options)
+  await hasgardExpect(locator).toContainText("Nyssance", options)
+  await hasgardExpect(locator).not.toContainText("nyssance", options)
+  await hasgardExpect(locator).toHaveValue("me@example.com", options)
+  await hasgardExpect(locator).toHaveValue(/@example\.com$/, options)
+  await hasgardExpect(locator).toHaveAttribute("href", "/settings", options)
+  await hasgardExpect(locator).not.toHaveAttribute("target", "_blank", options)
+  await hasgardExpect(locator).toHaveCount(3, options)
+  await hasgardExpect(locator).not.toHaveCount(2, options)
+})
+
+test("a failed assertion reports what was last read", async () => {
+  const locator = {
+    inputValue: () => Promise.resolve("draft"),
+    count: () => Promise.resolve(1)
+  } as unknown as HasgardLocator
+
+  await expect(hasgardExpect(locator).toHaveValue("final", { timeout: 0 })).rejects.toThrow(
+    'expected Hasgard locator value to match final, received "draft" within 0ms'
+  )
+  await expect(hasgardExpect(locator).not.toHaveCount(1, { timeout: 0 })).rejects.toThrow(
+    "expected Hasgard locator not to match 1 elements, received 1 within 0ms"
+  )
+})
+
+test("an assertion that becomes true is noticed well inside the old 50 ms poll interval", async () => {
+  const flipAt = Date.now() + 5
+  const locator = { isVisible: () => Promise.resolve(Date.now() >= flipAt) } as unknown as HasgardLocator
+
+  const started = Date.now()
+  await hasgardExpect(locator).toBeVisible({ timeout: 1_000 })
+
+  expect(Date.now() - started).toBeLessThan(45)
+})

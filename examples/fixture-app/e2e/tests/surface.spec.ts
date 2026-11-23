@@ -671,3 +671,53 @@ test("native video targets a window and reports permission failures explicitly",
   await expect(window.videoStatus()).resolves.toEqual({ active: false, pendingResult: false })
   await expect(window.stopVideo()).rejects.toThrow(/no video session/)
 })
+
+test("an element screenshot has the element's own proportions", async ({ window }) => {
+  const box = await window.locator("#hit-pad").boundingBox()
+  const png = await window.screenshot("#hit-pad")
+
+  expect(png.subarray(1, 4).toString("latin1")).toBe("PNG")
+  const width = png.readUInt32BE(16)
+  const height = png.readUInt32BE(20)
+  // The capture is in device pixels, so both sides scale by the same factor.
+  const scale = width / box.width
+  expect(scale).toBeGreaterThanOrEqual(0.99)
+  expect(Math.abs(height - box.height * scale)).toBeLessThanOrEqual(2)
+})
+
+test("a pending watch observes the action that follows it on the same connection", async ({ window }) => {
+  const started = Date.now()
+  const watching = window.watch({ selector: "#status", requireMutation: true, timeoutMs: 8_000 })
+  await window.locator("#display-name").fill("Pipelined")
+  await window.locator("#save").click()
+
+  // `requireMutation` rejects on timeout, so resolving means the watch saw
+  // the save. Serial dispatch held the fill behind the watch until it timed out.
+  await watching
+  expect(Date.now() - started).toBeLessThan(4_000)
+  await expect(window.locator("#status")).toHaveText("Saved Pipelined")
+})
+
+test("a ref to a removed element is stale instead of silently succeeding", async ({ window }) => {
+  await window.evaluate(
+    'const b = document.createElement("button"); b.id = "transient"; b.textContent = "Transient"; document.body.append(b); null'
+  )
+  const found = await window.call<{ elements: { ref: string }[] }>("query", { by: "selector", value: "#transient" })
+  const ref = found.elements[0].ref
+  await window.call("click", { ref })
+
+  await window.evaluate('document.querySelector("#transient").remove(); null')
+
+  await expect(window.call("click", { ref })).rejects.toThrow(/Stale ref/)
+  await expect(window.call("wait", { ref, gone: true, timeout: 1_000 })).resolves.toEqual({ found: true })
+})
+
+test("role assertions cover value, state and count without a snapshot per poll", async ({ window }) => {
+  await window.getByRole("textbox", { name: "Display name" }).fill("Asserted")
+
+  await expect(window.getByRole("textbox", { name: "Display name" })).toHaveValue("Asserted")
+  await expect(window.locator("#locked")).toBeDisabled()
+  await expect(window.locator("#save")).toBeEnabled()
+  await expect(window.locator("[data-turn]")).toHaveCount(80)
+  await expect(window.locator("#status")).not.toContainText("never")
+})

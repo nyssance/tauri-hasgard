@@ -9,6 +9,8 @@ pub(crate) mod native;
 pub(crate) mod probe;
 #[cfg(target_os = "macos")]
 pub(crate) mod screencapture;
+#[cfg(windows)]
+pub(crate) mod webview2;
 #[cfg(target_os = "macos")]
 pub(crate) mod window_id;
 
@@ -56,7 +58,7 @@ pub(crate) type PageCaptureFn = std::sync::Arc<dyn Fn(Option<&str>, [f64; 4]) ->
 static PAGE_CAPTURE_FN: std::sync::RwLock<Option<PageCaptureFn>> = std::sync::RwLock::new(None);
 
 /// Install the composited page capture for this process.
-#[cfg(feature = "cef")]
+#[cfg(any(feature = "cef", windows))]
 pub(crate) fn register_page_capture_fn(capture: PageCaptureFn) {
     *PAGE_CAPTURE_FN.write().expect("page capture lock") = Some(capture);
 }

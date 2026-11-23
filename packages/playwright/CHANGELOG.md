@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 — 2026-11-23
+
+- Add `toBeHidden`, `toBeEnabled`, `toBeDisabled`, `toBeChecked`, `toContainText`, `toHaveValue`, `toHaveAttribute` and `toHaveCount`.
+- `getByRole` matches in the page through the `role` query dimension instead of taking a full snapshot per action. Refs held elsewhere and the `diff` baseline are no longer reset by a role locator.
+- Assertions and indexed or filtered `waitFor` re-read after 10, 20, then 50 ms instead of a fixed 50 ms.
+- A pending `watch` no longer blocks actions awaited after it; requires plugin 0.8.0.
+- On Windows, `screenshot` returns composited pixels with plugin 0.8.0.
+
 ## 0.6.8 — 2026-11-15
 
 - Align package versions with the plugin's CEF ipc and screenshot release. The client API is unchanged from 0.6.7.

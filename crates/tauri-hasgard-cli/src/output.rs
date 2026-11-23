@@ -476,22 +476,14 @@ pub(crate) fn format_diff(value: &serde_json::Value) {
             if let Some(fields) = field_changes {
                 for field in fields {
                     let field_name = field.as_str().unwrap_or("?");
-                    let old_val = strip_ansi(
-                        &old.and_then(|o| o.get(field_name))
-                            .map(|v| match v {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
-                            })
-                            .unwrap_or_default(),
-                    );
-                    let new_val = strip_ansi(
-                        &el.get(field_name)
-                            .map(|v| match v {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
-                            })
-                            .unwrap_or_default(),
-                    );
+                    // A field one side lacks reads as empty: that absence is the change.
+                    let field_text = |value: Option<&serde_json::Value>| match value {
+                        Some(serde_json::Value::String(s)) => s.clone(),
+                        Some(other) => other.to_string(),
+                        None => String::new(),
+                    };
+                    let old_val = strip_ansi(&field_text(old.and_then(|o| o.get(field_name))));
+                    let new_val = strip_ansi(&field_text(el.get(field_name)));
 
                     let mut line = format!("{} {} ", crate::style::warn("~"), crate::style::info(&role));
                     if let Some(ref n) = name {

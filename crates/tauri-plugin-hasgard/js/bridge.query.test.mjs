@@ -69,6 +69,7 @@ function loadBridge(body) {
   globalThis.window = { fetch() {} }
   globalThis.document = {
     body,
+    documentElement: body,
     getElementById(id) {
       return all.find((n) => n.getAttribute("id") === id) || null
     },
@@ -173,14 +174,94 @@ test("query refs append rather than resetting the map a snapshot handed out", ()
   const found = hasgard.query({ by: "text", value: "two" })
 
   assert.ok(before.length > 0)
-  assert.ok(!before.includes(found.elements[0].ref), "a query ref must not collide with a live snapshot ref")
+  assert.equal(hasgard.resolve(found.elements[0].ref), second, "a query ref must name the node it matched")
   assert.equal(hasgard.resolve(before[0]), first, "snapshot refs must stay resolvable after a query")
+})
+
+test("a node keeps one ref across repeated queries instead of minting a new one each time", () => {
+  const node = el("p", { text: "one" })
+  const hasgard = loadBridge(el("body", {}, [node]))
+
+  const first = hasgard.query({ by: "text", value: "one" }).elements[0].ref
+  const second = hasgard.query({ by: "text", value: "one" }).elements[0].ref
+
+  assert.equal(second, first)
+})
+
+test("exact text finds a nested match whose ancestors only contain it", () => {
+  const span = el("span", { text: "Save" })
+  const other = el("span", { text: "Save draft" })
+  const hasgard = loadBridge(el("body", {}, [el("div", { text: "Actions: " }, [span, other])]))
+
+  const result = hasgard.query({ by: "text", value: "Save", exact: true })
+
+  assert.equal(result.elements.length, 1)
+  assert.equal(hasgard.resolve(result.elements[0].ref), span)
+})
+
+test("text matches come back in document order across separate subtrees", () => {
+  const a = el("li", { text: "apple pie" })
+  const b = el("li", { text: "apple tart" })
+  const hasgard = loadBridge(el("body", {}, [el("ul", {}, [a]), el("ul", {}, [b])]))
+
+  const result = hasgard.query({ by: "text", value: "apple" })
+
+  assert.deepEqual(
+    result.elements.map((e) => hasgard.resolve(e.ref)),
+    [a, b]
+  )
+})
+
+test("role matches what a snapshot reports, without resetting snapshot refs", () => {
+  const save = el("button", { text: "Save" })
+  const cancel = el("button", { text: "Cancel" })
+  const hidden = el("div", { attrs: { "aria-hidden": "true" } }, [el("button", { text: "Save hidden" })])
+  const hasgard = loadBridge(el("body", {}, [save, cancel, hidden]))
+
+  const snap = hasgard.snapshot({})
+  const all = hasgard.query({ by: "role", value: "button" })
+  const named = hasgard.query({ by: "role", value: "button", name: "Save" })
+
+  assert.equal(all.elements.length, 2, "a hidden subtree contributes no role matches")
+  assert.equal(named.elements.length, 1)
+  assert.equal(hasgard.resolve(named.elements[0].ref), save)
+  assert.deepEqual(
+    named.elements[0],
+    snap.elements.find((e) => e.name === "Save"),
+    "a role match has the shape and ref the snapshot gave the same node"
+  )
+})
+
+test("role names match as a case-sensitive substring, exactly, or by pattern", () => {
+  const hasgard = loadBridge(el("body", {}, [el("button", { text: "Save" }), el("button", { text: "Save draft" })]))
+
+  assert.equal(hasgard.query({ by: "role", value: "button", name: "Save" }).elements.length, 2)
+  assert.equal(hasgard.query({ by: "role", value: "button", name: "save" }).elements.length, 0)
+  assert.equal(hasgard.query({ by: "role", value: "button", name: "Save", exact: true }).elements.length, 1)
+  assert.equal(
+    hasgard.query({ by: "role", value: "button", name: { source: "^save draft$", flags: "i" } }).elements.length,
+    1
+  )
+  assert.throws(
+    () => hasgard.query({ by: "role", value: "button", name: 7 }),
+    /must be a string or a \{ source, flags \} pattern/
+  )
+})
+
+test("acting on a ref whose element left the document fails as stale", () => {
+  const node = el("button", { text: "Save" })
+  const hasgard = loadBridge(el("body", {}, [node]))
+  const ref = hasgard.query({ by: "role", value: "button" }).elements[0].ref
+
+  node.isConnected = false
+
+  assert.throws(() => hasgard.filter({ refs: [ref], hasText: "Save" }), /Stale ref: e\d+ .*take a new snapshot/)
 })
 
 test("an unknown dimension is rejected with the supported list", () => {
   const hasgard = loadBridge(el("body", {}, []))
 
-  assert.throws(() => hasgard.query({ by: "role", value: "button" }), /must be one of .*text.*testid/)
+  assert.throws(() => hasgard.query({ by: "xpath", value: "//button" }), /must be one of .*text.*testid.*role/)
 })
 
 test("a missing value is rejected rather than matching everything", () => {

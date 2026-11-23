@@ -4,6 +4,7 @@
   if (window.__HASGARD__) return
 
   const idMap = new Map()
+  let refOf = new WeakMap()
   let refCounter = 0
 
   const _logs = []
@@ -687,11 +688,15 @@
   // ones would grow `idMap` on every link of a filter chain and make the same
   // element answer to a different name after each refinement.
   function describeElement(node, role, depth, existingRef) {
-    let ref = existingRef
+    // A node keeps one ref for as long as `idMap` holds it. Minting a second
+    // ref for a node that already has one would grow `idMap` on every repeated
+    // query, and let two refs for one element disagree about staleness.
+    let ref = existingRef || refOf.get(node)
     if (!ref) {
       refCounter++
       ref = `e${refCounter}`
       idMap.set(ref, node)
+      refOf.set(node, ref)
     }
 
     const entry = { ref, role, depth }
@@ -712,6 +717,15 @@
     return entry
   }
 
+  // Inactive application panes must not mint actionable references.
+  function isHiddenFromSnapshot(node) {
+    return (
+      node.getAttribute("inert") !== null ||
+      node.getAttribute("hidden") !== null ||
+      node.getAttribute("aria-hidden") === "true"
+    )
+  }
+
   function snapshot(options) {
     const interactive = options?.interactive || false
     const selector = options?.selector || null
@@ -719,6 +733,8 @@
 
     // Never recycle a ref: another connection may still hold an older snapshot.
     idMap.clear()
+    refOf = new WeakMap()
+    pruneAt = PRUNE_FLOOR
 
     const doc = frameDocument(options?.frame)
     let root
@@ -738,13 +754,7 @@
     function walk(node, currentDepth) {
       if (currentDepth > maxDepth) return
       if (node.nodeType !== Node.ELEMENT_NODE) return
-      // Inactive application panes must not mint actionable references.
-      if (
-        node.getAttribute("inert") !== null ||
-        node.getAttribute("hidden") !== null ||
-        node.getAttribute("aria-hidden") === "true"
-      )
-        return
+      if (isHiddenFromSnapshot(node)) return
 
       const role = getRole(node)
       const isInteractive = isInteractiveElement(node)
@@ -766,12 +776,7 @@
     }
 
     for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      if (
-        ancestor.hasAttribute("inert") ||
-        ancestor.hasAttribute("hidden") ||
-        ancestor.getAttribute("aria-hidden") === "true"
-      )
-        return { elements }
+      if (isHiddenFromSnapshot(ancestor)) return { elements }
     }
     walk(root, 0)
     return { elements }
@@ -780,7 +785,7 @@
   // `selector` is a dimension so that every locator kind — CSS, role, or
   // text-ish — can be resolved down to refs by one code path. `filter` then
   // refines any of them uniformly instead of needing a per-kind implementation.
-  const QUERY_DIMENSIONS = ["text", "label", "placeholder", "testid", "alt", "title", "selector"]
+  const QUERY_DIMENSIONS = ["text", "label", "placeholder", "testid", "alt", "title", "selector", "role"]
 
   function normalizeForMatch(value) {
     return String(value ?? "")
@@ -836,8 +841,7 @@
     if (by === "testid") return doc.querySelectorAll("[data-testid]")
     if (by === "alt") return doc.querySelectorAll("[alt]")
     if (by === "title") return doc.querySelectorAll("[title]")
-    if (by === "label") return doc.querySelectorAll("input, textarea, select, button, meter, output, progress")
-    return doc.querySelectorAll("*")
+    return doc.querySelectorAll("input, textarea, select, button, meter, output, progress")
   }
 
   function queryMatches(el, by, value, exact) {
@@ -849,12 +853,98 @@
     // A test id is an identifier, not prose: substring matching on it invites
     // "save" quietly selecting "save-draft", so this dimension is always exact.
     if (by === "testid") return normalizeForMatch(el.getAttribute("data-testid")) === normalizeForMatch(value)
-    if (by === "label") {
-      return labelTextsOf(el).some((text) => {
-        return matchesQuery(text, value, exact)
-      })
+    return labelTextsOf(el).some((text) => {
+      return matchesQuery(text, value, exact)
+    })
+  }
+
+  // Text matching considers every element, so an ancestor matches whenever its
+  // descendant does — <html> and <body> would match everything. Only the
+  // innermost matches are kept, which is the element a user would point at.
+  //
+  // One top-down walk does both jobs. A subtree whose text does not contain the
+  // needle cannot hold a match, so it is skipped whole; an element is innermost
+  // exactly when none of its children reported a match. Scanning every element
+  // and then comparing the matches pairwise was quadratic in the match count.
+  function innermostTextMatches(doc, value, exact) {
+    const wanted = normalizeForMatch(value)
+    const needle = exact ? wanted : wanted.toLowerCase()
+    const matched = []
+
+    function visit(el) {
+      const text = normalizeForMatch(el.textContent)
+      const haystack = exact ? text : text.toLowerCase()
+      if (!haystack.includes(needle)) return false
+      let inner = false
+      for (const child of el.children) {
+        if (visit(child)) inner = true
+      }
+      if (inner) return true
+      if (exact && haystack !== needle) return false
+      matched.push(el)
+      return true
     }
-    return matchesQuery(el.textContent, value, exact)
+
+    visit(doc.documentElement)
+    return matched
+  }
+
+  function roleNameMatcher(params) {
+    const name = params.name
+    if (name == null) return null
+    if (typeof name === "string") {
+      // Role names follow the snapshot's own rule: a case-sensitive substring,
+      // or equality when exact.
+      if (params.exact) {
+        return (actual) => {
+          return actual === name
+        }
+      }
+      return (actual) => {
+        return actual.includes(name)
+      }
+    }
+    if (typeof name === "object" && typeof name.source === "string" && typeof name.flags === "string") {
+      const pattern = new RegExp(name.source, name.flags)
+      return (actual) => {
+        pattern.lastIndex = 0
+        return pattern.test(actual)
+      }
+    }
+    throw new Error("query: role 'name' must be a string or a { source, flags } pattern")
+  }
+
+  // The elements a snapshot would report under `role`, matched in the page so
+  // that only the matches travel. It walks exactly as `snapshot` does — same
+  // hidden-subtree rule, same role and name computation — but leaves `idMap`
+  // alone, so refs held elsewhere and the `diff` baseline both survive.
+  function queryByRole(doc, params) {
+    const role = params.value
+    if (typeof role !== "string" || role === "") throw new Error("query: role 'value' must be a non-empty string")
+    const nameMatches = roleNameMatcher(params)
+    const elements = []
+
+    function walk(node, depth) {
+      if (node.nodeType !== Node.ELEMENT_NODE) return
+      if (isHiddenFromSnapshot(node)) return
+      if (getRole(node) === role) {
+        if (nameMatches) {
+          const name = getName(node)
+          if (name && nameMatches(name)) elements.push(describeElement(node, role, depth))
+        } else {
+          elements.push(describeElement(node, role, depth))
+        }
+      }
+      for (const child of node.children) walk(child, depth + 1)
+    }
+
+    const root = doc.body
+    if (!root) return { elements }
+    for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (isHiddenFromSnapshot(ancestor)) return { elements }
+    }
+    walk(root, 0)
+    return { elements }
   }
 
   function query(params) {
@@ -864,22 +954,18 @@
     }
     if (params.value == null) throw new Error("query requires a 'value'")
     const exact = !!params.exact
+    const doc = frameDocument(params.frame)
+
+    pruneDetachedRefs()
+    if (by === "role") return queryByRole(doc, params)
 
     let matched = []
-    const candidates = queryCandidates(frameDocument(params.frame), by, params.value)
-    for (const candidate of candidates) {
-      if (queryMatches(candidate, by, params.value, exact)) matched.push(candidate)
-    }
-
-    // Text matching walks every element, so an ancestor matches whenever its
-    // descendant does — <html> and <body> would match everything. Keep only the
-    // innermost matches, which is the element a user would point at.
-    if (by === "text" && matched.length > 1) {
-      matched = matched.filter((el) => {
-        return !matched.some((other) => {
-          return other !== el && el.contains(other)
-        })
-      })
+    if (by === "text") {
+      matched = innermostTextMatches(doc, params.value, exact)
+    } else {
+      for (const candidate of queryCandidates(doc, by, params.value)) {
+        if (queryMatches(candidate, by, params.value, exact)) matched.push(candidate)
+      }
     }
 
     return {
@@ -967,10 +1053,36 @@
     return idMap.get(ref) || null
   }
 
+  // A ref names a node, not a position: once that node leaves its document —
+  // a re-render replaced it, or its frame was removed — the ref is stale.
+  // Acting on the detached node would dispatch events nothing listens to and
+  // still report success.
+  function isDetached(el) {
+    return el.isConnected === false || el.ownerDocument?.defaultView === null
+  }
+
   function requireEl(ref) {
     const el = idMap.get(ref)
     if (!el) throw new Error(`Unknown ref: ${ref}`)
+    if (isDetached(el)) {
+      throw new Error(`Stale ref: ${ref} (its element is no longer in the document; take a new snapshot)`)
+    }
     return el
+  }
+
+  // `query` appends refs and only `snapshot` resets them, so a session that
+  // never snapshots would otherwise keep every node it ever matched alive.
+  // Sweep detached nodes once the map has doubled since the last sweep, which
+  // keeps the cost amortized instead of paying a full scan per query.
+  const PRUNE_FLOOR = 1024
+  let pruneAt = PRUNE_FLOOR
+
+  function pruneDetachedRefs() {
+    if (idMap.size < pruneAt) return
+    for (const [ref, el] of idMap) {
+      if (isDetached(el)) idMap.delete(ref)
+    }
+    pruneAt = Math.max(PRUNE_FLOOR, idMap.size * 2)
   }
 
   // `index` selects among *all* selector matches, so an ordinal locator
@@ -1809,8 +1921,8 @@
     return new Promise((res, rej) => {
       function check() {
         if (selector) return frameDocument(options?.frame).querySelector(selector)
-        if (ref) return idMap.get(ref) || null
-        return null
+        const known = idMap.get(ref)
+        return known && !isDetached(known) ? known : null
       }
 
       const el = check()
@@ -1835,11 +1947,15 @@
         }
       })
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true
-      })
+      // Mutations do not cross a frame boundary, so the target's own document
+      // has to be observed. The top document stays observed as well: removing
+      // the frame itself is a mutation only its host document sees.
+      const roots = new Set([document.body])
+      if (selector) roots.add(frameDocument(options?.frame).body)
+      else roots.add(idMap.get(ref)?.ownerDocument?.body)
+      for (const root of roots) {
+        if (root) observer.observe(root, { childList: true, subtree: true, attributes: true })
+      }
     })
   }
 

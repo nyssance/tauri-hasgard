@@ -23,7 +23,7 @@ Check that it works, with your app running:
 
 ```console
 $ npx -y tauri-hasgard ping
-✓ Connected. Plugin and CLI both 0.7.0.
+✓ Connected. Plugin and CLI both 0.8.0.
 $ claude mcp list        # or: codex mcp list
 ```
 
@@ -59,7 +59,7 @@ args = ["-y", "tauri-hasgard", "mcp"]
 An app that registers the plugin can serve the same tools from its own process: no endpoint is opened, and no CLI is installed. Enable the plugin's `mcp` feature:
 
 ```toml
-tauri-plugin-hasgard = { version = "0.7", features = ["mcp"] }
+tauri-plugin-hasgard = { version = "0.8", features = ["mcp"] }
 ```
 
 ```rust

@@ -27,8 +27,10 @@ mod macos_keyboard;
 pub(crate) mod protocol;
 pub(crate) mod recorder;
 mod video;
+#[cfg(windows)]
+mod windows_focus;
 // Native screenshot capture for the `screenshot_native` JSON-RPC method.
-// macOS-only today; non-macOS callers receive `PERMISSION_DENIED`.
+// macOS-only today; non-macOS callers receive `-32601`.
 pub(crate) mod screenshot;
 #[cfg(any(unix, windows))]
 pub(crate) mod server;
@@ -244,6 +246,20 @@ where
     })
 }
 
+/// `screenshot`: resolves the label like `EvalFn` and takes that webview's composited pixels.
+#[cfg(windows)]
+fn make_page_capture_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> screenshot::PageCaptureFn
+where
+    R::Handle: tauri_runtime_wry::AsWryHandle,
+{
+    let handle = app.clone();
+    Arc::new(move |window: Option<&str>, area| {
+        let label = window.unwrap_or("main");
+        let target = handle.get_webview_window(label).ok_or_else(|| format!("Window '{label}' not found"))?;
+        screenshot::webview2::capture(&target, area)
+    })
+}
+
 #[cfg(any(unix, windows))]
 fn make_press_hooks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PressHooksRef
 where
@@ -263,6 +279,9 @@ where
             };
             #[cfg(target_os = "macos")]
             macos_keyboard::focus(&target)?;
+            #[cfg(windows)]
+            let before = windows_focus::current();
+
             #[cfg(not(target_os = "macos"))]
             target.set_focus().map_err(|e| e.to_string())?;
 
@@ -284,6 +303,9 @@ where
                 receiver
                     .recv_timeout(std::time::Duration::from_secs(2))
                     .map_err(|error| format!("WebView focus timed out: {error}"))??;
+
+                let hwnd = target.hwnd().map_err(|error| error.to_string())?;
+                windows_focus::confirm(hwnd.0 as isize, before)?;
             }
 
             Ok(())

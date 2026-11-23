@@ -88,6 +88,8 @@ For a complete runnable example, see the repository's [fixture app](https://gith
 await window.getByRole("textbox", { name: "Display name", exact: true }).fill("Nyssance")
 await window.locator('[data-testid="save"]').click()
 await expect(window.getByRole("status")).toHaveText("Saved")
+await expect(window.locator("#email")).toHaveValue(/@example\.com$/)
+await expect(window.locator(".row")).toHaveCount(3)
 await window.press("Tab", {
   waitFor: "document.activeElement.id === 'save'",
   timeoutMs: 1_000

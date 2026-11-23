@@ -32,7 +32,7 @@ tauri-hasgard --window main screenshot screen.png
 
 A target is a ref from the latest snapshot or a CSS selector. Refs are invalid after the UI changes.
 
-`screenshot` redraws the document from the DOM. `screenshot-native --output viewport.png` captures the pixels actually on screen; platform support is listed in the [protocol](protocol.md).
+`screenshot` captures the document or one element: composited pixels on Windows and CEF, a redraw from the DOM elsewhere. `screenshot-native --output viewport.png` captures the pixels actually on screen and is macOS only; the [protocol](protocol.md#methods) lists platform support.
 
 ## 4. Hand it to an AI client
 

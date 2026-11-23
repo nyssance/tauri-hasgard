@@ -75,16 +75,21 @@ pub(crate) enum Command {
         #[arg(short, long)]
         depth: Option<u8>,
     },
-    /// Find elements by text, label, placeholder, test id, alt, or title.
+    /// Find elements by text, label, placeholder, test id, alt, title, or role.
     ///
     /// Matching runs against the live DOM, so it sees every naming source
     /// independently — unlike a snapshot `name`, which collapses them into one
-    /// truncated field.
+    /// truncated field. `--by role` reports what a snapshot would for that
+    /// role, without resetting the refs a snapshot handed out.
     Query {
         /// Dimension to match on.
-        #[arg(long, value_parser = ["text", "label", "placeholder", "testid", "alt", "title"])]
+        #[arg(long, value_parser = ["text", "label", "placeholder", "testid", "alt", "title", "role"])]
         by: String,
         value: String,
+        /// With `--by role`: keep elements whose accessible name contains this
+        /// text (case-sensitive), or equals it with `--exact`.
+        #[arg(long)]
+        name: Option<String>,
         /// Require a full, case-sensitive match. Test ids are always exact.
         #[arg(long)]
         exact: bool,

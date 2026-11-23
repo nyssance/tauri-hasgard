@@ -6,8 +6,8 @@
 //! (`WKWebView` `takeSnapshot:`, no screen-recording permission); with
 //! `window_id` it captures that on-screen window through `screencapture` or
 //! `CGWindowList`. The handler validates the request shape on every platform,
-//! then dispatches to the macOS-only capture pipeline; non-macOS callers always
-//! receive `PERMISSION_DENIED` so the contract surface is identical on every host.
+//! then dispatches to the macOS-only capture pipeline; non-macOS callers receive
+//! `-32601` with `UNSUPPORTED_PLATFORM`, the code every unsupported method uses.
 
 #[cfg(target_os = "macos")]
 use std::path::Path;
@@ -18,7 +18,9 @@ use serde_json::Value;
 #[cfg(target_os = "macos")]
 use serde_json::json;
 
-use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RpcError};
+#[cfg(target_os = "macos")]
+use crate::protocol::RPC_INTERNAL_ERROR;
+use crate::protocol::{RPC_INVALID_PARAMS, RpcError};
 
 /// Domain error codes carried in the JSON-RPC `error.data.error` field.
 ///
@@ -31,7 +33,10 @@ pub(crate) mod codes {
     pub(crate) const WINDOW_NOT_FOUND: &str = "WINDOW_NOT_FOUND";
     #[cfg_attr(not(target_os = "macos"), allow(dead_code, reason = "only referenced by the macOS capture path"))]
     pub(crate) const CAPTURE_FAILED: &str = "CAPTURE_FAILED";
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code, reason = "only referenced by the macOS capture path"))]
     pub(crate) const PERMISSION_DENIED: &str = "PERMISSION_DENIED";
+    #[cfg_attr(target_os = "macos", allow(dead_code, reason = "only referenced where native capture is absent"))]
+    pub(crate) const UNSUPPORTED_PLATFORM: &str = "UNSUPPORTED_PLATFORM";
 }
 
 /// Build a JSON-RPC error response with the given numeric code, message, and
@@ -212,9 +217,9 @@ pub(crate) async fn handle_screenshot(params: Option<&Value>) -> Result<Value, R
         // violations (bad format, relative path) ahead of the platform error.
         let _ = req;
         Err(rpc_error(
-            RPC_INTERNAL_ERROR,
-            codes::PERMISSION_DENIED,
-            "screenshot is only available on macOS in this release",
+            crate::protocol::RPC_METHOD_NOT_FOUND,
+            codes::UNSUPPORTED_PLATFORM,
+            "screenshot_native is only available on macOS; use screenshot for the page's pixels",
             Value::Null,
         ))
     }
@@ -572,7 +577,13 @@ mod tests {
         // all), so it fails past validation rather than as a parameter error.
         let params = json!({"output_path": output_path, "window": "settings"});
         let err = handle_screenshot(Some(&params)).await.expect_err("no capture is registered in tests");
+        #[cfg(target_os = "macos")]
         assert_eq!(err.code, RPC_INTERNAL_ERROR);
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(err.code, crate::protocol::RPC_METHOD_NOT_FOUND);
+            assert_eq!(err_data(&err).get("error").and_then(Value::as_str), Some(codes::UNSUPPORTED_PLATFORM));
+        }
         assert!(
             !err.message.contains("window_id"),
             "omitting window_id must not be a parameter error, got: {}",

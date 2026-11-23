@@ -1,3 +1,17 @@
+# 0.8.0 (2026-11-23)
+
+- Requests on one connection are pipelined: a response is written when its request finishes, matched by `id`. Requests for the same window keep their arrival order; other windows and the observers `wait` and `watch` run alongside. A pending `watch` no longer holds later requests until it times out.
+- A ref whose element left the document fails with `Stale ref` instead of acting on the detached node and reporting success; `wait` with `gone` on a ref now resolves. A node keeps one ref across repeated queries, and detached nodes are swept from the ref table.
+- Add the `role` dimension to `query` (`value` is the role; optional `name` is a string or `{ source, flags }`). Playwright `getByRole` uses it, so it no longer takes a full snapshot per action, resets other refs, or overwrites the `diff` baseline.
+- Text queries walk the document once instead of comparing every match pairwise. A frame-scoped `wait` observes the frame's own document.
+- Wry on Windows: `screenshot` takes composited pixels through WebView2's `Page.captureScreenshot`, like CEF. `press` confirms the target is the foreground window and fails if Windows refuses the activation, instead of sleeping 80 ms and typing into whichever window had focus; consecutive presses into one window no longer wait.
+- `screenshot_native` and `video.*` off macOS return `-32601`, the code every unsupported method uses (`screenshot_native` carries `UNSUPPORTED_PLATFORM`).
+- MCP `screenshot` returns image content instead of a base64 data URL in text.
+- File uploads state their real limit: one request carries about 750 KB of file data. The 50 MB and 100 MB constants that could never be reached are replaced by `MAX_FILE_PAYLOAD_BYTES`.
+- Replay runs `hover`, `focus`, `blur` and `dblclick` instead of skipping them, and rejects an entry without `action` or `timestamp`. CLI `scroll --ref` accepts `@e3` as well as `e3`.
+- Playwright: add `toBeHidden`, `toBeEnabled`, `toBeDisabled`, `toBeChecked`, `toContainText`, `toHaveValue`, `toHaveAttribute` and `toHaveCount`; assertions re-read after 10, 20, then 50 ms instead of a fixed 50 ms.
+- `SECURITY.md` no longer claims the plugin is inert in release builds.
+
 # 0.7.0 (2026-11-19)
 
 - Add the `tauri-hasgard-mcp` crate: the Hasgard tools as an `rmcp` `ServerHandler`, reaching the application through the plugin's endpoint (`HasgardMcpServer::endpoint`) or a host-supplied function (`HasgardMcpServer::in_process`). `tauri-hasgard mcp` is now this library over stdio; its tools and behavior are unchanged.

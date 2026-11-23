@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { basename } from "node:path"
 
+import { pollDelay, sleep } from "./poll.js"
 import type { HasgardRpcClient } from "./rpc-client.js"
 import { HasgardRpcError } from "./rpc-client.js"
 import type {
@@ -1185,10 +1186,10 @@ export class HasgardLocator {
     }
 
     const deadline = Date.now() + options.timeoutMs
-    while (Date.now() <= deadline) {
+    for (let attempt = 0; Date.now() <= deadline; attempt++) {
       const found = (await this.count()) > 0
       if (found === (options.state === "attached")) return
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await sleep(pollDelay(attempt, deadline) || 1)
     }
     throw new Error(`Locator did not become ${options.state} within ${options.timeoutMs}ms`)
   }
@@ -1289,16 +1290,14 @@ export class HasgardLocator {
       if (this.query.query.exact !== undefined) params.exact = this.query.query.exact
       return this.runQuery(params)
     }
-    const query = this.query
-    const snapshot = await this.window.snapshot(query.frame ? { frame: [...query.frame] } : {})
-    return snapshot.elements.filter((element) => {
-      if (element.role !== query.role) return false
-      const expected = query.query.name
-      if (expected === undefined) return true
-      if (element.name === undefined) return false
-      if (expected instanceof RegExp) return expected.test(element.name)
-      return query.query.exact ? element.name === expected : element.name.includes(expected)
-    })
+    // Role matching runs in the page, so only the matches travel and the refs
+    // and `diff` baseline a full snapshot would reset are left alone.
+    const params: Record<string, JsonValue> = { by: "role", value: this.query.role }
+    const { name, exact } = this.query.query
+    if (name instanceof RegExp) params.name = { source: name.source, flags: name.flags }
+    else if (name !== undefined) params.name = name
+    if (exact !== undefined) params.exact = exact
+    return this.runQuery(params)
   }
 
   /**

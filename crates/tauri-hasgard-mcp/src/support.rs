@@ -68,9 +68,16 @@ pub fn with_scope(params: Option<Value>, scope: Scope<'_>) -> Option<Value> {
     Some(Value::Object(map))
 }
 
-pub const MAX_DROP_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB per file
+/// Files travel base64-encoded inside one request, so the request limit is
+/// the upload limit: about 750 KB of file data across all files of one call.
+pub const MAX_FILE_PAYLOAD_BYTES: usize = crate::protocol::MAX_REQUEST_BYTES;
 
-pub const MAX_TOTAL_DROP_SIZE: usize = 100 * 1024 * 1024; // 100 MB total base64 payload
+fn file_payload_too_large(encoded: usize) -> anyhow::Error {
+    anyhow::anyhow!(
+        "Files encode to at least {encoded} bytes, but one request carries at most {MAX_FILE_PAYLOAD_BYTES} bytes \
+         (about 750 KB of file data in total)"
+    )
+}
 
 /// Read local paths into the `{name, type, data}` payloads the bridge turns
 /// back into `File` objects.
@@ -84,11 +91,14 @@ pub fn encode_files(paths: &[std::path::PathBuf]) -> Result<Vec<serde_json::Valu
     for path in paths {
         let meta = std::fs::metadata(path).with_context(|| format!("Failed to stat file: {}", path.display()))?;
         anyhow::ensure!(meta.is_file(), "Not a regular file: {}", path.display());
-        anyhow::ensure!(meta.len() <= MAX_DROP_FILE_SIZE, "File too large (>50 MB): {}", path.display());
+        // Reject from the size alone, before reading a file that cannot be sent.
+        let encoded_len = usize::try_from(meta.len().div_ceil(3).saturating_mul(4)).unwrap_or(usize::MAX);
+        total_encoded = total_encoded.saturating_add(encoded_len);
+        if total_encoded > MAX_FILE_PAYLOAD_BYTES {
+            return Err(file_payload_too_large(total_encoded));
+        }
         let data = std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-        total_encoded += encoded.len();
-        anyhow::ensure!(total_encoded <= MAX_TOTAL_DROP_SIZE, "Total file payload exceeds 100 MB limit");
         let name = path
             .file_name()
             .with_context(|| format!("File path has no file name: {}", path.display()))?
@@ -100,20 +110,20 @@ pub fn encode_files(paths: &[std::path::PathBuf]) -> Result<Vec<serde_json::Valu
 }
 
 pub async fn run_drop_command(
-    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, window: Option<&str>,
+    client: &mut Client, target: &str, file: Vec<std::path::PathBuf>, scope: Scope<'_>,
 ) -> Result<serde_json::Value> {
     let mut p = target_params(target);
     p["files"] = json!(encode_files(&file)?);
-    client.call("drop", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+    client.call("drop", with_scope(Some(p), scope)).await
 }
 
 pub async fn run_set_input_files_command(
-    client: &mut Client, target: &str, files: Vec<std::path::PathBuf>, window: Option<&str>,
+    client: &mut Client, target: &str, files: Vec<std::path::PathBuf>, scope: Scope<'_>,
 ) -> Result<serde_json::Value> {
     let mut p = target_params(target);
     // An empty list is meaningful here, unlike for `drop`: it deselects.
     p["files"] = json!(encode_files(&files)?);
-    client.call("setInputFiles", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+    client.call("setInputFiles", with_scope(Some(p), scope)).await
 }
 
 pub fn target_params(raw: &str) -> serde_json::Value {
@@ -198,8 +208,7 @@ pub async fn run_replay_command(
     let mut skipped = 0;
 
     for (i, entry) in entries.iter().enumerate() {
-        let action = entry.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
-        let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let (action, timestamp) = replay_step(i, entry)?;
 
         let delta = timestamp.saturating_sub(prev_ts);
         if delta > 0 && i > 0 {
@@ -261,18 +270,32 @@ pub fn export_replay_file(path: &std::path::Path, export: &str) -> Result<Value>
 
 pub fn export_replay_command(entries: &[Value], export: &str) -> Result<Value> {
     if export == "sh" {
-        return Ok(Value::String(export_shell_script(entries)));
+        return Ok(Value::String(export_shell_script(entries)?));
     }
     anyhow::bail!("unsupported export format: {export}; supported: sh")
 }
 
-pub fn export_shell_script(entries: &[Value]) -> String {
+/// The `action` and `timestamp` every recorded entry carries. A recording
+/// without them is damaged; replaying it as an unknown action at time zero
+/// would report a run that never happened.
+fn replay_step(index: usize, entry: &Value) -> Result<(&str, u64)> {
+    let action = entry
+        .get("action")
+        .and_then(Value::as_str)
+        .with_context(|| format!("Recording entry {} has no string 'action'", index + 1))?;
+    let timestamp = entry
+        .get("timestamp")
+        .and_then(Value::as_u64)
+        .with_context(|| format!("Recording entry {} has no integer 'timestamp'", index + 1))?;
+    Ok((action, timestamp))
+}
+
+pub fn export_shell_script(entries: &[Value]) -> Result<String> {
     let mut script = String::from("#!/bin/bash\n# Generated by tauri-hasgard record/replay\n\n");
     let mut prev_ts: u64 = 0;
 
     for (i, entry) in entries.iter().enumerate() {
-        let action = entry.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
-        let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let (action, timestamp) = replay_step(i, entry)?;
 
         let delta = timestamp.saturating_sub(prev_ts);
         if delta > 0 && i > 0 {
@@ -292,7 +315,7 @@ pub fn export_shell_script(entries: &[Value]) -> String {
         script.push('\n');
     }
 
-    script
+    Ok(script)
 }
 
 /// Wrap a string in single quotes with proper escaping for shell safety.
@@ -326,6 +349,10 @@ pub fn is_replayable(action: &str) -> bool {
             | "select"
             | "check"
             | "scroll"
+            | "hover"
+            | "focus"
+            | "blur"
+            | "dblclick"
             | "drag"
             | "drop"
             | "navigate"
@@ -383,6 +410,7 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
             format!("tauri-hasgard select {target} {}", shell_escape(value))
         }
         "check" => format!("tauri-hasgard check {target}"),
+        "hover" | "focus" | "blur" | "dblclick" => format!("tauri-hasgard {action} {target}"),
         "scroll" => {
             let dir = entry.get("direction").and_then(|d| d.as_str()).unwrap_or("down");
             let mut cmd = format!("tauri-hasgard scroll {}", shell_escape(dir));

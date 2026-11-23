@@ -9,7 +9,7 @@ use anyhow::Result;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation, JsonObject,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation, JsonObject,
         ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
     },
     service::{MaybeSendFuture, RequestContext, RoleServer},
@@ -188,16 +188,13 @@ impl HasgardMcpServer {
             "windows" => self.call_app_tool("windows.list", None, None).await,
             "state" => self.call_app_tool("state", None, window).await,
             "snapshot" => {
-                self.call_app_tool(
-                    "snapshot",
-                    Some(json!({
-                        "interactive": optional_bool(&args, "interactive")?.unwrap_or(false),
-                        "selector": optional_string(&args, "selector")?,
-                        "depth": optional_u8(&args, "depth")?,
-                    })),
-                    window,
-                )
-                .await
+                let mut params = json!({
+                    "interactive": optional_bool(&args, "interactive")?.unwrap_or(false),
+                    "selector": optional_string(&args, "selector")?,
+                    "depth": optional_u8(&args, "depth")?,
+                });
+                insert_optional_frame(&mut params, &args)?;
+                self.call_app_tool("snapshot", Some(params), window).await
             }
             "diff" => {
                 let mut params = json!({
@@ -211,11 +208,19 @@ impl HasgardMcpServer {
                 self.call_app_tool("diff", Some(params), window).await
             }
             "query" => {
-                let params = json!({
-                    "by": required_string(&args, "by")?,
+                let by = required_string(&args, "by")?;
+                let mut params = json!({
+                    "by": by,
                     "value": required_string(&args, "value")?,
                     "exact": optional_bool(&args, "exact")?.unwrap_or(false),
                 });
+                if let Some(name) = optional_string(&args, "name")? {
+                    if by != "role" {
+                        return Err(invalid_params("'name' applies to by: \"role\" only"));
+                    }
+                    params["name"] = json!(name);
+                }
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("query", Some(params), window).await
             }
             "click" => {
@@ -225,11 +230,13 @@ impl HasgardMcpServer {
             "fill" => {
                 let mut params = target_params(&required_string(&args, "target")?);
                 params["value"] = json!(required_string(&args, "value")?);
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("fill", Some(params), window).await
             }
             "type" => {
                 let mut params = target_params(&required_string(&args, "target")?);
                 params["text"] = json!(required_string(&args, "text")?);
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("type", Some(params), window).await
             }
             "press" => {
@@ -248,6 +255,7 @@ impl HasgardMcpServer {
             "select" => {
                 let mut params = target_params(&required_string(&args, "target")?);
                 params["value"] = json!(required_string(&args, "value")?);
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("select", Some(params), window).await
             }
             "check" => {
@@ -255,6 +263,7 @@ impl HasgardMcpServer {
                 if let Some(checked) = optional_bool(&args, "checked")? {
                     params["checked"] = json!(checked);
                 }
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("check", Some(params), window).await
             }
             "dblclick" => {
@@ -340,8 +349,11 @@ impl HasgardMcpServer {
                 .await
             }
             "screenshot" => {
-                self.call_app_tool("screenshot", Some(json!({"selector": optional_string(&args, "selector")?})), window)
-                    .await
+                let params = Some(json!({"selector": optional_string(&args, "selector")?}));
+                Ok(match self.call_app("screenshot", params, window).await.and_then(|result| image_content(&result)) {
+                    Ok(image) => CallToolResult::success(vec![image]),
+                    Err(err) => tool_error(&err),
+                })
             }
             "screenshot_native" => {
                 // Without an id the plugin renders the routed webview through
@@ -541,7 +553,9 @@ impl HasgardMcpServer {
             Ok(client) => client,
             Err(err) => return Ok(tool_error(&err)),
         };
-        Ok(match run_drop_command(&mut client, &target, files, window.as_deref()).await {
+        let frame = optional_frame(&args)?.unwrap_or_default();
+        let scope = Scope { window: window.as_deref(), frame: &frame };
+        Ok(match run_drop_command(&mut client, &target, files, scope).await {
             Ok(result) => tool_success(result),
             Err(err) => tool_error(&err),
         })
@@ -557,7 +571,9 @@ impl HasgardMcpServer {
             Ok(client) => client,
             Err(err) => return Ok(tool_error(&err)),
         };
-        Ok(match run_set_input_files_command(&mut client, &target, files, window.as_deref()).await {
+        let frame = optional_frame(&args)?.unwrap_or_default();
+        let scope = Scope { window: window.as_deref(), frame: &frame };
+        Ok(match run_set_input_files_command(&mut client, &target, files, scope).await {
             Ok(result) => tool_success(result),
             Err(err) => tool_error(&err),
         })
@@ -1124,7 +1140,7 @@ fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "screenshot",
-            description: "Capture the full webview document or an element selector as a PNG data URL.",
+            description: "Capture the full webview document or an element selector. Returns the PNG as image content.",
             schema: selector_schema,
             read_only: true,
             destructive: false,
@@ -1333,6 +1349,28 @@ fn tool_specs() -> Vec<ToolSpec> {
     ]
 }
 
+/// Tools whose bridge operation resolves inside a frame and whose own schema
+/// does not already declare `frame`. Listed, not blanket-applied: a tool that
+/// ignored the chain would answer from the top document without saying so.
+const FRAME_SCOPED_TOOLS: &[&str] =
+    &["snapshot", "query", "fill", "type", "select", "check", "drop", "set_input_files"];
+
+fn frame_prop() -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Scope to a same-origin iframe: one CSS selector per nesting level, outermost first. Cross-origin frames are unreachable.",
+    })
+}
+
+fn with_frame_property(schema: &JsonObject) -> Arc<JsonObject> {
+    let mut schema = schema.clone();
+    if let Some(Value::Object(properties)) = schema.get_mut("properties") {
+        properties.insert("frame".to_owned(), frame_prop());
+    }
+    Arc::new(schema)
+}
+
 fn cached_tools(dangerous: bool) -> &'static Vec<Tool> {
     static SAFE: OnceLock<Vec<Tool>> = OnceLock::new();
     static ALL: OnceLock<Vec<Tool>> = OnceLock::new();
@@ -1352,7 +1390,12 @@ fn build_tools_with_flag(enable_dangerous_tools: bool) -> Vec<Tool> {
     specs
         .into_iter()
         .map(|spec| {
-            Tool::new(namespaced_tool_name(spec.name), spec.description, (spec.schema)()).with_annotations(
+            let schema = if FRAME_SCOPED_TOOLS.contains(&spec.name) {
+                with_frame_property(&(spec.schema)())
+            } else {
+                (spec.schema)()
+            };
+            Tool::new(namespaced_tool_name(spec.name), spec.description, schema).with_annotations(
                 ToolAnnotations::new()
                     .read_only(spec.read_only)
                     .destructive(spec.destructive)
@@ -1367,6 +1410,20 @@ fn tool_success(result: Value) -> CallToolResult {
     let mut payload = Map::new();
     payload.insert("result".to_owned(), result);
     CallToolResult::structured(Value::Object(payload))
+}
+
+/// The `screenshot` result as image content.
+///
+/// The plugin answers with a PNG data URL. Handing that string to a model as
+/// text gives it megabytes of base64 it cannot look at; image content is what
+/// an MCP client renders and a model sees.
+fn image_content(result: &Value) -> anyhow::Result<ContentBlock> {
+    const PNG_DATA_URL: &str = "data:image/png;base64,";
+    let data = result
+        .as_str()
+        .and_then(|url| url.strip_prefix(PNG_DATA_URL))
+        .ok_or_else(|| anyhow::anyhow!("screenshot result is not a PNG data URL"))?;
+    Ok(ContentBlock::image(data, "image/png"))
 }
 
 fn tool_error(err: &anyhow::Error) -> CallToolResult {
@@ -1656,8 +1713,21 @@ fn click_schema() -> Arc<JsonObject> {
 fn query_schema() -> Arc<JsonObject> {
     object_schema(
         props([
-            ("by", string_prop("Dimension to match: text, label, placeholder, testid, alt, or title.")),
-            ("value", string_prop("Value to match against the chosen dimension.")),
+            (
+                "by",
+                string_prop(
+                    "Dimension to match: text, label, placeholder, testid, alt, title, or role. \
+                     role reports what a snapshot would for that role without resetting snapshot refs.",
+                ),
+            ),
+            ("value", string_prop("Value to match against the chosen dimension; the role itself for by: role.")),
+            (
+                "name",
+                string_prop(
+                    "With by: role, keep elements whose accessible name contains this text (case-sensitive), \
+                     or equals it with exact.",
+                ),
+            ),
             ("exact", bool_prop("Require a full, case-sensitive match. Test ids are always exact regardless.")),
         ]),
         &["by", "value"],

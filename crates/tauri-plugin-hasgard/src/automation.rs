@@ -143,6 +143,8 @@ where
         crate::screenshot::register_snapshot_fn(crate::make_snapshot_fn(app));
         #[cfg(any(target_os = "macos", windows))]
         crate::heap::register_heap_snapshot_fn(crate::make_heap_snapshot_fn(app));
+        #[cfg(windows)]
+        crate::screenshot::register_page_capture_fn(crate::make_page_capture_fn(app));
         Ok((crate::make_eval_fn(app, engine), crate::make_press_hooks(app)))
     })
 }
