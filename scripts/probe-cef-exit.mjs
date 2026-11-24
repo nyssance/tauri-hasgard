@@ -126,7 +126,7 @@ for (const [name, extra] of [
 }
 
 let launch = 0
-for (const [name, activity] of scenarios.slice(0, 1)) {
+for (const [name, activity] of scenarios) {
   const codes = []
   for (let round = 0; round < rounds; round++) {
     const temp = mkdtempSync(join(tmpdir(), "hg-cef-probe-"))
