@@ -1039,7 +1039,7 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "native_dialog",
             description: "Answer the dialog plugin's native open, save and message dialogs in advance, since nothing \
                           can click an operating-system dialog. Set the policy before the action that opens one. \
-                          The default, manual, leaves them on screen. Not available on CEF.",
+                          The default, manual, leaves them on screen.",
             schema: native_dialog_schema,
             read_only: false,
             destructive: false,

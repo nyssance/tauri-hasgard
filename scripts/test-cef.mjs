@@ -220,6 +220,38 @@ try {
   assert.deepEqual(await rpc("cookies.clear", { name: "session" }, "guest"), { removed: 1 })
   assert.deepEqual(await rpc("cookies.get", { url: guestUrl, name: "session" }, "guest"), [])
   pass("location wait, native window state and resize, and the cookie store through the CEF runtime")
+  // The dialog plugin's commands are answered where CEF pauses the application's IPC requests.
+  const native = () => evaluate("main", "document.body.dataset.native")
+  assert.deepEqual((await rpc("nativeDialog.list", {}, "main")).policy, { action: "manual", paths: [], button: null })
+  await rpc("nativeDialog.handle", { action: "accept", paths: ["/tmp/hasgard-cef.csv"] }, "main")
+  // Each answer is awaited as whatever the application received, so a wrong one is shown, not timed out.
+  const answerTo = async (button, expected) => {
+    await evaluate("main", "delete document.body.dataset.native")
+    await rpc("click", { selector: button }, "main")
+    assert.equal(await until(native, `Answer to ${button}`, 5000), expected)
+  }
+  // Proven first with a request that could not open a real dialog even if it went
+  // unanswered: it carries no invoke key, so Tauri itself would refuse it.
+  await answerTo("#native-probe", 'probe:ok:"/tmp/hasgard-cef.csv"')
+  await answerTo("#native-save", 'save:"/tmp/hasgard-cef.csv"')
+  await answerTo("#native-ask", 'message:"Yes"')
+  await rpc("nativeDialog.handle", { action: "dismiss" }, "main")
+  await answerTo("#native-save", "save:null")
+  // Every other command still reaches the application while dialogs are being answered.
+  assert.equal(await rpc("ipc", { command: "ipc_echo", args: { value: "real" } }, "main"), "main:real")
+  const answered = (await rpc("nativeDialog.list", {}, "main")).dialogs
+  assert.deepEqual(
+    answered.map(({ kind, accepted, title, result }) => ({ kind, accepted, title, result })),
+    [
+      { kind: "save", accepted: true, title: "Export report", result: "/tmp/hasgard-cef.csv" },
+      { kind: "message", accepted: true, title: "Draft", result: "Yes" },
+      { kind: "save", accepted: false, title: "Export report", result: null }
+    ]
+  )
+  assert.deepEqual(answered[1].buttons, ["Yes", "No"])
+  assert.equal((await rpc("nativeDialog.handle", { action: "manual" }, "main")).action, "manual")
+  await rpc("nativeDialog.clear", {}, "main")
+  pass("native dialogs answered at the IPC boundary, recorded, and nothing else intercepted")
   const heapPath = join(artifacts, "guest.heapsnapshot")
   rmSync(heapPath, { force: true })
   const heap = await rpc("heap.snapshot", { output_path: heapPath }, "guest")

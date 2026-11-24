@@ -15,3 +15,5 @@ tauri-build = { version = "3.0.0-alpha.4", features = [] }
 tauri = { version = "3.0.0-alpha.6", features = ["unstable"] }
 tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"] }
 tauri-plugin-hasgard = { path = "../../../crates/tauri-plugin-hasgard", features = ["cef"] }
+# Its open, save and message commands are what `nativeDialog.*` answers.
+tauri-plugin-dialog = "3.0.0-alpha.4"

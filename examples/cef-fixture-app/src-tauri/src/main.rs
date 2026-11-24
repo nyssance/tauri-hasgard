@@ -83,6 +83,7 @@ fn main() {
             Ok(())
         })
         .plugin(tauri_plugin_hasgard::init_cef())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![recreate_guest, close_guest, ipc_echo, set_floating, quit_fixture])
         .run(tauri::generate_context!())
         .expect("CEF fixture failed");

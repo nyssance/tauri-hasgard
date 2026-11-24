@@ -15,6 +15,8 @@ import { test } from "node:test"
 
 const here = import.meta.dirname
 const BRIDGE_SRC = readFileSync(join(here, "bridge.js"), "utf8")
+// Shares the page's world with the bridge on Wry, and is loaded ahead of it.
+const NATIVE_DIALOG_SRC = readFileSync(join(here, "native-dialog.js"), "utf8")
 
 const REAL_CONSOLE = {
   log: console.log.bind(console),
@@ -91,6 +93,7 @@ function loadBridge(body, fetch = () => {}) {
   XMLHttpRequestStub.prototype.send = function () {}
   globalThis.XMLHttpRequest = XMLHttpRequestStub
 
+  ;(0, eval)(NATIVE_DIALOG_SRC)
   ;(0, eval)(BRIDGE_SRC)
   return globalThis.window.__HASGARD__
 }

@@ -52,8 +52,18 @@ use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg(any(unix, windows))]
-pub(crate) const BRIDGE_JS: &str =
-    concat!(include_str!("../js/vendor/html-to-image.iife.js"), "\n", include_str!("../js/bridge.js"));
+pub(crate) const BRIDGE_JS: &str = concat!(
+    include_str!("../js/vendor/html-to-image.iife.js"),
+    "\n",
+    include_str!("../js/native-dialog.js"),
+    "\n",
+    include_str!("../js/bridge.js")
+);
+
+/// Answers the dialog plugin's commands in the page's own world. Part of the bridge
+/// on Wry; injected into the main world by a runtime whose bridge is isolated.
+#[cfg(feature = "cef")]
+pub(crate) const NATIVE_DIALOG_JS: &str = include_str!("../js/native-dialog.js");
 
 #[cfg(any(unix, windows))]
 fn build_plugin<R: tauri::Runtime>(

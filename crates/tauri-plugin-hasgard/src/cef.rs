@@ -42,6 +42,8 @@ struct Client {
     console: Mutex<ConsoleLog>,
     network: Mutex<NetworkLog>,
     routes: Mutex<Routes>,
+    /// The native dialog script is registered for every later document of this webview.
+    native_dialogs: Mutex<bool>,
     /// Chunks of the heap snapshot being taken, when one is.
     heap: Mutex<Option<Vec<u8>>>,
 }
@@ -514,6 +516,31 @@ impl Client {
         result
     }
 
+    /// `nativeDialog.*`: the dialog plugin's commands are answered in the page's main
+    /// world, where the application makes them. The script is registered for later
+    /// documents as well, so a policy in force holds across navigation.
+    fn native_dialog(&self, view: &View, operation: &str, params: &Value) -> Result<Value, String> {
+        let call = match operation {
+            "handle" => "handle",
+            "list" => "list",
+            "clear" => "clear",
+            other => return Err(format!("Unknown native dialog method: nativeDialog.{other}")),
+        };
+        {
+            let mut registered = self.native_dialogs.lock().expect("CEF native dialog lock");
+            if !*registered {
+                self.call(view, "Page.addScriptToEvaluateOnNewDocument", &json!({"source": crate::NATIVE_DIALOG_JS}))?;
+                *registered = true;
+            }
+        }
+        // The current document predates the registration; the script installs itself once.
+        let code = format!(
+            "(()=>{{{}\nreturn window.__HASGARD_NATIVE_DIALOGS__.{call}({params})}})()",
+            crate::NATIVE_DIALOG_JS
+        );
+        self.evaluate(view, &EvalScript { code, world: EvalWorld::Main }, || Ok(TIMEOUT))
+    }
+
     /// `heap.snapshot`: V8's own `.heapsnapshot`, streamed by the `DevTools` protocol
     /// and written next to the target, then renamed, so a reader never sees a partial file.
     fn heap_snapshot(&self, view: &View, params: &Value) -> Result<Value, String> {
@@ -926,33 +953,38 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
         if method == "heap.snapshot" {
             return client.heap_snapshot(&view, &params);
         }
-        if method == "route.add" {
-            let added = client.routes.lock().expect("CEF routes lock").add(&params)?;
-            let first = {
-                let mut routes = client.routes.lock().expect("CEF routes lock");
+        // Requests are paused only while something wants to answer them: a route, or a
+        // native dialog policy. Only the kinds the Wry bridge wraps are paused; documents
+        // and assets load untouched.
+        let intercept = |wanted: bool| -> Result<(), String> {
+            let enabled = client.routes.lock().expect("CEF routes lock").send.is_some();
+            if wanted && !enabled {
                 let native = view.clone();
-                routes
-                    .send
-                    .replace(Arc::new(move |method, params| {
-                        if let Ok(id) = allocate_devtools_message_id()
-                            && let Ok(message) =
-                                serde_json::to_vec(&json!({"id": id, "method": method, "params": params}))
-                        {
-                            let _ = native.send_dev_tools_message(&message);
-                        }
-                    }))
-                    .is_none()
-            };
-            if first {
-                // Only the request kinds the Wry bridge wraps are paused; documents and assets load untouched.
+                client.routes.lock().expect("CEF routes lock").send = Some(Arc::new(move |method, params| {
+                    if let Ok(id) = allocate_devtools_message_id()
+                        && let Ok(message) = serde_json::to_vec(&json!({"id": id, "method": method, "params": params}))
+                    {
+                        let _ = native.send_dev_tools_message(&message);
+                    }
+                }));
                 let patterns =
                     json!([{"urlPattern": "*", "resourceType": "Fetch"}, {"urlPattern": "*", "resourceType": "XHR"}]);
                 if let Err(error) = client.call(&view, "Fetch.enable", &json!({"patterns": patterns})) {
-                    let mut routes = client.routes.lock().expect("CEF routes lock");
-                    routes.rules.clear();
-                    routes.send = None;
+                    client.routes.lock().expect("CEF routes lock").send = None;
                     return Err(error);
                 }
+            } else if !wanted && enabled {
+                // Requests paused meanwhile are still answered: the view stays until interception is off.
+                client.call(&view, "Fetch.disable", &json!({}))?;
+                client.routes.lock().expect("CEF routes lock").send = None;
+            }
+            Ok(())
+        };
+        if method == "route.add" {
+            let added = client.routes.lock().expect("CEF routes lock").add(&params)?;
+            if let Err(error) = intercept(true) {
+                client.routes.lock().expect("CEF routes lock").rules.clear();
+                return Err(error);
             }
             return Ok(added);
         }
@@ -960,19 +992,18 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
             return Ok(client.routes.lock().expect("CEF routes lock").list());
         }
         if method == "route.clear" {
-            let (removed, enabled) = {
+            let removed = {
                 let mut routes = client.routes.lock().expect("CEF routes lock");
                 let removed = routes.rules.len();
                 routes.rules.clear();
                 routes.intercepted.clear();
-                (removed, routes.send.is_some())
+                removed
             };
-            if enabled {
-                // Requests paused meanwhile are still answered: the view stays until interception is off.
-                client.call(&view, "Fetch.disable", &json!({}))?;
-                client.routes.lock().expect("CEF routes lock").send = None;
-            }
+            intercept(false)?;
             return Ok(json!({"removed": removed}));
+        }
+        if let Some(operation) = method.strip_prefix("nativeDialog.") {
+            return client.native_dialog(&view, operation, &params);
         }
         if method == "network.getRequests" {
             return Ok(client.network.lock().expect("CEF network lock").list(&params));

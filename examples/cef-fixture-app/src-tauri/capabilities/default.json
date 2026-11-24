@@ -1,5 +1,5 @@
 {
   "identifier": "local",
   "windows": ["main", "second"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }
