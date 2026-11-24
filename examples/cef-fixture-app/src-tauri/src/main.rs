@@ -44,6 +44,12 @@ fn set_floating(window: tauri::Window, enabled: bool) -> Result<(), String> {
 fn runtime_eval(webview: tauri::Webview, script: String) -> Result<(), String> {
     webview.eval(script).map_err(|error| error.to_string())
 }
+/// Emits an event from the application itself, with no Hasgard code involved.
+#[tauri::command]
+fn app_emit(app: tauri::AppHandle, event: String, payload: u32) -> Result<(), String> {
+    use tauri::Emitter;
+    app.emit(&event, payload).map_err(|error| error.to_string())
+}
 #[tauri::command]
 fn quit_fixture(app: tauri::AppHandle) {
     app.exit(0);
@@ -112,6 +118,7 @@ fn main() {
             ipc_echo,
             set_floating,
             runtime_eval,
+            app_emit,
             quit_fixture
         ])
         .run(tauri::generate_context!())

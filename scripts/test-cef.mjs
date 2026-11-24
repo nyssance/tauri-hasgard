@@ -282,9 +282,19 @@ try {
       () => null
     ),
     broadcast: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } })),
-    targeted: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } }, "main"))
+    targeted: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } }, "main")),
+    fromApp: await heardBy(() =>
+      rpc("ipc", { command: "app_emit", args: { event: "fixture-ping", payload: 7 } }, "main")
+    )
   }
-  assert.deepEqual(delivery, { runtimeEval: "ran", broadcast: '{"n":7}', targeted: '{"n":7}' })
+  if (delivery.broadcast === null)
+    console.log("main console:", JSON.stringify(await rpc("console.getLogs", {}, "main")))
+  assert.deepEqual(delivery, {
+    runtimeEval: "ran",
+    broadcast: '{"n":7}',
+    targeted: '{"n":7}',
+    fromApp: "7"
+  })
   await rpc("fill", { selector: "#host-input", value: "saved" }, "main")
   await evaluate("main", 'document.querySelector("#host-input").dispatchEvent(new Event("change")), null')
   const heard = await until(async () => {
