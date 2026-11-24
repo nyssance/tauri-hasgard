@@ -401,6 +401,19 @@ pub fn is_replayable(action: &str) -> bool {
             | "snapshot"
             | "wait"
             | "eval"
+            | "wheel"
+            | "setInputFiles"
+            | "dialog.handle"
+            | "nativeDialog.handle"
+            | "route.add"
+            | "route.clear"
+            | "storage.set"
+            | "storage.clear"
+            | "cookies.set"
+            | "cookies.clear"
+            | "window.resize"
+            | "window.move"
+            | "event.emit"
     )
 }
 
@@ -490,6 +503,70 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
         "navigate" => {
             let url = entry.get("url").and_then(|u| u.as_str()).unwrap_or("");
             format!("tauri-hasgard navigate {}", shell_escape(url))
+        }
+        _ => later_action_command(action, entry, &target),
+    }
+}
+
+/// The commands for the actions recorded since the first set: input the page cannot
+/// tell from a user's, and the standing state a flow depends on.
+fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
+    match action {
+        "wheel" => {
+            let delta = |axis: &str| entry.get(axis).and_then(Value::as_f64).unwrap_or(0.0);
+            let mut cmd = format!("tauri-hasgard wheel --delta-x {} --delta-y {}", delta("deltaX"), delta("deltaY"));
+            if !target.is_empty() {
+                let _ = write!(cmd, " {target}");
+            }
+            cmd
+        }
+        "dialog.handle" | "nativeDialog.handle" => {
+            let command = if action == "dialog.handle" { "dialog" } else { "native-dialog" };
+            let policy = entry.get("action").and_then(Value::as_str).unwrap_or("dismiss");
+            let mut cmd = format!("tauri-hasgard {command} {}", shell_escape(policy));
+            if let Some(text) = entry.get("promptText").and_then(Value::as_str) {
+                let _ = write!(cmd, " --prompt-text {}", shell_escape(text));
+            }
+            for path in entry.get("paths").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                let _ = write!(cmd, " --path {}", shell_escape(path));
+            }
+            if let Some(button) = entry.get("button").and_then(Value::as_str) {
+                let _ = write!(cmd, " --button {}", shell_escape(button));
+            }
+            cmd
+        }
+        "route.clear" => "tauri-hasgard route clear".to_owned(),
+        "route.add" => {
+            let pattern = entry.get("pattern").and_then(Value::as_str).unwrap_or("");
+            let abort = entry.get("action").and_then(Value::as_str) == Some("abort");
+            let mut cmd =
+                format!("tauri-hasgard route {} {}", if abort { "abort" } else { "fulfill" }, shell_escape(pattern));
+            if !abort {
+                if let Some(status) = entry.get("status").and_then(Value::as_u64) {
+                    let _ = write!(cmd, " --status {status}");
+                }
+                if let Some(body) = entry.get("body").and_then(Value::as_str) {
+                    let _ = write!(cmd, " --body {}", shell_escape(body));
+                }
+            }
+            cmd
+        }
+        "window.resize" => {
+            let size = |side: &str| entry.get(side).and_then(Value::as_f64).unwrap_or(0.0);
+            format!("tauri-hasgard window resize {} {}", size("width"), size("height"))
+        }
+        "window.move" => {
+            let point = |axis: &str| entry.get(axis).and_then(Value::as_f64).unwrap_or(0.0);
+            format!("tauri-hasgard window move {} {}", point("x"), point("y"))
+        }
+        "event.emit" => {
+            let event = entry.get("event").and_then(Value::as_str).unwrap_or("");
+            let payload = entry.get("payload").map_or_else(|| "null".to_owned(), Value::to_string);
+            format!("tauri-hasgard event emit {} --payload {}", shell_escape(event), shell_escape(&payload))
+        }
+        // These carry data a one-line command cannot: file contents, or several cookie fields.
+        "setInputFiles" | "storage.set" | "storage.clear" | "cookies.set" | "cookies.clear" => {
+            format!("# {action}: replayed from the recording; not exportable as one command")
         }
         _ => {
             let safe = action.replace(['\n', '\r'], " ");
@@ -716,5 +793,43 @@ mod tests {
         );
         assert!(encode_files(std::slice::from_ref(&directory)).is_err());
         std::fs::remove_dir_all(&directory).expect("remove temp directory");
+    }
+    #[test]
+    fn standing_state_and_wheel_export_as_commands_and_replay() {
+        for (action, entry, command) in [
+            (
+                "wheel",
+                json!({"deltaX": 0.0, "deltaY": 120.0, "selector": "#list"}),
+                "tauri-hasgard wheel --delta-x 0 --delta-y 120 '#list'",
+            ),
+            (
+                "dialog.handle",
+                json!({"action": "accept", "promptText": "ok go"}),
+                "tauri-hasgard dialog 'accept' --prompt-text 'ok go'",
+            ),
+            (
+                "nativeDialog.handle",
+                json!({"action": "accept", "paths": ["/tmp/a b.csv"], "button": "Save"}),
+                "tauri-hasgard native-dialog 'accept' --path '/tmp/a b.csv' --button 'Save'",
+            ),
+            (
+                "route.add",
+                json!({"pattern": "**/api/user", "action": "fulfill", "status": 503, "body": "down"}),
+                "tauri-hasgard route fulfill '**/api/user' --status 503 --body 'down'",
+            ),
+            ("route.add", json!({"pattern": "**/x", "action": "abort"}), "tauri-hasgard route abort '**/x'"),
+            ("route.clear", json!({}), "tauri-hasgard route clear"),
+            ("window.resize", json!({"width": 480.0, "height": 800.0}), "tauri-hasgard window resize 480 800"),
+            (
+                "event.emit",
+                json!({"event": "sync:done", "payload": {"n": 1}}),
+                "tauri-hasgard event emit 'sync:done' --payload '{\"n\":1}'",
+            ),
+        ] {
+            assert!(is_replayable(action), "{action} must replay");
+            assert_eq!(entry_to_cli_command(action, &entry), command);
+        }
+        assert!(entry_to_cli_command("setInputFiles", &json!({})).starts_with("# setInputFiles"));
+        assert!(is_replayable("setInputFiles"));
     }
 }

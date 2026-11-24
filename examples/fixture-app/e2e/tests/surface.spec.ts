@@ -863,6 +863,7 @@ test("routes and the dialog policy hold across a navigation", async ({ hasgard }
   await settings.routes.clear()
   await settings.routes.fulfill({ pattern: "**/api/profile", status: 200, body: "stubbed profile" })
   await settings.dialogs.accept("typed")
+  await settings.evaluate("console.info('before navigation')")
   try {
     await settings.navigate("embedded.html")
     await settings.waitForURL("**/embedded.html", { waitUntil: "load", timeoutMs: 10_000 })
@@ -871,6 +872,9 @@ test("routes and the dialog policy hold across a navigation", async ({ hasgard }
     const read = "fetch('/api/profile').then((response) => response.text())"
     expect(await settings.evaluate<string>(read)).toBe("stubbed profile")
     expect(await settings.evaluate<string | null>("prompt('Name?')")).toBe("typed")
+    // The log is of the flow, so what the last document wrote is still in it.
+    const logged = (await settings.consoleLogs()).map((entry) => entry.args[0])
+    expect(logged).toContain("before navigation")
     const { routes } = await settings.routes.list()
     expect(routes.map(({ pattern, used }) => ({ pattern, used }))).toEqual([{ pattern: "**/api/profile", used: 1 }])
     // The application's session storage does not show Hasgard's own entry.

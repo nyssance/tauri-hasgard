@@ -28,11 +28,12 @@ const REAL_CONSOLE = {
 // Fresh globals per test. `realFetch` records what actually reached the network,
 // which is how "the route intercepted it" is told from "the route matched but
 // the request went out anyway".
-function loadBridge() {
+function loadBridge(windowExtras = {}) {
   Object.assign(console, REAL_CONSOLE)
 
   const reachedNetwork = []
   globalThis.window = {
+    ...windowExtras,
     fetch(input) {
       reachedNetwork.push(typeof input === "string" ? input : input.url)
       return Promise.resolve(new Response("live", { status: 200 }))
@@ -366,6 +367,30 @@ test("routes and dialog policies hold across a navigation within the tab", async
     assert.deepEqual(second.hasgard.storageGet({ session: true, key: "__hasgard__" }), { found: false })
     second.hasgard.storageClear({ session: true })
     assert.equal(loadBridge().hasgard.routes().routes.length, 3, "clearing app storage keeps the standing rules")
+
+    // Logs follow the flow: written as a document is left, taken up by the next.
+    let leave
+    loadBridge({
+      addEventListener(type, handler) {
+        if (type === "pagehide") leave = handler
+      }
+    })
+    console.warn("from the first page", { n: 1 })
+    await globalThis.window.fetch("https://app.test/api/user")
+    leave()
+    const arrived = loadBridge()
+    assert.deepEqual(
+      arrived.hasgard.consoleLogs().map(({ id, level, args }) => ({ id, level, args })),
+      [{ id: 1, level: "warn", args: ["from the first page", { n: 1 }] }]
+    )
+    assert.equal(arrived.hasgard.networkRequests().at(-1).url, "https://app.test/api/user")
+    console.info("from the second page")
+    assert.deepEqual(
+      arrived.hasgard.consoleLogs().map(({ id }) => id),
+      [1, 2],
+      "ids continue"
+    )
+    assert.equal(globalThis.sessionStorage.getItem("__hasgard__logs"), null, "taken out once read")
 
     // Back to defaults leaves nothing behind.
     const last = loadBridge()

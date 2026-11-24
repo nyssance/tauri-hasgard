@@ -113,6 +113,20 @@ fn is_recordable(method: &str) -> bool {
             | "hover"
             | "focus"
             | "blur"
+            | "wheel"
+            | "setInputFiles"
+            // Standing state a flow depends on: replaying the clicks without it replays a different flow.
+            | "dialog.handle"
+            | "nativeDialog.handle"
+            | "route.add"
+            | "route.clear"
+            | "storage.set"
+            | "storage.clear"
+            | "cookies.set"
+            | "cookies.clear"
+            | "window.resize"
+            | "window.move"
+            | "event.emit"
     )
 }
 
@@ -247,5 +261,19 @@ mod tests {
         rec.start();
         assert!(rec.stop().expect("empty recording").is_empty());
         assert!(rec.stop().is_none());
+    }
+    #[test]
+    fn the_state_a_flow_depends_on_is_recorded_with_its_actions() {
+        let recorder = Recorder::new();
+        recorder.start();
+        for method in ["route.add", "dialog.handle", "nativeDialog.handle", "wheel", "setInputFiles", "event.emit"] {
+            recorder.record(method, Some(&json!({"window": "main"})));
+        }
+        // Reads and queries are not part of a flow.
+        for method in ["route.list", "snapshot", "cookies.get", "window.state"] {
+            recorder.record(method, None);
+        }
+        let entries = recorder.stop().expect("recording");
+        assert_eq!(entries.len(), 6);
     }
 }

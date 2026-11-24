@@ -348,8 +348,49 @@
     Object.assign(_dialogPolicy, state.dialog)
   }
 
+  // Console and network logs describe a flow, not one document, so they follow
+  // it to the next document the same way. They are written once, as the document
+  // is left, and taken out again by the one that replaces it.
+  const LOGS_KEY = `${STATE_KEY}logs`
+
+  function saveLogs() {
+    try {
+      sessionStorage.setItem(
+        LOGS_KEY,
+        JSON.stringify({
+          logs: _logs,
+          logId: _logIdCounter,
+          network: _networkRequests,
+          netId: _netIdCounter,
+          routeLog: _routeLog
+        })
+      )
+    } catch {
+      // No session storage, or more than it will hold: the logs end with this document.
+    }
+  }
+
+  function restoreLogs() {
+    let raw
+    try {
+      raw = sessionStorage.getItem(LOGS_KEY)
+      sessionStorage.removeItem(LOGS_KEY)
+    } catch {
+      return
+    }
+    if (!raw) return
+    const kept = JSON.parse(raw)
+    _logs.push(...kept.logs)
+    _logIdCounter = kept.logId
+    _networkRequests.push(...kept.network)
+    _netIdCounter = kept.netId
+    _routeLog = kept.routeLog
+  }
+
   // Everything it restores is declared above, and no request has been wrapped yet.
   restoreState()
+  restoreLogs()
+  if (typeof window.addEventListener === "function") window.addEventListener("pagehide", saveLogs)
 
   function recordNetwork(entry) {
     _networkRequests.push(entry)
