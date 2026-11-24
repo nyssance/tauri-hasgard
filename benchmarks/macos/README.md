@@ -12,15 +12,15 @@ mocked Tauri runtime is involved.
 
 ```sh
 bun benchmarks/macos/setup.mjs /path/to/ALwith/Vendor /private/tmp/hasgard-benchmark
-node benchmarks/macos/run.mjs /private/tmp/hasgard-benchmark benchmarks/macos/results/local.json
-node benchmarks/macos/report.mjs benchmarks/macos/results/local.json benchmarks/macos/results/summary.md
+bun benchmarks/macos/run.mjs /private/tmp/hasgard-benchmark benchmarks/macos/results/local.json
+bun benchmarks/macos/report.mjs benchmarks/macos/results/local.json benchmarks/macos/results/summary.md
 ```
 
 For additional latency replication without repeating native capability probes:
 
 ```sh
-node benchmarks/macos/run.mjs /private/tmp/hasgard-benchmark benchmarks/macos/results/latency-12.json --rounds 12 --latency-only
-node benchmarks/macos/report.mjs benchmarks/macos/results/latency-12.json benchmarks/macos/results/latency-12.md
+bun benchmarks/macos/run.mjs /private/tmp/hasgard-benchmark benchmarks/macos/results/latency-12.json --rounds 12 --latency-only
+bun benchmarks/macos/report.mjs benchmarks/macos/results/latency-12.json benchmarks/macos/results/latency-12.md
 ```
 
 Round counts must be positive multiples of three to preserve balanced launch

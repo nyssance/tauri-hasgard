@@ -1,58 +1,35 @@
-// Native CEF E2E. Build examples/cef-fixture-app with `tauri build --debug --bundles app` first.
+// Native CEF E2E, run with Bun on macOS and Windows.
+// Build examples/cef-fixture-app first: `tauri build --debug --bundles app` on macOS, `--no-bundle` on Windows.
 // Local runs use the secondary display; CI may explicitly select 0.
 import assert from "node:assert/strict"
-import { execFileSync, spawn } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
-import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 
+// Launch, endpoint and transport come from the Playwright package, which already
+// handles Unix sockets and named pipes, process groups and Windows process trees.
+import { hasgardEndpointPath, HasgardProcess, HasgardRpcClient } from "../packages/playwright/src/index.ts"
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const mac = process.platform === "darwin"
+if (!mac && process.platform !== "win32") throw new Error("The CEF native test runs on macOS and Windows")
 const executable =
   process.argv[2] ??
-  join(root, "target/debug/bundle/macos/Hasgard CEF Fixture.app/Contents/MacOS/tauri-hasgard-cef-fixture")
+  (mac
+    ? join(root, "target/debug/bundle/macos/Hasgard CEF Fixture.app/Contents/MacOS/tauri-hasgard-cef-fixture")
+    : join(root, "target/debug/tauri-hasgard-cef-fixture.exe"))
 const artifacts = resolve(process.env.HASGARD_CEF_OUTPUT ?? join(root, "test-results/cef"))
 mkdirSync(artifacts, { recursive: true })
 rmSync(join(artifacts, "report.json"), { force: true })
 const temp = mkdtempSync(join(tmpdir(), "hg-cef-"))
-const socketPath = join(temp, "app.sock")
-let sequence = 0
-function rpc(method, params = {}, window) {
-  return new Promise((resolve, reject) => {
-    const socket = connect(socketPath)
-    let buffer = ""
-    const timer = setTimeout(() => {
-      socket.destroy()
-      reject(new Error(`${method} RPC timed out`))
-    }, 20000)
-    socket.on("connect", () =>
-      socket.write(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: ++sequence,
-          method,
-          params: { ...params, ...(window ? { window } : {}) }
-        }) + "\n"
-      )
-    )
-    socket.on("error", reject)
-    socket.on("close", () => {
-      clearTimeout(timer)
-      if (!buffer.includes("\n")) reject(new Error("RPC connection closed before reply"))
-    })
-    socket.on("data", (chunk) => {
-      buffer += chunk
-      if (!buffer.includes("\n")) return
-      socket.end()
-      const response = JSON.parse(buffer.slice(0, buffer.indexOf("\n")))
-      if (response.error) reject(new Error(JSON.stringify(response.error)))
-      else resolve(response.result)
-    })
-  })
-}
+const socketPath = hasgardEndpointPath(`hg-cef-${process.pid}`)
+const app = new HasgardProcess()
+const client = new HasgardRpcClient(socketPath)
+const rpc = (method, params = {}, window) => client.call(method, { ...params, ...(window ? { window } : {}) })
 const evaluate = (window, script) => rpc("eval", { script }, window)
 async function until(check, label, ms = 20000) {
   const deadline = Date.now() + ms
@@ -84,35 +61,31 @@ const server = createServer((req, res) => {
 })
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
 const guestUrl = `http://127.0.0.1:${server.address().port}/guest.html`
-const app = spawn(executable, [], {
-  env: {
-    ...process.env,
-    TAURI_HASGARD_DISPLAY: process.env.TAURI_HASGARD_DISPLAY ?? "secondary",
-    TAURI_HASGARD_SOCKET: socketPath,
-    HASGARD_CEF_GUEST_URL: guestUrl,
-    HASGARD_CEF_PROFILE: join(temp, "cef-profile")
-  },
-  detached: true,
-  stdio: ["ignore", "pipe", "pipe"]
-})
-let log = ""
-app.stdout.on("data", (value) => {
-  log += value
-})
-app.stderr.on("data", (value) => {
-  log += value
-})
-app.on("error", (error) => {
-  log += error.stack
-})
+const exit = async (waitMs = 0) => (await app.diagnostics(waitMs)).exit
+const appLog = async () => {
+  const { stdout, stderr } = await app.diagnostics()
+  return stdout + stderr
+}
 const checks = []
+let exited
 const executorPids = new Set()
-function collectExecutors() {
-  const processes = execFileSync("ps", ["-axo", "pid=,ppid=,comm="], { encoding: "utf8" }).trim().split("\n")
-  for (const line of processes) {
+async function collectExecutors() {
+  const { pid } = await app.diagnostics()
+  // One line per process: pid, parent pid, name.
+  const processes = mac
+    ? execFileSync("ps", ["-axo", "pid=,ppid=,comm="], { encoding: "utf8" })
+    : execFileSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.Name)" }'
+        ],
+        { encoding: "utf8" }
+      )
+  for (const line of processes.trim().split(/\r?\n/)) {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/)
-    if (match && Number(match[2]) === app.pid && match[3].includes("hasgard-playwright"))
-      executorPids.add(Number(match[1]))
+    if (match && Number(match[2]) === pid && match[3].includes("hasgard-playwright")) executorPids.add(Number(match[1]))
   }
 }
 const pass = (text) => {
@@ -120,8 +93,24 @@ const pass = (text) => {
   console.log(`PASS ${text}`)
 }
 try {
+  await app.start(
+    {
+      command: executable,
+      args: [],
+      cwd: root,
+      timeoutMs: 60_000,
+      env: {
+        TAURI_HASGARD_DISPLAY: process.env.TAURI_HASGARD_DISPLAY ?? "secondary",
+        HASGARD_CEF_GUEST_URL: guestUrl,
+        HASGARD_CEF_PROFILE: join(temp, "cef-profile")
+      }
+    },
+    socketPath
+  )
+  await client.connect(20_000)
   await until(async () => {
-    if (app.exitCode !== null) throw new Error(`App exited ${app.exitCode}: ${log}`)
+    const exited = await exit()
+    if (exited) throw new Error(`App exited ${exited.code ?? exited.signal}: ${await appLog()}`)
     return (await evaluate("main", "document.readyState")) === "complete"
   }, "Host readiness")
   await rpc("click", { selector: "#recreate" }, "main")
@@ -156,15 +145,23 @@ try {
     /not allowed|denied/i
   )
   pass("CEF IPC: real command results, window routing, escaped arguments, rejection and capability enforcement")
-  await rpc("ipc", { command: "set_floating", args: { enabled: true } }, "second")
-  const floating = await rpc(
-    "screenshot_native",
-    { window_id: windows.find((w) => w.label === "second").native_id, output_path: join(artifacts, "floating.png") },
-    "second"
-  )
-  assert.ok(floating.width > 0 && floating.height > 0)
-  await rpc("ipc", { command: "set_floating", args: { enabled: false } }, "second")
-  pass("explicit native screenshot captures an always-on-top window")
+  // Whole-window capture exists on macOS only.
+  if (mac) {
+    await rpc("ipc", { command: "set_floating", args: { enabled: true } }, "second")
+    const floating = await rpc(
+      "screenshot_native",
+      { window_id: windows.find((w) => w.label === "second").native_id, output_path: join(artifacts, "floating.png") },
+      "second"
+    )
+    assert.ok(floating.width > 0 && floating.height > 0)
+    await rpc("ipc", { command: "set_floating", args: { enabled: false } }, "second")
+    pass("explicit native screenshot captures an always-on-top window")
+  } else {
+    await assert.rejects(rpc("screenshot_native", { output_path: join(artifacts, "unsupported.png") }, "second"), {
+      code: -32601
+    })
+    pass("native screenshot is reported as unsupported on this platform")
+  }
   pass("unimplemented main-world operations fail explicitly")
   await rpc("fill", { selector: "#guest-input", value: "guest text" }, "guest")
   await rpc("click", { selector: "#increment" }, "guest")
@@ -172,7 +169,7 @@ try {
   await rpc("fill", { selector: "#second-input", value: "second text" }, "second")
   assert.equal(await evaluate("guest", 'document.querySelector("#guest-input").value'), "guest text")
   pass("DOM click and fill are isolated between windows")
-  collectExecutors()
+  await collectExecutors()
   assert.ok(executorPids.size >= 3, "Each exercised native view must use its packaged Playwright executor")
   await rpc("click", { selector: "#trusted" }, "guest")
   // The click reply and this read travel on separate CDP clients; the handler may not have run yet.
@@ -365,21 +362,23 @@ try {
   await rpc("click", { selector: "#modal" }, "main")
   assert.equal(await evaluate("main", 'document.querySelector("#dialog").open'), true)
   await rpc("snapshot", {}, "main")
-  const host = await rpc("screenshot_native", { output_path: join(artifacts, "host-page.png") }, "main")
-  const guest = await rpc("screenshot_native", { output_path: join(artifacts, "guest-page.png") }, "guest")
-  const whole = await rpc("screenshot_native", {
-    output_path: join(artifacts, "whole-window.png"),
-    window_id: windows.find((w) => w.label === "main").native_id
-  })
-  assert.equal(host.backend, "cef-cdp")
-  assert.equal(guest.backend, "cef-cdp")
-  // Screen pixels, not DOM existence, establish the native occlusion result.
-  const colors = JSON.parse(
-    execFileSync(
-      "python3",
-      [
-        "-c",
-        `from PIL import Image,ImageCms
+  let captures
+  if (mac) {
+    const host = await rpc("screenshot_native", { output_path: join(artifacts, "host-page.png") }, "main")
+    const guest = await rpc("screenshot_native", { output_path: join(artifacts, "guest-page.png") }, "guest")
+    const whole = await rpc("screenshot_native", {
+      output_path: join(artifacts, "whole-window.png"),
+      window_id: windows.find((w) => w.label === "main").native_id
+    })
+    assert.equal(host.backend, "cef-cdp")
+    assert.equal(guest.backend, "cef-cdp")
+    // Screen pixels, not DOM existence, establish the native occlusion result.
+    const colors = JSON.parse(
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          `from PIL import Image,ImageCms
 from io import BytesIO
 import json,sys
 out=[]
@@ -390,18 +389,35 @@ for path in sys.argv[1:]:
  colors=list(im.getdata())
  out.append({'pink':sum(r>230 and 40<g<100 and b>170 for r,g,b in colors),'green':sum(r<50 and g>140 and 60<b<150 for r,g,b in colors)})
 print(json.dumps(out))`,
-        join(artifacts, "host-page.png"),
-        join(artifacts, "whole-window.png")
-      ],
-      { encoding: "utf8" }
+          join(artifacts, "host-page.png"),
+          join(artifacts, "whole-window.png")
+        ],
+        { encoding: "utf8" }
+      )
     )
-  )
-  assert.ok(colors[0].pink > 1000, `Host page should contain modal: ${JSON.stringify(colors)}`)
-  assert.ok(
-    colors[1].green > 1000 && colors[1].pink < 100,
-    `Whole window must show native child occluding modal: ${JSON.stringify(colors)}`
-  )
-  pass("single-page vs whole-window screenshots reproduce native modal occlusion")
+    assert.ok(colors[0].pink > 1000, `Host page should contain modal: ${JSON.stringify(colors)}`)
+    assert.ok(
+      colors[1].green > 1000 && colors[1].pink < 100,
+      `Whole window must show native child occluding modal: ${JSON.stringify(colors)}`
+    )
+    captures = { host, guest, whole, colors }
+    pass("single-page vs whole-window screenshots reproduce native modal occlusion")
+  } else {
+    // No whole-window capture off macOS, so occlusion cannot be shown; the page captures still must be real PNGs.
+    captures = {}
+    for (const label of ["main", "guest"]) {
+      const url = await rpc("screenshot", {}, label)
+      assert.equal(typeof url, "string")
+      assert.ok(url.startsWith("data:image/png;base64,"), `${label} screenshot is not a PNG data URL`)
+      const png = Buffer.from(url.slice("data:image/png;base64,".length), "base64")
+      assert.equal(png.subarray(1, 4).toString("latin1"), "PNG")
+      const size = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+      assert.ok(size.width > 100 && size.height > 100, `${label} screenshot is ${JSON.stringify(size)}`)
+      writeFileSync(join(artifacts, `${label}-page.png`), png)
+      captures[label] = size
+    }
+    pass("page screenshots are composited PNGs of each webview")
+  }
   await rpc("click", { selector: "#dismiss" }, "main")
   // Exiting can destroy the initiating document before its IPC response arrives.
   // The process result, rather than transport delivery, establishes clean shutdown.
@@ -409,9 +425,10 @@ print(json.dumps(out))`,
   await rpc("ipc", { command: "quit_fixture" }, "main").catch((error) => {
     shutdownResponse = String(error)
   })
-  await until(() => app.exitCode !== null || app.signalCode !== null, "Graceful exit", 10000)
-  assert.equal(app.exitCode, 0, `Unexpected shutdown: ${app.signalCode}: ${shutdownResponse}`)
-  assert.equal(app.signalCode, null)
+  exited = await exit(10_000)
+  assert.ok(exited, "Graceful exit")
+  assert.equal(exited.code, 0, `Unexpected shutdown: ${exited.signal}: ${shutdownResponse}`)
+  assert.equal(exited.signal, null)
   await until(
     () =>
       [...executorPids].every((pid) => {
@@ -426,11 +443,11 @@ print(json.dumps(out))`,
     "Executor process cleanup",
     5000
   )
-  assert.doesNotMatch(log, /FATAL:|panicked at/)
+  assert.doesNotMatch(await appLog(), /FATAL:|panicked at/)
   pass("graceful IPC shutdown exits 0 and reaps Playwright executors")
   writeFileSync(
     join(artifacts, "report.json"),
-    JSON.stringify({ checks, windows, host, guest, whole, colors, exitCode: app.exitCode, shutdownResponse }, null, 2)
+    JSON.stringify({ checks, windows, ...captures, exitCode: exited.code, shutdownResponse }, null, 2)
   )
 } catch (error) {
   writeFileSync(
@@ -446,28 +463,24 @@ print(json.dumps(out))`,
   }
   throw error
 } finally {
-  if (app.exitCode === null && app.signalCode === null) process.kill(-app.pid, "SIGTERM")
-  if (app.exitCode === null && app.signalCode === null)
-    await Promise.race([new Promise((resolve) => app.once("exit", resolve)), sleep(5000)])
-  if (app.exitCode === null && app.signalCode === null) {
-    process.kill(-app.pid, "SIGKILL")
-    await sleep(300)
-  }
+  client.disconnect()
+  writeFileSync(join(artifacts, "app.log"), await appLog())
+  // Stops the application and everything it started if the test did not end it.
+  await app.stop()
   server.closeAllConnections()
   await new Promise((resolve) => server.close(resolve))
-  writeFileSync(join(artifacts, "app.log"), log)
   rmSync(temp, { recursive: true, force: true })
 }
-assert.ok(app.exitCode !== null || app.signalCode !== null, "fixture process must exit")
-rmSync(temp, { recursive: true, force: true })
-assert.equal(existsSync(socketPath), false)
+assert.ok(exited, "fixture process must exit")
+// A named pipe has no file to leave behind.
+if (mac) assert.equal(existsSync(socketPath), false)
 pass("process and socket cleanup")
 
 const finalReport = JSON.parse(readFileSync(join(artifacts, "report.json"), "utf8"))
 writeFileSync(
   join(artifacts, "report.json"),
   JSON.stringify(
-    { ...finalReport, status: "passed", checks, exitCode: app.exitCode, signalCode: app.signalCode },
+    { ...finalReport, status: "passed", checks, exitCode: exited.code, signalCode: exited.signal },
     null,
     2
   )

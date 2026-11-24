@@ -8,7 +8,7 @@
 //   3. `scroll` routes through `resolveTarget`, so a selector locator scrolls
 //      its own element rather than the document.
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.target.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.target.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

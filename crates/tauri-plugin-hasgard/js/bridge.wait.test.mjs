@@ -5,7 +5,7 @@
 // serves selector waits. These tests drive exactly that: a value that changes
 // on a timer, with no mutation ever dispatched.
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.wait.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.wait.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

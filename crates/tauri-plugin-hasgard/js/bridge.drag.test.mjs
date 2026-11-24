@@ -8,7 +8,7 @@
 // "No element at offset" error. The bridge must scroll the source into view
 // first, like a user would, and name the viewport in the residual error.
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.drag.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.drag.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

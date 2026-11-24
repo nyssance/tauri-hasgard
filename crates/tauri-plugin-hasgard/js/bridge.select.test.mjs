@@ -6,7 +6,7 @@
 // quirk at the heart of #113: assigning `HTMLSelectElement.value` a string that
 // matches no `<option>` silently yields `value === ""` / `selectedIndex === -1`.
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.select.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.select.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

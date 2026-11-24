@@ -52,8 +52,16 @@ jobs:
           if-no-files-found: ignore
 
   cef-native-e2e:
-    runs-on: macos-26
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            build: --bundles app
+          - runner: windows-2025
+            build: --no-bundle
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     env:
       TAURI_HASGARD_DISPLAY: "0"
     steps:
@@ -66,20 +74,26 @@ jobs:
         with:
           key: cef-native-e2e
       - run: bun install --frozen-lockfile
+      # Whole-window occlusion is asserted on macOS only, where native capture exists.
       - name: Install screenshot pixel assertions
+        if: runner.os == 'macOS'
         run: |
           python3 -m venv "$RUNNER_TEMP/cef-pixels"
           "$RUNNER_TEMP/cef-pixels/bin/pip" install Pillow==11.3.0
           echo "$RUNNER_TEMP/cef-pixels/bin" >> "$GITHUB_PATH"
       - name: Build CEF native fixture
         working-directory: examples/cef-fixture-app
-        run: ../fixture-app/node_modules/.bin/tauri build --debug --bundles app
+        shell: bash
+        # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
+        env:
+          CEF_PATH: ${{ runner.temp }}/cef-cache
+        run: bun ../fixture-app/node_modules/@tauri-apps/cli/tauri.js build --debug ${{ matrix.build }}
       - name: Run CEF native fixture
-        run: node scripts/test-cef.mjs
+        run: bun scripts/test-cef.mjs
       - name: Upload CEF native evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cef-native-evidence
+          name: cef-native-evidence-${{ runner.os }}
           path: test-results/cef
           if-no-files-found: ignore

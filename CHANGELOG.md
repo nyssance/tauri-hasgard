@@ -2,6 +2,8 @@
 
 - Fix a ref that could not be used: once the ref table passed 1,024 entries, a node swept as detached and later re-attached was handed its old ref, which the table no longer knew.
 - Fix request ordering for a request that names no window. It targets `main` and now waits in `main`'s lane; before, it could run alongside a request sent to `main` explicitly.
+- The CEF native test uses the Playwright package's launch, endpoint and transport, runs under Bun, and covers Windows as well as macOS. On Windows it checks page screenshots; whole-window occlusion stays macOS only.
+- `HasgardProcess.diagnostics()` reports the application's pid and exit on Windows.
 - Release validation checks the committed versions against the tag instead of rewriting them, and runs the unit suites. Native E2E is a manual workflow.
 
 # 0.7.3 (2026-11-23)

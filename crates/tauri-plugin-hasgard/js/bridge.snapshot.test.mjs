@@ -8,7 +8,7 @@
 // types `SnapshotElement.value` as `Option<String>` — `diff` then aborts with
 // `invalid type: integer 0, expected a string`.
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.snapshot.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.snapshot.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

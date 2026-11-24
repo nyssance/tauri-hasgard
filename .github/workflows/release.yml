@@ -203,7 +203,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           while read -r directory; do
-            name=$(node -p "require('./npm-cli/$directory/package.json').name")
+            name=$(jq -r .name "npm-cli/$directory/package.json")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published"
               continue

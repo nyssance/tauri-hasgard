@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFile, writeFile } from "node:fs/promises"
 
 const [input, output] = process.argv.slice(2)
-if (!input || !output) throw new Error("Usage: node benchmarks/macos/report.mjs INPUT_JSON OUTPUT_MARKDOWN")
+if (!input || !output) throw new Error("Usage: bun benchmarks/macos/report.mjs INPUT_JSON OUTPUT_MARKDOWN")
 const result = JSON.parse(await readFile(input, "utf8"))
 const names = ["hasgard", "pilot", "playwright"]
 const scenarios = [

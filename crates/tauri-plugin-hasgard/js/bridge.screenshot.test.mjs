@@ -7,7 +7,7 @@
 // width/height, html-to-image crops `document.documentElement` to the viewport
 // and silently loses everything below the fold).
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.screenshot.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.screenshot.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

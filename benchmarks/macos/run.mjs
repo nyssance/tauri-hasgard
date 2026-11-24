@@ -15,7 +15,7 @@ const { values, positionals } = parseArgs({
 })
 const [workArgument, outputArgument] = positionals
 if (!workArgument || !outputArgument || positionals.length !== 2)
-  throw new Error("Usage: node benchmarks/macos/run.mjs WORK_DIR OUTPUT_JSON [--rounds N] [--latency-only]")
+  throw new Error("Usage: bun benchmarks/macos/run.mjs WORK_DIR OUTPUT_JSON [--rounds N] [--latency-only]")
 const rounds = Number(values.rounds)
 assert.ok(Number.isSafeInteger(rounds) && rounds > 0 && rounds % 3 === 0, "rounds must be a positive multiple of three")
 if (process.platform !== "darwin") throw new Error("This benchmark requires a real macOS desktop session")

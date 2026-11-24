@@ -6,7 +6,7 @@
 // only the highest-precedence one. These tests pin the cases where matching on
 // `name` would give the wrong answer.
 //
-// Run: node --test crates/tauri-plugin-hasgard/js/bridge.query.test.mjs
+// Run: bun test crates/tauri-plugin-hasgard/js/bridge.query.test.mjs
 
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"

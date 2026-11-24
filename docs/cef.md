@@ -96,7 +96,7 @@ tauri build --debug --bundles app
 From the repository root:
 
 ```sh
-TAURI_HASGARD_DISPLAY=secondary node scripts/test-cef.mjs
+TAURI_HASGARD_DISPLAY=secondary bun scripts/test-cef.mjs
 ```
 
 The fixture explicitly uses `SecretStorage::Mock` with a fresh temporary profile,

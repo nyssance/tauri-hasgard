@@ -53,6 +53,11 @@ export class HasgardProcess {
       detached: process.platform !== "win32"
     })
     this.child = child
+    // No supervisor here: the spawned process is the application, so its pid and exit are reported directly.
+    this.applicationPid = child.pid
+    child.once("exit", (code, signal) => {
+      this.applicationExit = { code, signal }
+    })
     child.stdout?.on("data", (data: Buffer) => {
       this.stdout = appendOutput(this.stdout, data.toString())
     })
