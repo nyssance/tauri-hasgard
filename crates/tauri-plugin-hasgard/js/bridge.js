@@ -2184,12 +2184,14 @@
     const stable = optionalNumber(options?.stable, "stable", 300)
     const requireMutation = !!options?.requireMutation
 
+    // A frame is watched in its own document: its changes are not the page's.
+    const doc = frameDocument(options?.frame)
     let root
     if (selector) {
-      root = document.querySelector(selector)
+      root = doc.querySelector(selector)
       if (!root) throw new Error(`watch: no element matches selector: ${selector}`)
     } else {
-      root = document.body
+      root = doc.body
     }
 
     return new Promise((res, rej) => {
@@ -2438,8 +2440,9 @@
   function formDump(params) {
     let forms
     let totalForms
+    const doc = frameDocument(params?.frame)
     if (params?.selector) {
-      const found = document.querySelector(params.selector)
+      const found = doc.querySelector(params.selector)
       if (!found) {
         throw new Error(`Form not found: ${params.selector}`)
       }
@@ -2449,7 +2452,7 @@
       forms = [found]
       totalForms = 1
     } else {
-      const all = document.querySelectorAll("form")
+      const all = doc.querySelectorAll("form")
       totalForms = all.length
       forms = []
       const formLimit = Math.min(totalForms, MAX_FORMS)

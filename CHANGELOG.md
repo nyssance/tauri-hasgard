@@ -1,5 +1,12 @@
 # Unreleased
 
+- Fix `replay` reporting success when replayed steps failed: the CLI exits 1, the MCP tool reports an error, and the failing steps and their errors are in the result.
+- Fix a scenario step that hit `timeout_ms` leaving the connection one answer behind, so every later step failed with a response id mismatch. The client now skips the answer to a call it gave up on.
+- CLI: the default window from `TAURI_HASGARD_WINDOW` no longer narrows `event emit` to that window or `downloads` to its files; only a `--window` on the command line does.
+- `watch` and `forms` take `frame` (CLI `--frame`, MCP, Playwright `frameLocator(...).watch()` and `.forms()`). `url`, `title`, `state`, `eval`, `navigate` and `storage.*` reject it instead of answering for the page.
+- An in-process `Automation` no longer requires a window for `record.*`.
+- A scenario step that sets a field its action does not read is rejected.
+- Documented: the MCP dangerous-tools default is not a security boundary; which native dialogs can be answered; that a policy belongs to its origin; that recording an event hears Hasgard's own `event.emit`.
 - The native dialog policy is also written again as a document is left, so an application that clears its session storage does not get a real dialog on the next page.
 - An in-process MCP server (`Automation::mcp_server`) can use the `event`, `downloads` and `clipboard` tools: methods that belong to the application rather than a window no longer require one.
 - The MCP `run_scenario` and `replay` tools refuse `eval`, `ipc` and `drop` while dangerous tools are disabled, as the tools themselves do.

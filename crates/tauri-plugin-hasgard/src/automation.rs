@@ -175,10 +175,10 @@ pub fn init_cef_with_executor(
 }
 
 /// What belongs to the application rather than to one of its windows needs no target: an
-/// event sent to every listener, the downloads of all windows, the system clipboard.
+/// event sent to every listener, the downloads of all windows, the system clipboard, the recorder.
 fn is_application_wide(method: &str) -> bool {
     matches!(method, "ping" | "windows.list")
-        || ["event.", "downloads.", "clipboard."].iter().any(|family| method.starts_with(family))
+        || ["event.", "downloads.", "clipboard.", "record."].iter().any(|family| method.starts_with(family))
 }
 
 #[cfg(test)]
@@ -187,9 +187,17 @@ mod tests {
 
     #[test]
     fn only_what_belongs_to_the_application_may_omit_a_window() {
-        for method in
-            ["ping", "windows.list", "event.emit", "event.list", "downloads.list", "downloads.wait", "clipboard.read"]
-        {
+        for method in [
+            "ping",
+            "windows.list",
+            "event.emit",
+            "event.list",
+            "downloads.list",
+            "downloads.wait",
+            "clipboard.read",
+            "record.start",
+            "record.stop",
+        ] {
             assert!(is_application_wide(method), "{method} needs no window");
         }
         for method in ["click", "eval", "snapshot", "cookies.get", "window.state", "nativeDialog.handle", "events"] {

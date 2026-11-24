@@ -106,6 +106,46 @@ pub struct Step {
 }
 
 impl Step {
+    /// The fields this step sets, besides its name, action and deadline.
+    fn set_fields(&self) -> Vec<&'static str> {
+        let fields = [
+            ("target", self.target.is_some()),
+            ("value", self.value.is_some()),
+            ("text", self.text.is_some()),
+            ("key", self.key.is_some()),
+            ("session", self.session.is_some()),
+            ("url", self.url.is_some()),
+            ("script", self.script.is_some()),
+            ("expected", self.expected.is_some()),
+            ("selector", self.selector.is_some()),
+            ("direction", self.direction.is_some()),
+            ("amount", self.amount.is_some()),
+            ("ref", self.step_ref.is_some()),
+            ("gone", self.gone.is_some()),
+            ("stable", self.stable.is_some()),
+            ("require_mutation", self.require_mutation.is_some()),
+            ("path", self.path.is_some()),
+            ("to", self.to.is_some()),
+            ("files", self.files.is_some()),
+            ("policy", self.policy.is_some()),
+            ("paths", self.paths.is_some()),
+            ("button", self.button.is_some()),
+            ("pattern", self.pattern.is_some()),
+            ("status", self.status.is_some()),
+            ("body", self.body.is_some()),
+            ("content_type", self.content_type.is_some()),
+            ("method", self.method.is_some()),
+            ("abort", self.abort.is_some()),
+            ("clear", self.clear.is_some()),
+            ("delta_x", self.delta_x.is_some()),
+            ("delta_y", self.delta_y.is_some()),
+            ("command", self.command.is_some()),
+            ("args", self.args.is_some()),
+            ("values", self.values.is_some()),
+        ];
+        fields.into_iter().filter_map(|(name, set)| set.then_some(name)).collect()
+    }
+
     fn display_name(&self, idx: usize) -> String {
         self.name.clone().unwrap_or_else(|| format!("step-{}", idx + 1))
     }
@@ -172,6 +212,35 @@ pub fn parse_scenario(content: &str) -> Result<Scenario> {
     Ok(scenario)
 }
 
+/// The fields each action reads. Every action `validate_step` accepts is listed.
+fn fields_read_by(action: &str) -> &'static [&'static str] {
+    match action {
+        "click" | "dblclick" | "hover" | "focus" | "blur" | "check" | "assert-exists" | "assert-visible"
+        | "assert-hidden" => &["target"],
+        "fill" => &["target", "value"],
+        "type" => &["target", "text"],
+        "press" => &["key"],
+        "select" => &["target", "value", "values"],
+        "drag" => &["target", "to"],
+        "set-input-files" => &["target", "files"],
+        "wheel" => &["target", "delta_x", "delta_y"],
+        "dialog" => &["policy", "text"],
+        "native-dialog" => &["policy", "paths", "button"],
+        "route" => &["pattern", "abort", "status", "body", "content_type", "method", "clear"],
+        "ipc" => &["command", "args", "expected"],
+        "scroll" => &["direction", "amount", "target", "ref"],
+        "navigate" => &["url"],
+        "wait" => &["target", "ref", "selector", "gone"],
+        "watch" => &["selector", "stable", "require_mutation"],
+        "eval" => &["script"],
+        "screenshot" => &["path", "selector"],
+        "storage-get" => &["key", "session", "expected"],
+        "assert-text" | "assert-value" => &["target", "expected"],
+        "assert-url" => &["expected"],
+        _ => &[],
+    }
+}
+
 fn validate_step(step: &Step) -> Result<()> {
     let required: &[(&str, Option<&str>)] = match step.action.as_str() {
         // An empty list clears the input, so the list has to be stated.
@@ -195,6 +264,12 @@ fn validate_step(step: &Step) -> Result<()> {
     };
     for (name, value) in required {
         anyhow::ensure!(value.is_some(), "{} requires '{name}'", step.action);
+    }
+    // A field the action never reads is a mistake that would otherwise pass in silence:
+    // `expected` on an `eval` step asserts nothing.
+    let used = fields_read_by(&step.action);
+    if let Some(unused) = step.set_fields().into_iter().find(|field| !used.contains(field)) {
+        anyhow::bail!("{} does not use '{unused}'", step.action);
     }
     Ok(())
 }
@@ -740,6 +815,12 @@ mod tests {
         // Every action the runner dispatches has to pass validation; `check` did not.
         assert!(super::parse_scenario("[[step]]\naction='check'\ntarget='#agree'").is_ok());
         assert!(super::parse_scenario("[[step]]\naction='check'").is_err());
+        // A field the action never reads would pass in silence: this asserts nothing.
+        let unread = super::parse_scenario("[[step]]\naction='eval'\nscript='document.title'\nexpected='Home'");
+        assert!(format!("{:#}", unread.expect_err("eval does not compare")).contains("does not use 'expected'"));
+        assert!(super::parse_scenario("[[step]]\naction='click'\ntarget='#a'\nvalue='x'").is_err());
+        assert!(super::parse_scenario("[[step]]\naction='ipc'\ncommand='ping'\nexpected='pong'").is_ok());
+        assert!(super::parse_scenario("[[step]]\naction='click'\ntarget='#a'\ntimeout_ms=500\nname='go'").is_ok());
     }
 
     use super::*;

@@ -862,8 +862,9 @@ export class HasgardWindow {
   }
 
   /** Observe DOM mutations until they settle, or reject when nothing changes. */
-  async watch(options: WatchOptions = {}): Promise<WatchChanges> {
+  async watch(options: WatchOptions = {}, frame?: string[]): Promise<WatchChanges> {
     const params: Record<string, JsonValue> = {}
+    if (frame) params.frame = frame
     if (options.selector !== undefined) params.selector = options.selector
     if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
     if (options.stableMs !== undefined) params.stable = options.stableMs
@@ -935,8 +936,10 @@ export class HasgardWindow {
     }
   }
 
-  async forms(selector?: string): Promise<FormsDump> {
-    const params = selector ? { selector } : undefined
+  async forms(selector?: string, frame?: string[]): Promise<FormsDump> {
+    const params: Record<string, JsonValue> = {}
+    if (selector) params.selector = selector
+    if (frame) params.frame = frame
     const value = expectRecord(await this.rpc.call("forms.dump", withWindow(this.label, params)), "forms.dump result")
     return {
       forms: expectArray(value.forms, "forms.dump.forms").map(parseFormEntry),
@@ -1236,6 +1239,16 @@ export class HasgardFrameLocator {
   /** Descend into a frame nested inside this one. */
   frameLocator(selector: string): HasgardFrameLocator {
     return new HasgardFrameLocator(this.windowRef, [...this.frame, selector])
+  }
+
+  /** Watch this frame's own document for changes. */
+  watch(options: WatchOptions = {}): Promise<WatchChanges> {
+    return this.windowRef.watch(options, [...this.frame])
+  }
+
+  /** The forms in this frame's document. */
+  forms(selector?: string): Promise<FormsDump> {
+    return this.windowRef.forms(selector, [...this.frame])
   }
 
   /** A PNG of this frame's document, or of one element in it. */

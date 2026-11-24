@@ -267,6 +267,7 @@ pub async fn run_replay_command(
     let mut prev_ts: u64 = 0;
     let mut passed = 0;
     let mut skipped = 0;
+    let mut errors = Vec::new();
 
     for (i, entry) in entries.iter().enumerate() {
         let (action, timestamp) = replay_step(i, entry)?;
@@ -294,25 +295,26 @@ pub async fn run_replay_command(
             params.insert("window".to_string(), Value::String(w.to_string()));
         }
 
-        let result = client.call(action, Some(Value::Object(params))).await;
-
-        let status = if result.is_ok() {
-            passed += 1;
-            "ok"
-        } else {
-            "FAIL"
-        };
-        eprintln!("{}", format_replay_step(i + 1, total, action, status));
+        match client.call(action, Some(Value::Object(params))).await {
+            Ok(_) => {
+                passed += 1;
+                eprintln!("{}", format_replay_step(i + 1, total, action, "ok"));
+            }
+            Err(error) => {
+                eprintln!("{}: {error}", format_replay_step(i + 1, total, action, "FAIL"));
+                errors.push(serde_json::json!({"step": i + 1, "action": action, "error": error.to_string()}));
+            }
+        }
     }
 
-    let executed = total - skipped;
-    let status = if passed == executed { "ok" } else { "failed" };
+    let status = if errors.is_empty() { "ok" } else { "failed" };
     Ok(serde_json::json!({
         "status": status,
         "total": total,
         "passed": passed,
         "skipped": skipped,
-        "failed": executed - passed
+        "failed": errors.len(),
+        "errors": errors,
     }))
 }
 

@@ -92,7 +92,9 @@ MCP over ACP is a [draft](https://agentclientprotocol.com/rfds/mcp-over-acp) beh
 
 ## Dangerous tools
 
-`eval`, `ipc` and `drop` run arbitrary code or commands in the application, so they are hidden by default.
+`eval`, `ipc` and `drop` run arbitrary code or commands in the application, so they are hidden by default. `run_scenario` and `replay` refuse steps and recorded actions of those three kinds for the same reason.
+
+This default keeps an agent from reaching for them; it is not a security boundary. `wait` with `expression` and `press` with `wait_for` evaluate a script in the page whatever the setting, and on Wry the page can call the application's commands. Attach the server only to an application you would let the agent script.
 
 - stdio: set `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1` in the server's environment, for example `codex mcp add tauri-hasgard --env TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS=1 -- npx -y tauri-hasgard mcp`, or `-e` for `claude mcp add`.
 - In process: `server.with_dangerous_tools(true)`.

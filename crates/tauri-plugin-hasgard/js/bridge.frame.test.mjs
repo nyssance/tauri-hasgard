@@ -407,3 +407,13 @@ test("a frame's screenshot area is the frame's content box, and an element's is 
   assert.throws(() => hasgard.screenshotArea({ frame: ["#pane"], selector: "#absent" }), /Element not found/)
   assert.throws(() => hasgard.screenshotArea({ frame: ["#nowhere"] }), /No frame matches/)
 })
+
+test("forms and watch look in the frame's document, not the page's", () => {
+  // The page has the form and the list; the frame has neither. Answering for the page would find them.
+  const page = makeDocument({ "#signup": makeElement("signup", { tagName: "FORM" }), "#list": makeElement("list") })
+  const hasgard = loadBridge({ main: page, frames: { "#pane": makeDocument() } })
+
+  assert.throws(() => hasgard.formDump({ frame: ["#pane"], selector: "#signup" }), /Form not found: #signup/)
+  assert.throws(() => hasgard.watch({ frame: ["#pane"], selector: "#list" }), /no element matches selector: #list/)
+  assert.throws(() => hasgard.formDump({ frame: ["#absent"] }), /No frame matches/)
+})

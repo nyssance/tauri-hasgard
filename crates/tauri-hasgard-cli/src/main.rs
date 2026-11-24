@@ -3,7 +3,6 @@ mod output;
 
 use anyhow::{Context, Result};
 use base64::Engine;
-use clap::Parser;
 use serde_json::{Value, json};
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -56,7 +55,7 @@ fn run() -> Result<()> {
 }
 
 async fn run_cli() -> Result<()> {
-    let args = Cli::parse();
+    let args = parse_cli(std::env::args_os()).unwrap_or_else(|error| error.exit());
     let is_mcp = matches!(args.command, Command::Mcp);
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
@@ -141,7 +140,38 @@ async fn run_cli() -> Result<()> {
     }
 
     format_result(output_kind, &result, args.json)?;
+    // A replay in which a step failed has failed, and a script gating on it has to see that.
+    if matches!(output_kind, OutputKind::Replay) && result["status"] == "failed" {
+        anyhow::bail!("{} of {} replayed steps failed", result["failed"], result["total"]);
+    }
     Ok(())
+}
+
+/// The command line as it is acted on.
+///
+/// An event to every listener and the downloads of every window belong to the application.
+/// The default window from the environment says where element commands go, not that these
+/// should be narrowed; only a `--window` given with the command does that.
+fn parse_cli<I, T>(arguments: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let matches = <Cli as clap::CommandFactory>::command().try_get_matches_from(arguments)?;
+    let mut args = <Cli as clap::FromArgMatches>::from_arg_matches(&matches)?;
+    let given =
+        |matches: &clap::ArgMatches| matches.value_source("window") == Some(clap::parser::ValueSource::CommandLine);
+    // A global option may sit before the command or after it, at any depth.
+    let mut level = Some(&matches);
+    let mut on_command_line = false;
+    while let Some(current) = level {
+        on_command_line |= given(current);
+        level = current.subcommand().map(|(_, inner)| inner);
+    }
+    if matches!(args.command, Command::Event(_) | Command::Downloads(_)) && !on_command_line {
+        args.window = None;
+    }
+    Ok(args)
 }
 
 #[derive(Copy, Clone)]
@@ -395,7 +425,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
             client.call("wait", with_scope(Some(params), scope)).await
         }
         Command::Watch { selector, timeout, stable, require_mutation } => {
-            run_watch_command(client, selector, timeout, stable, require_mutation, scope.window).await
+            run_watch_command(client, selector, timeout, stable, require_mutation, scope).await
         }
         Command::Logs { level, last, clear, follow } => {
             run_logs_command(client, level, last, clear, follow, scope.window).await
@@ -479,8 +509,7 @@ async fn run_snapshot_command(
 }
 
 async fn run_watch_command(
-    client: &mut Client, selector: Option<String>, timeout: u64, stable: u64, require_mutation: bool,
-    window: Option<&str>,
+    client: &mut Client, selector: Option<String>, timeout: u64, stable: u64, require_mutation: bool, scope: Scope<'_>,
 ) -> Result<serde_json::Value> {
     let mut params = serde_json::Map::new();
     params.insert("timeout".into(), json!(timeout));
@@ -491,9 +520,7 @@ async fn run_watch_command(
     if let Some(sel) = selector {
         params.insert("selector".into(), json!(sel));
     }
-    client
-        .call("watch", with_scope(Some(serde_json::Value::Object(params)), Scope { window, ..Scope::default() }))
-        .await
+    client.call("watch", with_scope(Some(serde_json::Value::Object(params)), scope)).await
 }
 
 async fn run_diff_command(
@@ -1183,6 +1210,27 @@ mod tests {
 
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn the_default_window_does_not_narrow_what_belongs_to_the_application() {
+        // SAFETY: tests that read or write the environment are serialized.
+        unsafe { std::env::set_var("TAURI_HASGARD_WINDOW", "main") };
+        let window = |line: &[&str]| parse_cli(line.iter().copied()).expect("parses").window;
+        let outcome = (
+            window(&["tauri-hasgard", "click", "#save"]),
+            window(&["tauri-hasgard", "event", "emit", "sync:done"]),
+            window(&["tauri-hasgard", "downloads", "list"]),
+            window(&["tauri-hasgard", "event", "emit", "sync:done", "--window", "settings"]),
+            window(&["tauri-hasgard", "--window", "main", "downloads", "list"]),
+        );
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("TAURI_HASGARD_WINDOW") };
+        assert_eq!(
+            outcome,
+            (Some("main".to_owned()), None, None, Some("settings".to_owned()), Some("main".to_owned()))
+        );
+    }
 
     #[test]
     fn test_diagnose_versions_match_has_no_warning() {

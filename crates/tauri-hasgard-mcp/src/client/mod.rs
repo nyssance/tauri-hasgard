@@ -44,7 +44,16 @@ type Reader = BufReader<tokio::io::ReadHalf<tokio::net::windows::named_pipe::Nam
 type Writer = tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeClient>;
 
 enum Transport {
-    Endpoint { reader: Reader, writer: Writer, next_id: u64 },
+    Endpoint {
+        reader: Reader,
+        writer: Writer,
+        next_id: u64,
+        /// The response line being read. It outlives a call that is dropped while it waits
+        /// (a step that timed out), so the next call resumes the line instead of losing part of it.
+        line: Vec<u8>,
+        /// Set while a request is being written: a call dropped then leaves half a request behind.
+        writing: bool,
+    },
     InProcess(InProcessCall),
 }
 
@@ -70,19 +79,22 @@ impl Client {
     }
 
     fn endpoint(reader: Reader, writer: Writer) -> Self {
-        Self(Transport::Endpoint { reader, writer, next_id: 1 })
+        Self(Transport::Endpoint { reader, writer, next_id: 1, line: Vec::new(), writing: false })
     }
 
     /// Send one request and return its result value.
     pub async fn call(&mut self, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
-        let (reader, writer, next_id) = match &mut self.0 {
-            Transport::Endpoint { reader, writer, next_id } => (reader, writer, next_id),
+        let (reader, writer, next_id, line, writing) = match &mut self.0 {
+            Transport::Endpoint { reader, writer, next_id, line, writing } => (reader, writer, next_id, line, writing),
             Transport::InProcess(call) => {
                 // The in-process executor takes an object; an absent params value is the empty object.
                 let params = params.unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
                 return call(method.to_owned(), params).await.map_err(|error| RpcFailure(error).into());
             }
         };
+        if *writing {
+            bail!("An earlier request was abandoned while it was being sent; this connection cannot be used further");
+        }
         let id = *next_id;
         *next_id += 1;
 
@@ -93,25 +105,35 @@ impl Client {
         if bytes.len() > MAX_REQUEST_BYTES {
             bail!("Hasgard request is {} bytes; maximum is {MAX_REQUEST_BYTES} bytes including newline", bytes.len());
         }
+        *writing = true;
         writer.write_all(&bytes).await?;
         writer.flush().await?;
+        *writing = false;
 
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            bail!("Server closed the connection");
-        }
+        let response = loop {
+            // Whatever a dropped call had read of a line is still in `line`, and is completed here.
+            let n = reader.read_until(b'\n', line).await?;
+            if n == 0 {
+                bail!("Server closed the connection");
+            }
+            let response: Result<Response, _> = serde_json::from_slice(line.trim_ascii());
+            line.clear();
+            let response = response?;
 
-        let response: Response = serde_json::from_str(line.trim())?;
-
-        if response.id.is_null() {
-            let err = response.error.ok_or_else(|| anyhow::anyhow!("Uncorrelated response has no error"))?;
-            return Err(RpcFailure(err).into());
-        }
-
-        if response.id != serde_json::Value::Number(id.into()) {
-            bail!("Response ID mismatch: expected {id}, got {}", response.id);
-        }
+            if response.id.is_null() {
+                let err = response.error.ok_or_else(|| anyhow::anyhow!("Uncorrelated response has no error"))?;
+                return Err(RpcFailure(err).into());
+            }
+            // The answer to a call that was given up on, such as a scenario step that timed
+            // out, arrives later and belongs to no one; the one waited for comes after it.
+            if response.id.as_u64().is_some_and(|answered| answered < id) {
+                continue;
+            }
+            if response.id != serde_json::Value::Number(id.into()) {
+                bail!("Response ID mismatch: expected {id}, got {}", response.id);
+            }
+            break response;
+        };
 
         if let Some(err) = response.error {
             return Err(RpcFailure(err).into());
@@ -166,6 +188,35 @@ mod tests {
             }
             handle.await.expect("server");
         }
+    }
+
+    #[tokio::test]
+    async fn a_call_given_up_on_does_not_take_the_next_call_s_answer() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let socket = directory.path().join("rpc.sock");
+        let listener = UnixListener::bind(&socket).expect("listen");
+        // The first answer comes late and in two pieces; the second follows at once.
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let (reader, mut writer) = stream.into_split();
+            let mut requests = BufReader::new(reader).lines();
+            requests.next_line().await.expect("first request");
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            writer.write_all(br#"{"jsonrpc":"2.0","id":1,"res"#).await.expect("half an answer");
+            writer.flush().await.expect("flush");
+            requests.next_line().await.expect("second request");
+            writer
+                .write_all(b"ult\":\"slow\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"second\"}\n")
+                .await
+                .expect("answers");
+        });
+        let mut client = Client::connect(&socket).await.expect("connect");
+        // A step with a deadline: the call is dropped while it waits.
+        let given_up = tokio::time::timeout(Duration::from_millis(20), client.call("slow", None)).await;
+        assert!(given_up.is_err(), "the first call must time out");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(client.call("next", None).await.expect("the second call's own answer"), "second");
+        server.await.expect("server");
     }
 
     #[tokio::test]

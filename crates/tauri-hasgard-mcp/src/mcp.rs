@@ -627,6 +627,7 @@ impl HasgardMcpServer {
                 if optional_bool(&args, "require_mutation")?.unwrap_or(false) {
                     watch_params["requireMutation"] = json!(true);
                 }
+                insert_optional_frame(&mut watch_params, &args)?;
                 self.call_app_tool("watch", Some(watch_params), window).await
             }
             "logs" => self.call_logs_tool(&args, window).await,
@@ -671,8 +672,12 @@ impl HasgardMcpServer {
                 .await
             }
             "forms" => {
-                let params = optional_string(&args, "selector")?.map(|selector| json!({ "selector": selector }));
-                self.call_app_tool("forms.dump", params, window).await
+                let mut params = json!({});
+                if let Some(selector) = optional_string(&args, "selector")? {
+                    params["selector"] = json!(selector);
+                }
+                insert_optional_frame(&mut params, &args)?;
+                self.call_app_tool("forms.dump", Some(params), window).await
             }
             "assert_text" => self.assert_text(args, window, false).await,
             "assert_contains" => self.assert_text(args, window, true).await,
@@ -892,6 +897,8 @@ impl HasgardMcpServer {
             Err(err) => return Ok(tool_error(&err)),
         };
         Ok(match run_replay_command(&mut client, &path, None, window.as_deref()).await {
+            // A replay in which a step failed is a failed replay, as a scenario is.
+            Ok(result) if result["status"] == "failed" => CallToolResult::structured_error(json!({"result": result})),
             Ok(result) => tool_success(result),
             Err(err) => tool_error(&err),
         })
@@ -1685,6 +1692,8 @@ fn tool_specs() -> Vec<ToolSpec> {
 /// does not already declare `frame`. Listed, not blanket-applied: a tool that
 /// ignored the chain would answer from the top document without saying so.
 const FRAME_SCOPED_TOOLS: &[&str] = &[
+    "watch",
+    "forms",
     "snapshot",
     "diff",
     "screenshot",
@@ -2754,6 +2763,8 @@ mod tests {
             ("wheel", json!({"delta_y": 10})),
             ("drag", json!({"source": "#a", "target": "#b"})),
             ("wait", json!({"selector": "#a"})),
+            ("watch", json!({})),
+            ("forms", json!({})),
             ("assert_text", json!({"target": "#a", "expected": "x"})),
             ("assert_value", json!({"target": "#a", "expected": "x"})),
             ("assert_visible", json!({"target": "#a"})),
@@ -2769,7 +2780,7 @@ mod tests {
         for (method, sent) in calls.lock().expect("log").iter() {
             assert_eq!(sent, &frame, "{method} must carry the frame scope");
         }
-        assert_eq!(calls.lock().expect("log").len(), 9);
+        assert_eq!(calls.lock().expect("log").len(), 11);
     }
 
     #[tokio::test]

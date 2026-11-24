@@ -86,6 +86,9 @@ fn inject_plugin_version(result: &mut serde_json::Value) {
         obj.insert("plugin_version".to_owned(), serde_json::json!(env!("CARGO_PKG_VERSION")));
     }
 }
+fn is_page_level(method: &str) -> bool {
+    matches!(method, "url" | "title" | "state" | "eval" | "navigate") || method.starts_with("storage.")
+}
 
 /// Dispatch a JSON-RPC method call to the appropriate handler.
 #[expect(clippy::too_many_lines)]
@@ -103,6 +106,15 @@ pub(crate) async fn dispatch(
             && window.as_str().is_none_or(str::is_empty)
         {
             return Err(RpcError { code: -32602, message: "window must be a non-empty string".to_owned(), data: None });
+        }
+        // These answer for the window's own document. Given a frame they would still answer
+        // for the page, and the caller would take that for the frame's.
+        if object.get("frame").is_some_and(|frame| !frame.is_null()) && is_page_level(method) {
+            return Err(RpcError {
+                code: -32602,
+                message: format!("{method} acts on the window's document and does not take 'frame'"),
+                data: None,
+            });
         }
         if matches!(method, "wait" | "watch")
             && let Some(timeout) = object.get("timeout")
@@ -1916,6 +1928,20 @@ mod tests {
             .expect_err("the document never reaches the URL");
         assert_eq!(error.code, -32603);
         assert!(error.message.contains("app://localhost/login"), "{}", error.message);
+    }
+
+    #[tokio::test]
+    async fn a_frame_is_refused_by_what_answers_for_the_page() {
+        let engine = EvalEngine::new();
+        let eval_fn = scripted_eval(&engine, Vec::new());
+        for method in ["url", "title", "state", "eval", "navigate", "storage.list", "storage.clear"] {
+            let params = json!({"frame": ["#pane"], "script": "1", "url": "https://x/"});
+            let error = dispatch(method, Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new())
+                .await
+                .expect_err("a frame given to a page-level method");
+            assert_eq!(error.code, -32602, "{method}");
+            assert!(error.message.contains("does not take 'frame'"), "{method}: {}", error.message);
+        }
     }
 
     #[tokio::test]
