@@ -845,10 +845,20 @@
     )
   }
 
+  // An optional number. One of the wrong type is an error, not an absence: a caller
+  // who sent "5" or -1 asked for something, and the default is not it.
+  function optionalNumber(value, name, fallback) {
+    if (value == null) return fallback
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(`'${name}' must be a non-negative number, got: ${String(value).slice(0, 32)}`)
+    }
+    return value
+  }
+
   function snapshot(options) {
     const interactive = options?.interactive || false
     const selector = options?.selector || null
-    const maxDepth = options?.depth ?? 255
+    const maxDepth = optionalNumber(options?.depth, "depth", 255)
 
     // Never recycle a ref: another connection may still hold an older snapshot.
     idMap.clear()
@@ -1587,7 +1597,11 @@
 
   function scroll(options) {
     const dir = options?.direction || "down"
-    const amount = options?.amount || 300
+    // An explicit 0 is a scroll of nothing, not the default distance.
+    const amount = options?.amount ?? 300
+    if (typeof amount !== "number" || !Number.isFinite(amount)) {
+      throw new Error(`'amount' must be a number, got: ${String(amount).slice(0, 32)}`)
+    }
     // Route through `resolveTarget` rather than `ref` alone so a selector or
     // point locator can scroll its own element; with `ref`-only, every
     // selector-based caller silently scrolled the document instead.
@@ -2083,7 +2097,7 @@
     }
 
     if (expression) {
-      const poll = options?.poll ?? 50
+      const poll = optionalNumber(options?.poll, "poll", 50)
       return waitForExpression(expression, timeout, poll)
     }
 
@@ -2152,7 +2166,7 @@
   function watch(options) {
     const selector = options?.selector
     const timeout = options?.timeout ?? 10000
-    const stable = options?.stable ?? 300
+    const stable = optionalNumber(options?.stable, "stable", 300)
     const requireMutation = !!options?.requireMutation
 
     let root
@@ -2505,9 +2519,13 @@
     }
     function complete() {
       // WebKit can deliver keyup before the corresponding keydown while
-      // processing native input. Require both trusted events for every code,
-      // including modifiers, without assuming their DOM delivery order.
-      if (!sawMainKey || pressedCodes.size !== releasedCodes.size) return
+      // processing native input. Require both trusted events for every code
+      // pressed, including modifiers, without assuming their DOM delivery order.
+      // A keyup for a key this observation never saw go down belongs to the
+      // press before it -- a modifier pressed alone is not awaited, so its
+      // release can land here -- and counting it would leave the two sets
+      // unequal for good.
+      if (!sawMainKey) return
       for (const code of pressedCodes) if (!releasedCodes.has(code)) return
       removeListeners()
       resolve({ ok: true })

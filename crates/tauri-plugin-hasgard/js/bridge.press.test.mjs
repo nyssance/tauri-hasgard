@@ -81,3 +81,15 @@ for (const missing of ["main keydown", "modifier keyup", "trusted keyup", "match
     assert.equal(probe.listeners.size, 0)
   })
 }
+
+test("native completion ignores the release of a key pressed before it began", async () => {
+  // `press Shift` is not awaited in the webview, so its keyup can arrive while the next press is observed.
+  const probe = observer()
+  probe.emit("keyup", "ShiftLeft")
+  probe.emit("keydown", "ArrowRight")
+  assert.equal(probe.listeners.size, 2)
+  probe.emit("keyup", "ArrowRight")
+  assert.equal((await probe.waitPress({ token: 1 })).ok, true)
+  assert.equal(probe.listeners.size, 0)
+  probe.cancelPress({ token: 1 })
+})

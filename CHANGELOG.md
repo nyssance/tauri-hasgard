@@ -1,3 +1,8 @@
+# Unreleased
+
+- Fix a native `press` that timed out when the release of a modifier pressed just before it arrived during its own observation: a `keyup` for a key the press never saw go down is no longer counted.
+- The bridge rejects a `depth`, `amount`, `poll` or `stable` of the wrong type instead of using the default, and `scroll` with `amount: 0` scrolls nothing rather than the default distance.
+
 # 0.8.3 (2026-11-24)
 
 - `wait` and `watch` reject a `timeout` that is not a whole number instead of using the default.

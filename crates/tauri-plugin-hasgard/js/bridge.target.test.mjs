@@ -194,3 +194,11 @@ test("scroll without a target still scrolls the document", () => {
 
   assert.deepEqual(scrolled, { dx: 40, dy: 0 })
 })
+
+test("numeric options of the wrong type are rejected rather than replaced by the default", async () => {
+  const hasgard = loadBridge()
+  assert.throws(() => hasgard.snapshot({ depth: "3" }), /'depth' must be a non-negative number/)
+  assert.throws(() => hasgard.scroll({ direction: "down", amount: "far" }), /'amount' must be a number/)
+  assert.throws(() => hasgard.watch({ stable: -1 }), /'stable' must be a non-negative number/)
+  await assert.rejects(async () => hasgard.wait({ expression: "true", poll: "fast" }), /'poll' must be/)
+})
