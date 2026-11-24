@@ -260,6 +260,77 @@ try {
   assert.equal((await rpc("nativeDialog.handle", { action: "manual" }, "main")).action, "manual")
   await rpc("nativeDialog.clear", {}, "main")
   pass("native dialogs answered at the IPC boundary, recorded, and nothing else intercepted")
+  // Tauri events cross the same boundary on this runtime: one sent in is heard by the page,
+  // and one the page emits is recorded.
+  await rpc("event.clear")
+  assert.deepEqual((await rpc("event.listen", { event: "fixture-saved" })).listening, ["fixture-saved"])
+  await rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } })
+  assert.equal(await until(() => evaluate("main", "document.body.dataset.event"), "Event heard by the page"), '{"n":7}')
+  await rpc("fill", { selector: "#host-input", value: "saved" }, "main")
+  await evaluate("main", 'document.querySelector("#host-input").dispatchEvent(new Event("change")), null')
+  const heard = await until(async () => {
+    const { events } = await rpc("event.list", { event: "fixture-saved" })
+    return events.length > 0 && events
+  }, "Event emitted by the page")
+  assert.deepEqual(heard.at(-1).payload, { value: "saved" })
+  await assert.rejects(rpc("event.list", { sinceId: "1" }), /'sinceId' must be/)
+  await rpc("event.unlisten", { event: "fixture-saved" })
+  await rpc("event.clear")
+  pass("Tauri events delivered to the page and recorded from it")
+  // The child webview was built with Hasgard's download observer.
+  const downloadDir = join(artifacts, "downloads")
+  rmSync(downloadDir, { recursive: true, force: true })
+  mkdirSync(downloadDir, { recursive: true })
+  await rpc("downloads.clear")
+  await rpc("downloads.setDirectory", { path: downloadDir })
+  const finished = rpc("downloads.wait", { timeout: 20000 }, "guest")
+  await evaluate(
+    "guest",
+    `(() => {
+      const link = document.createElement("a")
+      link.href = URL.createObjectURL(new Blob(["hello cef"], { type: "text/plain" }))
+      link.download = "hasgard-cef.txt"
+      document.body.append(link)
+      link.click()
+      link.remove()
+      return null
+    })()`
+  )
+  const download = await finished
+  assert.equal(download.state, "finished", JSON.stringify(download))
+  assert.equal(download.window, "guest")
+  assert.equal(readFileSync(download.path, "utf8"), "hello cef")
+  assert.ok(download.path.startsWith(downloadDir), download.path)
+  assert.deepEqual(
+    (await rpc("downloads.list", {}, "guest")).downloads.map(({ id }) => id),
+    [download.id]
+  )
+  assert.deepEqual((await rpc("downloads.list", {}, "main")).downloads, [])
+  await rpc("downloads.setDirectory", { path: null })
+  pass("a download from the child webview is reported with the file it saved")
+  // A same-origin frame is captured and diffed as a document of its own.
+  const pngSize = async (params) => {
+    const url = await rpc("screenshot", params, "second")
+    assert.ok(url.startsWith("data:image/png;base64,"), "frame screenshot is not a PNG data URL")
+    const png = Buffer.from(url.slice("data:image/png;base64,".length), "base64")
+    return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+  }
+  const pane = await pngSize({ frame: ["#pane"] })
+  assert.ok(Math.abs(pane.width / pane.height - 300 / 120) < 0.05, `frame capture is ${JSON.stringify(pane)}`)
+  const pay = await pngSize({ frame: ["#pane"], selector: "#pay" })
+  assert.ok(Math.abs(pay.width / pay.height - 120 / 40) < 0.1, `element capture is ${JSON.stringify(pay)}`)
+  assert.ok(pay.width < pane.width)
+  await rpc("snapshot", { frame: ["#pane"] }, "second")
+  await rpc("snapshot", {}, "second")
+  assert.deepEqual(await rpc("diff", { frame: ["#pane"] }, "second"), { added: [], removed: [], changed: [] })
+  await evaluate(
+    "second",
+    'document.querySelector("#pane").contentDocument.querySelector("#pay").textContent = "Pay now", null'
+  )
+  const changed = await rpc("diff", { frame: ["#pane"] }, "second")
+  assert.ok(changed.added.length + changed.removed.length + changed.changed.length > 0, JSON.stringify(changed))
+  await assert.rejects(rpc("screenshot", { frame: ["#absent"] }, "second"), /No frame matches/)
+  pass("a frame has its own screenshot and its own diff baseline")
   const heapPath = join(artifacts, "guest.heapsnapshot")
   rmSync(heapPath, { force: true })
   const heap = await rpc("heap.snapshot", { output_path: heapPath }, "guest")

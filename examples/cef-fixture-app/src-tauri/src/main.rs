@@ -9,7 +9,9 @@ fn child(app: &tauri::AppHandle) -> Result<(), String> {
             tauri::WebviewUrl::External(url.parse().map_err(|e| format!("Invalid guest URL: {e}"))?),
         )
         .position(tauri::LogicalPosition::new(16.0, 180.0))
-        .size(tauri::LogicalSize::new(760.0, 430.0)),
+        .size(tauri::LogicalSize::new(760.0, 430.0))
+        // A webview reports its downloads only to the handler it was built with.
+        .on_download(tauri_plugin_hasgard::downloads::observer()),
     )
     .map_err(|e| e.to_string())?;
     Ok(())

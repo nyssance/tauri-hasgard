@@ -3,6 +3,8 @@
 <header><button id="modal">Open modal</button><button id="close">Close guest</button><button id="recreate">Recreate guest</button><button id="native-save">Export</button><button id="native-ask">Discard</button><button id="native-probe">Probe</button><input id="host-input" aria-label="Host input"></header>
 <dialog id="dialog"><h2>HOST MODAL</h2><input aria-label="Modal input"><button id="dismiss">Dismiss</button></dialog>
 <script>
+window.__TAURI__.event.listen('fixture-ping',e=>{document.body.dataset.event=JSON.stringify(e.payload)});
+document.querySelector('#host-input').addEventListener('change',e=>window.__TAURI__.event.emit('fixture-saved',{value:e.target.value}));
 document.querySelector('#modal').onclick=()=>document.querySelector('#dialog').showModal();
 document.querySelector('#dismiss').onclick=()=>document.querySelector('#dialog').close();
 document.querySelector('#native-probe').onclick=()=>fetch('http://ipc.localhost/plugin%3Adialog%7Csave',{method:'POST',body:JSON.stringify({options:{}}),headers:{'Content-Type':'application/json'}}).then(async r=>{document.body.dataset.native='probe:'+r.headers.get('Tauri-Response')+':'+await r.text()},e=>{document.body.dataset.native='probe:failed:'+e});

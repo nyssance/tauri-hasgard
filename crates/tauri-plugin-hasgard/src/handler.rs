@@ -48,10 +48,13 @@ const BRIDGE_TIMEOUT_BUFFER_MS: u64 = 2_000;
 /// honors `options.timeout` (currently `wait` and `watch`). Pads the user
 /// value with [`BRIDGE_TIMEOUT_BUFFER_MS`] so the bridge always gets to surface
 /// its own well-formed rejection before the channel goes silent.
-fn bridge_eval_timeout(params: Option<&serde_json::Value>) -> Duration {
-    let timeout_ms =
-        params.and_then(|p| p.get("timeout")).and_then(serde_json::Value::as_u64).unwrap_or(DEFAULT_BRIDGE_TIMEOUT_MS);
-    Duration::from_millis(timeout_ms.saturating_add(BRIDGE_TIMEOUT_BUFFER_MS))
+fn bridge_eval_timeout(params: Option<&serde_json::Value>, method: &str) -> Result<Duration, RpcError> {
+    let timeout_ms = match params {
+        Some(params) => crate::params::optional_u64(params, "timeout", method)?,
+        None => None,
+    }
+    .unwrap_or(DEFAULT_BRIDGE_TIMEOUT_MS);
+    Ok(Duration::from_millis(timeout_ms.saturating_add(BRIDGE_TIMEOUT_BUFFER_MS)))
 }
 
 /// Extract and remove the optional `"window"` key from params.
@@ -261,7 +264,9 @@ pub(crate) async fn dispatch(
         "wait" if params.is_some_and(|p| p.get("url").is_some() || p.get("load").is_some()) => {
             handle_wait_location(params, engine, eval_fn, win).await
         }
-        "wait" | "watch" => handle_eval_method(method, params, engine, eval_fn, win, bridge_eval_timeout(params)).await,
+        "wait" | "watch" => {
+            handle_eval_method(method, params, engine, eval_fn, win, bridge_eval_timeout(params, method)?).await
+        }
         // The bare `screenshot` JSON-RPC method returns a base64 PNG data URL
         // of the document or of one element; native window
         // capture ships under the distinct `screenshot_native` method so the
@@ -698,7 +703,7 @@ async fn handle_press(
             engine,
             eval_fn,
             window,
-            bridge_eval_timeout(Some(&wait_params)),
+            bridge_eval_timeout(Some(&wait_params), "press")?,
         )
         .await
         .map_err(|mut error| {
@@ -1678,31 +1683,32 @@ mod tests {
         // `Timeout waiting for [data-testid="..."]`) instead of the channel
         // tripping first with the cryptic "eval timed out after 10s".
         let params = json!({"selector": "#root", "timeout": 60_000_u64});
-        let got = bridge_eval_timeout(Some(&params));
+        let got = bridge_eval_timeout(Some(&params), "wait").expect("a valid timeout");
         assert_eq!(got, Duration::from_millis(60_000 + BRIDGE_TIMEOUT_BUFFER_MS));
     }
 
     #[test]
     fn test_bridge_eval_timeout_defaults_when_missing() {
         // Mirror the bridge's own fallback: 10_000 ms + buffer.
-        let got = bridge_eval_timeout(None);
+        let got = bridge_eval_timeout(None, "wait").expect("no timeout");
         assert_eq!(got, Duration::from_millis(DEFAULT_BRIDGE_TIMEOUT_MS + BRIDGE_TIMEOUT_BUFFER_MS));
     }
 
     #[test]
-    fn test_bridge_eval_timeout_defaults_when_param_not_u64() {
-        // A non-integer "timeout" (string, negative, float) must not panic and
-        // must fall back to the bridge default rather than silently coercing.
-        let params = json!({"timeout": "soon"});
-        let got = bridge_eval_timeout(Some(&params));
-        assert_eq!(got, Duration::from_millis(DEFAULT_BRIDGE_TIMEOUT_MS + BRIDGE_TIMEOUT_BUFFER_MS));
+    fn test_bridge_eval_timeout_rejects_a_param_that_is_not_an_integer() {
+        // A caller who sent "soon", -1 or 1.5 asked for something; the default is not it.
+        for timeout in [json!("soon"), json!(-1), json!(1.5)] {
+            let error = bridge_eval_timeout(Some(&json!({"timeout": timeout})), "wait").expect_err("not an integer");
+            assert_eq!(error.code, -32602);
+            assert!(error.message.contains("'timeout'"), "{}", error.message);
+        }
     }
 
     #[test]
     fn test_bridge_eval_timeout_saturates_on_overflow() {
         // u64::MAX + buffer must saturate, not wrap to a tiny value.
         let params = json!({"timeout": u64::MAX});
-        let got = bridge_eval_timeout(Some(&params));
+        let got = bridge_eval_timeout(Some(&params), "wait").expect("a valid timeout");
         assert_eq!(got, Duration::from_millis(u64::MAX));
     }
 
@@ -1712,7 +1718,7 @@ mod tests {
         // *ceiling* for stuck JS, not a per-call cost. JS receives `timeout: 0`
         // and rejects on the next microtask; the buffer never elapses on the
         // happy path.
-        let got = bridge_eval_timeout(Some(&json!({"timeout": 0_u64})));
+        let got = bridge_eval_timeout(Some(&json!({"timeout": 0_u64})), "wait").expect("zero is valid");
         assert_eq!(got, Duration::from_millis(BRIDGE_TIMEOUT_BUFFER_MS));
     }
 

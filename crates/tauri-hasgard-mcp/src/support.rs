@@ -435,6 +435,14 @@ pub fn resolve_export_target(val: Option<&Value>) -> Option<String> {
     None
 }
 
+fn recorded_text<'a>(entry: &'a Value, field: &str) -> Option<&'a str> {
+    entry.get(field).and_then(Value::as_str)
+}
+
+fn missing_field(action: &str, field: &str) -> String {
+    format!("# {action}: the recording has no {field}")
+}
+
 pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
     let ref_id = entry.get("ref").and_then(|r| r.as_str());
     let selector = entry.get("selector").and_then(|s| s.as_str());
@@ -446,28 +454,47 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
         String::new()
     };
 
+    // A command missing what it acts on would run and do something else; say what is missing instead.
+    if target.is_empty()
+        && matches!(action, "click" | "fill" | "type" | "select" | "check" | "hover" | "focus" | "blur" | "dblclick")
+    {
+        return missing_field(action, "ref or selector");
+    }
     match action {
         "click" => format!("tauri-hasgard click {target}"),
-        "fill" => {
-            let value = entry.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            format!("tauri-hasgard fill {target} {}", shell_escape(value))
-        }
-        "type" => {
-            let text = entry.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            format!("tauri-hasgard type {target} {}", shell_escape(text))
-        }
-        "press" => {
-            let key = entry.get("key").and_then(|k| k.as_str()).unwrap_or("");
-            format!("tauri-hasgard press {}", shell_escape(key))
-        }
+        "fill" => match recorded_text(entry, "value") {
+            Some(value) => format!("tauri-hasgard fill {target} {}", shell_escape(value)),
+            None => missing_field(action, "value"),
+        },
+        "type" => match recorded_text(entry, "text") {
+            Some(text) => format!("tauri-hasgard type {target} {}", shell_escape(text)),
+            None => missing_field(action, "text"),
+        },
+        "press" => match recorded_text(entry, "key") {
+            Some(key) => format!("tauri-hasgard press {}", shell_escape(key)),
+            None => missing_field(action, "key"),
+        },
         "select" => {
-            let value = entry.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            format!("tauri-hasgard select {target} {}", shell_escape(value))
+            let several = entry.get("values").and_then(Value::as_array);
+            let chosen: Vec<&str> = match (recorded_text(entry, "value"), several) {
+                (Some(value), _) => vec![value],
+                (None, Some(values)) => values.iter().filter_map(Value::as_str).collect(),
+                (None, None) => Vec::new(),
+            };
+            if chosen.is_empty() {
+                return missing_field(action, "value");
+            }
+            let mut cmd = format!("tauri-hasgard select {target}");
+            for value in chosen {
+                let _ = write!(cmd, " {}", shell_escape(value));
+            }
+            cmd
         }
         "check" => format!("tauri-hasgard check {target}"),
         "hover" | "focus" | "blur" | "dblclick" => format!("tauri-hasgard {action} {target}"),
         "scroll" => {
-            let dir = entry.get("direction").and_then(|d| d.as_str()).unwrap_or("down");
+            // The protocol's own default direction.
+            let dir = recorded_text(entry, "direction").unwrap_or("down");
             let mut cmd = format!("tauri-hasgard scroll {}", shell_escape(dir));
             if let Some(amt) = entry.get("amount").and_then(serde_json::Value::as_i64) {
                 let _ = write!(cmd, " {amt}");
@@ -500,10 +527,10 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
             // as a shell command since recordings store base64 file contents.
             format!("# drop {target} (requires --file; not exportable)")
         }
-        "navigate" => {
-            let url = entry.get("url").and_then(|u| u.as_str()).unwrap_or("");
-            format!("tauri-hasgard navigate {}", shell_escape(url))
-        }
+        "navigate" => match recorded_text(entry, "url") {
+            Some(url) => format!("tauri-hasgard navigate {}", shell_escape(url)),
+            None => missing_field(action, "url"),
+        },
         _ => later_action_command(action, entry, &target),
     }
 }
@@ -513,6 +540,7 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
 fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
     match action {
         "wheel" => {
+            // An axis left out is one that did not move.
             let delta = |axis: &str| entry.get(axis).and_then(Value::as_f64).unwrap_or(0.0);
             let mut cmd = format!("tauri-hasgard wheel --delta-x {} --delta-y {}", delta("deltaX"), delta("deltaY"));
             if !target.is_empty() {
@@ -522,7 +550,9 @@ fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
         }
         "dialog.handle" | "nativeDialog.handle" => {
             let command = if action == "dialog.handle" { "dialog" } else { "native-dialog" };
-            let policy = entry.get("action").and_then(Value::as_str).unwrap_or("dismiss");
+            let Some(policy) = recorded_text(entry, "action") else {
+                return missing_field(action, "action");
+            };
             let mut cmd = format!("tauri-hasgard {command} {}", shell_escape(policy));
             if let Some(text) = entry.get("promptText").and_then(Value::as_str) {
                 let _ = write!(cmd, " --prompt-text {}", shell_escape(text));
@@ -537,7 +567,9 @@ fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
         }
         "route.clear" => "tauri-hasgard route clear".to_owned(),
         "route.add" => {
-            let pattern = entry.get("pattern").and_then(Value::as_str).unwrap_or("");
+            let Some(pattern) = recorded_text(entry, "pattern") else {
+                return missing_field(action, "pattern");
+            };
             let abort = entry.get("action").and_then(Value::as_str) == Some("abort");
             let mut cmd =
                 format!("tauri-hasgard route {} {}", if abort { "abort" } else { "fulfill" }, shell_escape(pattern));
@@ -551,16 +583,19 @@ fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
             }
             cmd
         }
-        "window.resize" => {
-            let size = |side: &str| entry.get(side).and_then(Value::as_f64).unwrap_or(0.0);
-            format!("tauri-hasgard window resize {} {}", size("width"), size("height"))
-        }
-        "window.move" => {
-            let point = |axis: &str| entry.get(axis).and_then(Value::as_f64).unwrap_or(0.0);
-            format!("tauri-hasgard window move {} {}", point("x"), point("y"))
+        "window.resize" | "window.move" => {
+            let (verb, first, second) =
+                if action == "window.resize" { ("resize", "width", "height") } else { ("move", "x", "y") };
+            let number = |field: &str| entry.get(field).and_then(Value::as_f64);
+            match (number(first), number(second)) {
+                (Some(a), Some(b)) => format!("tauri-hasgard window {verb} {a} {b}"),
+                _ => missing_field(action, &format!("{first} and {second}")),
+            }
         }
         "event.emit" => {
-            let event = entry.get("event").and_then(Value::as_str).unwrap_or("");
+            let Some(event) = recorded_text(entry, "event") else {
+                return missing_field(action, "event");
+            };
             let payload = entry.get("payload").map_or_else(|| "null".to_owned(), Value::to_string);
             format!("tauri-hasgard event emit {} --payload {}", shell_escape(event), shell_escape(&payload))
         }
@@ -769,6 +804,41 @@ pub fn strip_ansi(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exported_command_names_what_the_recording_lacks_instead_of_running_without_it() {
+        assert_eq!(
+            entry_to_cli_command("fill", &serde_json::json!({"selector": "#a"})),
+            "# fill: the recording has no value"
+        );
+        assert_eq!(
+            entry_to_cli_command("click", &serde_json::json!({})),
+            "# click: the recording has no ref or selector"
+        );
+        assert_eq!(entry_to_cli_command("navigate", &serde_json::json!({})), "# navigate: the recording has no url");
+        assert_eq!(
+            entry_to_cli_command("window.resize", &serde_json::json!({"width": 800})),
+            "# window.resize: the recording has no width and height"
+        );
+        assert_eq!(
+            entry_to_cli_command("route.add", &serde_json::json!({"action": "abort"})),
+            "# route.add: the recording has no pattern"
+        );
+        // An empty value is a value: clearing a field is a real action.
+        assert!(
+            entry_to_cli_command("fill", &serde_json::json!({"selector": "#a", "value": ""}))
+                .starts_with("tauri-hasgard fill ")
+        );
+    }
+
+    #[test]
+    fn a_multiple_selection_exports_every_value() {
+        let entry = serde_json::json!({"selector": "#tags", "values": ["a", "b c"]});
+        let command = entry_to_cli_command("select", &entry);
+        assert!(command.starts_with("tauri-hasgard select "), "{command}");
+        assert!(command.contains(" a ") || command.contains(" 'a' "), "{command}");
+        assert!(command.contains("b c"), "{command}");
+    }
 
     #[test]
     fn small_files_travel_inline_and_large_ones_by_path() {

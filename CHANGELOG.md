@@ -1,3 +1,9 @@
+# Unreleased
+
+- `wait` and `watch` reject a `timeout` that is not a whole number instead of using the default.
+- A recording exported as CLI commands names the field an entry lacks instead of emitting a command without it, and a multiple selection exports every value.
+- The CEF native suite covers downloads, Tauri events, and frame screenshots and diffs.
+
 # 0.8.2 (2026-11-24)
 
 - Add downloads: `downloads.wait`, `downloads.list`, `downloads.setDirectory` and `downloads.clear`. The application passes `tauri_plugin_hasgard::downloads::observer()` to `on_download`, or wraps its own handler with `downloads::observe`. CLI `downloads`, the MCP `downloads` tool, and Playwright `hasgard.waitForDownload` and `hasgard.downloads`.
