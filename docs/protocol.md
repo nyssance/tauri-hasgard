@@ -221,6 +221,8 @@ Unsupported platforms return an explicit error.
 
 ## TOML scenarios through MCP
 
+Step actions: `click`, `dblclick`, `hover`, `focus`, `blur`, `fill`, `type`, `press`, `select` (`value` or `values`), `check`, `scroll`, `wheel` (`delta_x`, `delta_y`), `drag` (`target`, `to`), `set-input-files` (`files`), `navigate`, `wait`, `watch`, `eval`, `ipc` (`command`, `args`, optional `expected`), `dialog` (`policy`, optional `text`), `native-dialog` (`policy`, `paths`, `button`), `route` (`pattern` with `status`, `body`, `content_type`, `method`, or `abort = true`; `clear = true` removes every rule), `screenshot`, `storage-get`, and the assertions `assert-text`, `assert-value`, `assert-url`, `assert-exists`, `assert-visible`, `assert-hidden`.
+
 `hasgard.run_scenario` takes `toml` (required string), optional `window`, and
 optional `fail_fast`. It runs the same implementation as CLI `run`, including
 global/step deadlines and failure reporting. Failed steps set MCP `isError`.

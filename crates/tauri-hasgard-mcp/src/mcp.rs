@@ -254,7 +254,14 @@ impl HasgardMcpServer {
             }
             "select" => {
                 let mut params = target_params(&required_string(&args, "target")?);
-                params["value"] = json!(required_string(&args, "value")?);
+                match (optional_string(&args, "value")?, args.get("values").filter(|values| !values.is_null())) {
+                    (Some(_), Some(_)) => {
+                        return Err(invalid_params("select accepts either 'value' or 'values', not both"));
+                    }
+                    (Some(value), None) => params["value"] = json!(value),
+                    (None, Some(_)) => params["values"] = json!(required_string_array(&args, "values")?),
+                    (None, None) => return Err(invalid_params("select requires 'value' or 'values'")),
+                }
                 insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("select", Some(params), window).await
             }
@@ -275,13 +282,25 @@ impl HasgardMcpServer {
             "focus" => self.target_call("focus", &args, window).await,
             "blur" => self.target_call("blur", &args, window).await,
             "disabled" => self.target_call("disabled", &args, window).await,
+            "visible" => self.target_call("visible", &args, window).await,
+            "checked" => self.target_call("checked", &args, window).await,
+            "count" => {
+                let mut params = json!({"selector": required_string(&args, "selector")?});
+                insert_optional_frame(&mut params, &args)?;
+                self.call_app_tool("count", Some(params), window).await
+            }
             "bounding_box" => self.target_call("boundingBox", &args, window).await,
             "scroll" => {
-                let mut params = json!({
-                    "direction": optional_string(&args, "direction")?.unwrap_or_else(|| "down".to_owned()),
-                    "amount": optional_i32(&args, "amount")?,
-                    "ref": optional_ref(&args)?,
-                });
+                let mut params = match (optional_string(&args, "target")?, optional_ref(&args)?) {
+                    (Some(_), Some(_)) => {
+                        return Err(invalid_params("scroll accepts either 'target' or 'ref', not both"));
+                    }
+                    (Some(target), None) => target_params(&target),
+                    (None, Some(reference)) => json!({"ref": reference}),
+                    (None, None) => json!({}),
+                };
+                params["direction"] = json!(optional_string(&args, "direction")?.unwrap_or_else(|| "down".to_owned()));
+                params["amount"] = json!(optional_i32(&args, "amount")?);
                 insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("scroll", Some(params), window).await
             }
@@ -979,6 +998,30 @@ fn tool_specs() -> Vec<ToolSpec> {
             idempotent: false,
         },
         ToolSpec {
+            name: "visible",
+            description: "Report whether an element is visible. Unlike assert_visible, a hidden element is an answer, not a failure.",
+            schema: target_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "checked",
+            description: "Report whether a checkbox or radio is checked.",
+            schema: target_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "count",
+            description: "Count the elements a CSS selector matches.",
+            schema: count_schema,
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
             name: "disabled",
             description: "Report whether an element is disabled, by property or aria-disabled.",
             schema: target_schema,
@@ -1293,8 +1336,8 @@ fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "select",
-            description: "Select an option in a select element.",
-            schema: fill_schema,
+            description: "Select an option in a select element, or a set of options in a multiple one.",
+            schema: select_schema,
             read_only: false,
             destructive: false,
             idempotent: true,
@@ -1498,6 +1541,9 @@ const FRAME_SCOPED_TOOLS: &[&str] = &[
     "blur",
     "disabled",
     "bounding_box",
+    "visible",
+    "checked",
+    "count",
     "scroll",
     "wheel",
     "drag",
@@ -1961,6 +2007,24 @@ fn fill_schema() -> Arc<JsonObject> {
     )
 }
 
+fn select_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("target", string_prop("Element ref, CSS selector, or x,y coordinates.")),
+            ("value", string_prop("The option to select, by its value or visible label.")),
+            (
+                "values",
+                json!({
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For a multiple select: exactly this set becomes selected. Use instead of value.",
+                }),
+            ),
+        ]),
+        &["target"],
+    )
+}
+
 fn type_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -1998,9 +2062,14 @@ fn scroll_schema() -> Arc<JsonObject> {
             ("direction", enum_prop("Direction to scroll.", &["up", "down", "left", "right", "top", "bottom"])),
             ("amount", integer_prop("Pixel amount to scroll.")),
             ("ref", string_prop("Optional element ref, with or without @.")),
+            ("target", string_prop("Scroll this element instead of the document: ref, CSS selector, or x,y.")),
         ]),
         &[],
     )
+}
+
+fn count_schema() -> Arc<JsonObject> {
+    object_schema(props([("selector", string_prop("CSS selector to count matches of."))]), &["selector"])
 }
 
 fn drag_schema() -> Arc<JsonObject> {
@@ -2522,10 +2591,12 @@ mod tests {
             "blur",
             "bounding_box",
             "check",
+            "checked",
             "clear",
             "click",
             "clipboard",
             "cookies",
+            "count",
             "dblclick",
             "dialog",
             "diff",
@@ -2572,6 +2643,7 @@ mod tests {
             "video_start",
             "video_status",
             "video_stop",
+            "visible",
             "wait",
             "watch",
             "wheel",

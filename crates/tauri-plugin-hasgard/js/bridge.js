@@ -1440,13 +1440,27 @@
     // "set then trust" reports success on a no-op (#113). Match the option
     // first — by `value`, then by visible label — and error if none matches so
     // a reported `ok` always means an option was actually selected.
-    const wanted = String(params.value)
     const options = [...(el.options || [])]
-    const matched =
-      options.find((o) => o.value === wanted) || options.find((o) => (o.text || "").trim() === wanted.trim())
-    if (!matched) {
-      throw new Error(`select: no option matches ${JSON.stringify(params.value)}`)
+    const optionFor = (value) => {
+      const wanted = String(value)
+      const found =
+        options.find((o) => o.value === wanted) || options.find((o) => (o.text || "").trim() === wanted.trim())
+      if (!found) throw new Error(`select: no option matches ${JSON.stringify(value)}`)
+      return found
     }
+    // `values` selects exactly that set in a `<select multiple>`; an empty list clears it.
+    if (params.values !== undefined) {
+      if (!Array.isArray(params.values)) throw new Error("select 'values' must be an array")
+      if (!el.multiple && params.values.length !== 1) {
+        throw new Error(`select: this <select> takes one value, and ${params.values.length} were given`)
+      }
+      const chosen = new Set(params.values.map(optionFor))
+      for (const option of options) option.selected = chosen.has(option)
+      el.dispatchEvent(new Event("input", { bubbles: true }))
+      el.dispatchEvent(new Event("change", { bubbles: true }))
+      return { ok: true }
+    }
+    const matched = optionFor(params.value)
     const setter = nativeValueSetter(el)
     if (setter) {
       setter.call(el, matched.value)

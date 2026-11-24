@@ -243,12 +243,14 @@ try {
   assert.deepEqual(
     answered.map(({ kind, accepted, title, result }) => ({ kind, accepted, title, result })),
     [
+      // The probe's request named no title.
+      { kind: "save", accepted: true, title: undefined, result: "/tmp/hasgard-cef.csv" },
       { kind: "save", accepted: true, title: "Export report", result: "/tmp/hasgard-cef.csv" },
       { kind: "message", accepted: true, title: "Draft", result: "Yes" },
       { kind: "save", accepted: false, title: "Export report", result: null }
     ]
   )
-  assert.deepEqual(answered[1].buttons, ["Yes", "No"])
+  assert.deepEqual(answered[2].buttons, ["Yes", "No"])
   assert.equal((await rpc("nativeDialog.handle", { action: "manual" }, "main")).action, "manual")
   await rpc("nativeDialog.clear", {}, "main")
   pass("native dialogs answered at the IPC boundary, recorded, and nothing else intercepted")

@@ -150,3 +150,45 @@ test("select still rejects a non-<select> target", () => {
 
   assert.throws(() => hasgard.select({ selector: "input[name=role]", value: "admin" }), /<select>/i)
 })
+
+test("values selects exactly that set in a multiple select and clears with an empty list", () => {
+  const el = makeSelect([
+    { value: "a", text: "Alpha" },
+    { value: "b", text: "Beta" },
+    { value: "c", text: "Gamma" }
+  ])
+  el.multiple = true
+  el._options[2].selected = true
+  const hasgard = loadBridge({ queryResult: el })
+
+  // By value and by label, replacing what was selected before.
+  hasgard.select({ selector: "#tags", values: ["a", "Beta"] })
+  assert.deepEqual(
+    el._options.map((o) => o.selected),
+    [true, true, false]
+  )
+  assert.deepEqual(el.events, ["input", "change"])
+
+  hasgard.select({ selector: "#tags", values: [] })
+  assert.deepEqual(
+    el._options.map((o) => o.selected),
+    [false, false, false]
+  )
+  assert.throws(() => hasgard.select({ selector: "#tags", values: ["a", "missing"] }), /no option matches "missing"/)
+  assert.throws(() => hasgard.select({ selector: "#tags", values: "a" }), /'values' must be an array/)
+})
+
+test("values on a single select is refused unless it names one option", () => {
+  const el = makeSelect([
+    { value: "a", text: "Alpha" },
+    { value: "b", text: "Beta" }
+  ])
+  const hasgard = loadBridge({ queryResult: el })
+
+  assert.throws(() => hasgard.select({ selector: "#one", values: ["a", "b"] }), /takes one value, and 2 were given/)
+  hasgard.select({ selector: "#one", values: ["b"] })
+  assert.deepEqual(
+    el._options.map((o) => o.selected),
+    [false, true]
+  )
+})

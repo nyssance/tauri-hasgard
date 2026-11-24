@@ -61,7 +61,8 @@ export interface RoleQuery {
 }
 
 export interface WaitOptions {
-  state: "attached" | "detached"
+  /** `visible` and `hidden` follow what a user sees; `attached` and `detached` follow the document. */
+  state: "attached" | "detached" | "visible" | "hidden"
   timeoutMs: number
 }
 

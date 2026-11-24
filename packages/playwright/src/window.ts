@@ -1200,8 +1200,13 @@ export class HasgardLocator {
     })
   }
 
-  async selectOption(value: string): Promise<void> {
-    await this.withTarget((target) => this.window.call("select", { ...this.scoped(target), value }))
+  /**
+   * Select an option by its value or visible label. An array selects exactly
+   * that set in a `<select multiple>`; an empty one clears the selection.
+   */
+  async selectOption(value: string | string[]): Promise<void> {
+    const choice: Record<string, JsonValue> = Array.isArray(value) ? { values: value } : { value }
+    await this.withTarget((target) => this.window.call("select", { ...this.scoped(target), ...choice }))
   }
 
   /** Drive the checkbox to checked. A no-op when it is already checked. */
@@ -1365,6 +1370,17 @@ export class HasgardLocator {
   }
 
   async waitFor(options: WaitOptions): Promise<void> {
+    if (options.state === "visible" || options.state === "hidden") {
+      // An element that is not in the document is not visible either: `hidden` is satisfied by its absence.
+      const deadline = Date.now() + options.timeoutMs
+      for (let attempt = 0; Date.now() <= deadline; attempt++) {
+        const visible = (await this.count()) > 0 && (await this.isVisible())
+        if (visible === (options.state === "visible")) return
+        await sleep(pollDelay(attempt, deadline) || 1)
+      }
+      throw new Error(`Locator did not become ${options.state} within ${options.timeoutMs}ms`)
+    }
+
     // The bridge's `wait` op knows nothing about ordinals or text, so an
     // indexed or filtered locator has to poll its own count — waiting on the
     // bare selector would resolve as soon as *any* match appeared, even one

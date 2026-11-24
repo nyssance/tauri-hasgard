@@ -695,6 +695,11 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
         Command::Focus { target } => client.call("focus", with_scope(Some(target_params(&target)), scope)).await,
         Command::Blur { target } => client.call("blur", with_scope(Some(target_params(&target)), scope)).await,
         Command::Disabled { target } => client.call("disabled", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Visible { target } => client.call("visible", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Checked { target } => client.call("checked", with_scope(Some(target_params(&target)), scope)).await,
+        Command::Count { selector } => {
+            client.call("count", with_scope(Some(json!({"selector": selector})), scope)).await
+        }
         Command::BoundingBox { target } => {
             client.call("boundingBox", with_scope(Some(target_params(&target)), scope)).await
         }
@@ -721,29 +726,27 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             }
             client.call("press", with_scope(Some(params), scope)).await
         }
-        Command::Select { target, value } => {
+        Command::Select { target, values } => {
             let mut p = target_params(&target);
-            p["value"] = json!(value);
+            match values.as_slice() {
+                [value] => p["value"] = json!(value),
+                _ => p["values"] = json!(values),
+            }
             client.call("select", with_scope(Some(p), scope)).await
         }
         Command::Check { target, state } => {
             client.call("check", with_scope(Some(build_check_params(&target, state.as_deref())), scope)).await
         }
-        Command::Scroll { direction, amount, r#ref } => {
-            client
-                .call(
-                    "scroll",
-                    // `--ref` takes the ref as snapshots print it (`@e3`) or bare (`e3`).
-                    with_scope(
-                        Some(json!({
-                            "direction": direction,
-                            "amount": amount,
-                            "ref": r#ref.as_deref().map(|value| value.trim_start_matches('@')),
-                        })),
-                        scope,
-                    ),
-                )
-                .await
+        Command::Scroll { direction, amount, r#ref, target } => {
+            // `--ref` takes the ref as snapshots print it (`@e3`) or bare (`e3`).
+            let mut params = match (target, r#ref) {
+                (Some(target), _) => target_params(&target),
+                (None, Some(reference)) => json!({"ref": reference.trim_start_matches('@')}),
+                (None, None) => json!({}),
+            };
+            params["direction"] = json!(direction);
+            params["amount"] = json!(amount);
+            client.call("scroll", with_scope(Some(params), scope)).await
         }
         Command::Text { target } => client.call("text", with_scope(Some(target_params(&target)), scope)).await,
         Command::Html { target } => {

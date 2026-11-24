@@ -130,6 +130,12 @@ pub(crate) enum Command {
     Blur { target: String },
     /// Report whether an element is disabled.
     Disabled { target: String },
+    /// Report whether an element is visible, without failing when it is not.
+    Visible { target: String },
+    /// Report whether a checkbox or radio is checked.
+    Checked { target: String },
+    /// Count the elements a CSS selector matches.
+    Count { selector: String },
     /// Report an element's position and size in viewport pixels.
     BoundingBox { target: String },
     /// Clear and fill an input with a value.
@@ -186,7 +192,12 @@ pub(crate) enum Command {
         timeout: Option<u32>,
     },
     /// Select an option in a `<select>` element.
-    Select { target: String, value: String },
+    Select {
+        target: String,
+        /// An option's value or visible label. Several select that set in a `<select multiple>`.
+        #[arg(required = true, num_args = 1..)]
+        values: Vec<String>,
+    },
     /// Toggle a checkbox, or drive it to a state with --state.
     Check {
         target: String,
@@ -199,8 +210,12 @@ pub(crate) enum Command {
     Scroll {
         direction: String,
         amount: Option<i32>,
-        #[arg(long)]
+        /// Scroll this element instead of the document, by snapshot ref.
+        #[arg(long, conflicts_with = "target")]
         r#ref: Option<String>,
+        /// Scroll this element instead of the document: a ref, a CSS selector, or x,y.
+        #[arg(long)]
+        target: Option<String>,
     },
     /// Drag an element to another element or by offset.
     Drag {

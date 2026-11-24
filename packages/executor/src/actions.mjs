@@ -71,14 +71,25 @@ export async function act(page, method, params) {
         break
       }
       case "select": {
-        const value = await locator.evaluate((element, wanted) => {
-          if (element.tagName !== "SELECT") throw Error("select requires a select element")
-          const items = [...element.options]
-          const item = items.find((o) => o.value === wanted) ?? items.find((o) => o.text.trim() === wanted.trim())
-          if (!item) throw Error(`No option matches ${JSON.stringify(wanted)}`)
-          return item.value
-        }, String(params.value))
-        await locator.selectOption(value, options)
+        // `values` selects exactly that set in a `<select multiple>`; `value` selects one option.
+        const several = params.values !== undefined
+        if (several && !Array.isArray(params.values)) throw Error("select 'values' must be an array")
+        const wanted = several ? params.values.map(String) : [String(params.value)]
+        const values = await locator.evaluate(
+          (element, { wanted, several }) => {
+            if (element.tagName !== "SELECT") throw Error("select requires a select element")
+            if (several && !element.multiple && wanted.length !== 1)
+              throw Error(`select: this <select> takes one value, and ${wanted.length} were given`)
+            const items = [...element.options]
+            return wanted.map((value) => {
+              const item = items.find((o) => o.value === value) ?? items.find((o) => o.text.trim() === value.trim())
+              if (!item) throw Error(`No option matches ${JSON.stringify(value)}`)
+              return item.value
+            })
+          },
+          { wanted, several }
+        )
+        await locator.selectOption(several ? values : values[0], options)
         break
       }
       default:

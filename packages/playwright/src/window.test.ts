@@ -603,6 +603,27 @@ test("native window methods call window.* and parse the reported state", async (
   await expect(window.nativeState()).rejects.toThrow(/window\.width/)
 })
 
+test("waitFor visible and hidden follow what a user sees, not only the document", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const answers: Record<string, unknown[]> = {
+    count: [{ count: 0 }, { count: 1 }, { count: 1 }, { count: 1 }, { count: 0 }],
+    visible: [{ visible: false }, { visible: true }, { visible: true }]
+  }
+  vi.spyOn(rpc, "call").mockImplementation(async (method) => {
+    const next = answers[method]?.shift()
+    if (next === undefined) throw new Error(`Unexpected ${method}`)
+    return next
+  })
+  const locator = new HasgardWindow(rpc, "main").locator("#toast")
+
+  // Absent, then attached but hidden, then shown.
+  await locator.waitFor({ state: "visible", timeoutMs: 2_000 })
+  // Still shown once, then removed from the document: that is hidden too.
+  await locator.waitFor({ state: "hidden", timeoutMs: 2_000 })
+  expect(answers.count).toEqual([])
+  expect(answers.visible).toEqual([])
+})
+
 test("waitForURL sends a glob as is and a RegExp as its source and flags", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, url: "app://x/home", readyState: "complete" })

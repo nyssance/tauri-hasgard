@@ -54,7 +54,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
     pub name: Option<String>,
@@ -77,6 +77,32 @@ pub struct Step {
     pub stable: Option<u64>,
     pub require_mutation: Option<bool>,
     pub path: Option<PathBuf>,
+    /// `drag`: where the source is dropped.
+    pub to: Option<String>,
+    /// `set-input-files`: the files to attach; an empty list clears the input.
+    pub files: Option<Vec<PathBuf>>,
+    /// `dialog` and `native-dialog`: `accept`, `dismiss`, or for native dialogs `manual`.
+    pub policy: Option<String>,
+    /// `native-dialog`: what an open or save dialog returns.
+    pub paths: Option<Vec<String>>,
+    /// `native-dialog`: the message dialog button to press.
+    pub button: Option<String>,
+    /// `route`: the URL glob to answer, or `clear = true` to remove every rule.
+    pub pattern: Option<String>,
+    pub status: Option<u16>,
+    pub body: Option<String>,
+    pub content_type: Option<String>,
+    pub method: Option<String>,
+    pub abort: Option<bool>,
+    pub clear: Option<bool>,
+    /// `wheel`: pixels to scroll.
+    pub delta_x: Option<f64>,
+    pub delta_y: Option<f64>,
+    /// `ipc`: the Tauri command and its arguments.
+    pub command: Option<String>,
+    pub args: Option<toml::Value>,
+    /// `select`: several options in a multiple select, instead of `value`.
+    pub values: Option<Vec<String>>,
 }
 
 impl Step {
@@ -148,15 +174,21 @@ pub fn parse_scenario(content: &str) -> Result<Scenario> {
 
 fn validate_step(step: &Step) -> Result<()> {
     let required: &[(&str, Option<&str>)] = match step.action.as_str() {
-        "click" | "assert-exists" | "assert-visible" | "assert-hidden" => &[("target", step.target.as_deref())],
+        "click" | "dblclick" | "hover" | "focus" | "blur" | "set-input-files" | "assert-exists" | "assert-visible"
+        | "assert-hidden" => &[("target", step.target.as_deref())],
+        "select" if step.values.is_some() => &[("target", step.target.as_deref())],
         "fill" | "select" => &[("target", step.target.as_deref()), ("value", step.value.as_deref())],
+        "drag" => &[("target", step.target.as_deref()), ("to", step.to.as_deref())],
+        "dialog" | "native-dialog" => &[("policy", step.policy.as_deref())],
+        "route" if step.clear != Some(true) => &[("pattern", step.pattern.as_deref())],
+        "ipc" => &[("command", step.command.as_deref())],
         "type" => &[("target", step.target.as_deref()), ("text", step.text.as_deref())],
         "press" | "storage-get" => &[("key", step.key.as_deref())],
         "navigate" => &[("url", step.url.as_deref())],
         "eval" => &[("script", step.script.as_deref())],
         "assert-text" | "assert-value" => &[("target", step.target.as_deref()), ("expected", step.expected.as_deref())],
         "assert-url" => &[("expected", step.expected.as_deref())],
-        "scroll" | "wait" | "watch" | "screenshot" => &[],
+        "scroll" | "wait" | "watch" | "screenshot" | "wheel" | "route" => &[],
         action => anyhow::bail!("unknown step action: {action:?}"),
     };
     for (name, value) in required {
@@ -262,10 +294,92 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "select" => {
             let t = require_target(step)?;
-            let value = step.value.as_deref().ok_or_else(|| anyhow::anyhow!("{} requires value", step.action))?;
             let mut p = target_params(t);
-            p["value"] = json!(value);
+            match (&step.values, step.value.as_deref()) {
+                (Some(values), None) => p["values"] = json!(values),
+                (None, Some(value)) => p["value"] = json!(value),
+                _ => anyhow::bail!("select takes either 'value' or 'values'"),
+            }
             client.call("select", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "dblclick" => {
+            let mut p = target_params(require_target(step)?);
+            p["clickCount"] = json!(2);
+            client.call("click", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        action @ ("hover" | "focus" | "blur") => {
+            let p = target_params(require_target(step)?);
+            client.call(action, with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "drag" => {
+            let to = step.to.as_deref().ok_or_else(|| anyhow::anyhow!("drag requires 'to'"))?;
+            let p = json!({"source": target_params(require_target(step)?), "target": target_params(to)});
+            client.call("drag", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "set-input-files" => {
+            let files = step.files.clone().unwrap_or_default();
+            crate::support::run_set_input_files_command(
+                client,
+                require_target(step)?,
+                files,
+                Scope { window, ..Scope::default() },
+            )
+            .await
+        }
+        "wheel" => {
+            let mut p = step.target.as_deref().map_or_else(|| json!({}), target_params);
+            p["deltaX"] = json!(step.delta_x.unwrap_or(0.0));
+            p["deltaY"] = json!(step.delta_y.unwrap_or(0.0));
+            client.call("wheel", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "dialog" => {
+            let mut p = json!({"action": step.policy});
+            if let Some(text) = &step.text {
+                p["promptText"] = json!(text);
+            }
+            client.call("dialog.handle", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "native-dialog" => {
+            let mut p = json!({"action": step.policy});
+            if let Some(paths) = &step.paths {
+                p["paths"] = json!(paths);
+            }
+            if let Some(button) = &step.button {
+                p["button"] = json!(button);
+            }
+            client.call("nativeDialog.handle", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "route" if step.clear == Some(true) => {
+            client.call("route.clear", with_scope(None, Scope { window, ..Scope::default() })).await
+        }
+        "route" => {
+            let mut p = json!({
+                "pattern": step.pattern,
+                "action": if step.abort == Some(true) { "abort" } else { "fulfill" },
+            });
+            for (key, value) in [
+                ("status", step.status.map(|status| json!(status))),
+                ("body", step.body.as_ref().map(|body| json!(body))),
+                ("contentType", step.content_type.as_ref().map(|kind| json!(kind))),
+                ("method", step.method.as_ref().map(|method| json!(method))),
+            ] {
+                if let Some(value) = value {
+                    p[key] = value;
+                }
+            }
+            client.call("route.add", with_scope(Some(p), Scope { window, ..Scope::default() })).await
+        }
+        "ipc" => {
+            let mut p = json!({"command": step.command});
+            if let Some(args) = &step.args {
+                p["args"] = serde_json::to_value(args).context("ipc 'args' cannot be sent as JSON")?;
+            }
+            let result = client.call("ipc", with_scope(Some(p), Scope { window, ..Scope::default() })).await?;
+            if let Some(expected) = step.expected.as_deref() {
+                let actual = result.as_str().map_or_else(|| result.to_string(), str::to_owned);
+                anyhow::ensure!(actual == expected, "expected ipc result {expected:?}, got {actual:?}");
+            }
+            Ok(result)
         }
         "check" => {
             let t = require_target(step)?;
@@ -716,53 +830,13 @@ action = "ping"
 
     #[test]
     fn test_toml_step_display_name_uses_name_field() {
-        let step = Step {
-            name: Some("my step".to_string()),
-            action: "click".to_string(),
-            timeout_ms: None,
-            target: None,
-            value: None,
-            text: None,
-            key: None,
-            session: None,
-            url: None,
-            script: None,
-            expected: None,
-            selector: None,
-            direction: None,
-            amount: None,
-            step_ref: None,
-            gone: None,
-            stable: None,
-            require_mutation: None,
-            path: None,
-        };
+        let step = Step { name: Some("my step".to_string()), action: "click".to_string(), ..Step::default() };
         assert_eq!(step.display_name(0), "my step");
     }
 
     #[test]
     fn test_toml_step_display_name_fallback() {
-        let step = Step {
-            name: None,
-            action: "click".to_string(),
-            timeout_ms: None,
-            target: None,
-            value: None,
-            text: None,
-            key: None,
-            session: None,
-            url: None,
-            script: None,
-            expected: None,
-            selector: None,
-            direction: None,
-            amount: None,
-            step_ref: None,
-            gone: None,
-            stable: None,
-            require_mutation: None,
-            path: None,
-        };
+        let step = Step { name: None, action: "click".to_string(), ..Step::default() };
         assert_eq!(step.display_name(2), "step-3");
     }
 
@@ -801,5 +875,105 @@ action = "ping"
         assert!(xml.contains(r#"skipped="1""#));
         assert!(xml.contains(r#"message="oops &amp; done""#));
         assert!(xml.contains("<skipped"));
+    }
+    #[tokio::test]
+    async fn the_actions_added_for_whole_flows_send_their_protocol_calls() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let mut client = Client::in_process(std::sync::Arc::new(move |method, params| {
+            log.lock().expect("log").push((method.clone(), params));
+            Box::pin(async move { Ok(if method == "ipc" { json!("pong") } else { json!({"ok": true}) }) })
+        }));
+        let scenario = parse_scenario(
+            r##"
+[scenario]
+name = "flow"
+
+[[step]]
+action = "hover"
+target = "#menu"
+
+[[step]]
+action = "dblclick"
+target = "#row"
+
+[[step]]
+action = "drag"
+target = "#card"
+to = "#lane"
+
+[[step]]
+action = "select"
+target = "#tags"
+values = ["a", "b"]
+
+[[step]]
+action = "wheel"
+delta_y = 120.0
+
+[[step]]
+action = "dialog"
+policy = "accept"
+text = "typed"
+
+[[step]]
+action = "native-dialog"
+policy = "accept"
+paths = ["/tmp/report.csv"]
+
+[[step]]
+action = "route"
+pattern = "**/api/user"
+status = 503
+body = "down"
+
+[[step]]
+action = "route"
+clear = true
+
+[[step]]
+action = "ipc"
+command = "ping"
+args = { value = 1 }
+expected = "pong"
+"##,
+        )
+        .expect("the scenario parses");
+        let report = run_scenario(&mut client, &scenario, Some("main"), Some(true)).await.expect("the scenario runs");
+        assert_eq!(report.failed(), 0, "{:?}", report.results);
+
+        let sent = calls.lock().expect("log").clone();
+        let expected = [
+            ("hover", json!({"selector": "#menu", "window": "main"})),
+            ("click", json!({"selector": "#row", "clickCount": 2, "window": "main"})),
+            ("drag", json!({"source": {"selector": "#card"}, "target": {"selector": "#lane"}, "window": "main"})),
+            ("select", json!({"selector": "#tags", "values": ["a", "b"], "window": "main"})),
+            ("wheel", json!({"deltaX": 0.0, "deltaY": 120.0, "window": "main"})),
+            ("dialog.handle", json!({"action": "accept", "promptText": "typed", "window": "main"})),
+            ("nativeDialog.handle", json!({"action": "accept", "paths": ["/tmp/report.csv"], "window": "main"})),
+            (
+                "route.add",
+                json!({"pattern": "**/api/user", "action": "fulfill", "status": 503, "body": "down", "window": "main"}),
+            ),
+            ("route.clear", json!({"window": "main"})),
+            ("ipc", json!({"command": "ping", "args": {"value": 1}, "window": "main"})),
+        ];
+        assert_eq!(sent.len(), expected.len());
+        for ((method, params), (wanted_method, wanted_params)) in sent.iter().zip(expected) {
+            assert_eq!((method.as_str(), params), (wanted_method, &wanted_params));
+        }
+    }
+
+    #[test]
+    fn a_new_action_without_what_it_needs_is_rejected_when_parsed() {
+        for step in [
+            "action = 'drag'\ntarget = '#a'",
+            "action = 'dialog'",
+            "action = 'route'",
+            "action = 'ipc'",
+            "action = 'hover'",
+        ] {
+            assert!(parse_scenario(&format!("[[step]]\n{step}")).is_err(), "{step}");
+        }
     }
 }
