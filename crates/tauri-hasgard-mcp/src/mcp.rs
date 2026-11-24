@@ -223,9 +223,7 @@ impl HasgardMcpServer {
     async fn call_tool_by_name(&self, name: &str, args: JsonObject) -> Result<CallToolResult, McpError> {
         let name = normalize_tool_name(name);
         if DANGEROUS_MCP_TOOLS.contains(&name) && !self.dangerous {
-            return Err(invalid_params(format!(
-                "tool '{name}' is disabled by default. Set {ENABLE_DANGEROUS_MCP_TOOLS_ENV}=1 to enable dangerous MCP tools."
-            )));
+            return Err(disabled_by_default(&format!("tool '{name}'")));
         }
         let window = self.window_arg(&args)?;
         match name {
@@ -602,7 +600,10 @@ impl HasgardMcpServer {
                             "'url' and 'load' cannot be combined with an element or expression wait",
                         ));
                     }
-                    build_location_wait_params(url.as_deref(), load.as_deref(), timeout)
+                    let mut params = build_location_wait_params(url.as_deref(), load.as_deref(), timeout);
+                    // The application refuses a frame here; leaving it out would answer for the page.
+                    insert_optional_frame(&mut params, &args)?;
+                    params
                 } else {
                     let mut params = build_wait_params(
                         target.as_deref(),
@@ -713,6 +714,12 @@ impl HasgardMcpServer {
         // MCP remains attached to its configured application; TOML cannot redirect it.
         if scenario.connect.is_some() {
             return Err(invalid_params("MCP scenarios must omit [connect]; use the MCP server socket configuration"));
+        }
+        // A scenario is another way to reach the tools that are off by default.
+        if let Some(step) = scenario.step.iter().find(|step| DANGEROUS_MCP_TOOLS.contains(&step.action.as_str()))
+            && !self.dangerous
+        {
+            return Err(disabled_by_default(&format!("scenario step '{}'", step.action)));
         }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
@@ -869,6 +876,17 @@ impl HasgardMcpServer {
                 Err(err) => tool_error(&err),
             });
         }
+        // So is a recording: it replays whatever it holds.
+        if !self.dangerous {
+            let entries = match crate::support::read_replay_entries(&path) {
+                Ok(entries) => entries,
+                Err(err) => return Ok(tool_error(&err)),
+            };
+            let held = entries.iter().filter_map(|entry| entry.get("action")?.as_str());
+            if let Some(action) = held.into_iter().find(|action| DANGEROUS_MCP_TOOLS.contains(action)) {
+                return Err(disabled_by_default(&format!("recorded action '{action}'")));
+            }
+        }
         let mut client = match self.connect_client().await {
             Ok(client) => client,
             Err(err) => return Ok(tool_error(&err)),
@@ -1020,6 +1038,12 @@ impl ServerHandler for HasgardMcpServer {
 }
 
 const HASGARD_PREFIX: &str = "hasgard.";
+fn disabled_by_default(what: &str) -> McpError {
+    invalid_params(format!(
+        "{what} is disabled by default. Set {ENABLE_DANGEROUS_MCP_TOOLS_ENV}=1 to enable dangerous MCP tools."
+    ))
+}
+
 const ENABLE_DANGEROUS_MCP_TOOLS_ENV: &str = "TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS";
 const DANGEROUS_MCP_TOOLS: &[&str] = &["drop", "eval", "ipc"];
 
@@ -2653,6 +2677,55 @@ mod tests {
         assert!(server.call_tool_by_name("eval", JsonObject::new()).await.is_err());
         assert!(server.get_tool("eval").is_none());
         assert!(server.with_dangerous_tools(true).get_tool("eval").is_some());
+    }
+
+    #[tokio::test]
+    async fn a_scenario_or_a_recording_cannot_reach_the_tools_that_are_off() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let server = HasgardMcpServer::in_process(
+            move |method, _| {
+                log.lock().expect("log").push(method);
+                async move { Ok(json!({"ok": true})) }
+            },
+            Some("main".to_owned()),
+        )
+        .with_dangerous_tools(false);
+        for step in ["action = 'ipc'\ncommand = 'quit'", "action = 'eval'\nscript = '1'"] {
+            let args = json!({"toml": format!("[[step]]\n{step}")}).as_object().expect("object").clone();
+            let refused = server.call_tool_by_name("run_scenario", args).await.expect_err("off by default");
+            assert!(refused.message.contains("disabled by default"), "{}", refused.message);
+        }
+        let recording = std::env::temp_dir().join(format!("hasgard-gate-{}.json", std::process::id()));
+        std::fs::write(&recording, r#"[{"action":"eval","timestamp":0,"script":"1"}]"#).expect("write recording");
+        let args = json!({"path": recording}).as_object().expect("object").clone();
+        let refused = server.call_tool_by_name("replay", args.clone()).await;
+        assert!(calls.lock().expect("log").is_empty(), "nothing may reach the application");
+        // Turned on, both go through.
+        let allowed = server.with_dangerous_tools(true);
+        let replayed = allowed.call_tool_by_name("replay", args).await.expect("replay");
+        std::fs::remove_file(&recording).expect("remove recording");
+        assert!(refused.expect_err("off by default").message.contains("recorded action 'eval'"));
+        assert_ne!(replayed.is_error, Some(true), "{replayed:?}");
+        let args = json!({"toml": "[[step]]\naction = 'eval'\nscript = '1'"}).as_object().expect("object").clone();
+        assert_ne!(allowed.call_tool_by_name("run_scenario", args).await.expect("scenario").is_error, Some(true));
+        assert_eq!(*calls.lock().expect("log"), ["eval", "eval"]);
+    }
+
+    #[tokio::test]
+    async fn a_location_wait_passes_the_frame_on_for_the_application_to_refuse() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let server = HasgardMcpServer::in_process(
+            move |_, params| {
+                log.lock().expect("log").push(params["frame"].clone());
+                async move { Ok(json!({"ok": true})) }
+            },
+            Some("main".to_owned()),
+        );
+        let args = json!({"load": "load", "frame": ["#pane"]}).as_object().expect("object").clone();
+        server.call_tool_by_name("wait", args).await.expect("wait");
+        assert_eq!(*calls.lock().expect("log"), [json!(["#pane"])]);
     }
 
     #[tokio::test]

@@ -178,6 +178,9 @@
   } catch {
     // No session storage: the policy starts at its default.
   }
+  // Written again as the document is left: the application may have cleared its session
+  // storage since the policy was set, and the next document would otherwise open a real dialog.
+  if (typeof window.addEventListener === "function") window.addEventListener("pagehide", save)
 
   const fetchBefore = window.fetch
   window.fetch = function (input, init) {

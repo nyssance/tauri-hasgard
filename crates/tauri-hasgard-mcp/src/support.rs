@@ -385,12 +385,15 @@ pub fn scoped_cli_command(action: &str, entry: &Value) -> String {
     }
     // A drag names its ends, and each may carry the frame it is in. A command has one frame
     // for both, so two different ones cannot be said.
-    let ends: Vec<&Value> = ["source", "target"].iter().filter_map(|end| entry.get(end)?.get("frame")).collect();
+    // An end without a frame of its own is in the entry's, or in the page.
+    let end_frame =
+        |end: &str| entry.get(end).filter(|aim| aim.is_object()).map(|aim| aim.get("frame").or(entry.get("frame")));
+    let ends: Vec<Option<&Value>> = ["source", "target"].iter().filter_map(|end| end_frame(end)).collect();
     if ends.windows(2).any(|pair| pair[0] != pair[1]) {
         return format!("# {action}: its ends are in different frames; not exportable as one command");
     }
     // One selector per nesting level, outermost first; a single frame may be recorded bare.
-    let frames: Vec<&str> = match entry.get("frame").or_else(|| ends.first().copied()) {
+    let frames: Vec<&str> = match ends.first().copied().unwrap_or(entry.get("frame")) {
         Some(Value::String(frame)) => vec![frame],
         Some(Value::Array(frames)) => frames.iter().filter_map(Value::as_str).collect(),
         _ => Vec::new(),

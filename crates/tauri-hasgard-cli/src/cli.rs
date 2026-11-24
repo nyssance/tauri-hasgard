@@ -1296,6 +1296,8 @@ mod position_tests {
         for (action, entry) in [
             ("click", json!({"selector": ".row", "index": 3})),
             ("drag", json!({"source": {"selector": ".row", "index": 1}, "target": {"selector": "#bin"}})),
+            // One end in a frame and the other in the page are two different places as well.
+            ("drag", json!({"source": {"selector": "#a", "frame": ["#pane"]}, "target": {"selector": "#b"}})),
             (
                 "drag",
                 json!({"source": {"selector": "#a", "frame": ["#one"]}, "target": {"selector": "#b", "frame": ["#two"]}}),

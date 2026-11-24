@@ -401,3 +401,34 @@ test("the native dialog policy is stored under a key the bridge treats as its ow
   const key = NATIVE_DIALOG_SRC.match(/const STATE_KEY = "([^"]+)"/)?.[1]
   assert.ok(key?.startsWith("__hasgard__"), `native dialog state key is ${key}`)
 })
+
+test("the native dialog policy is written again as the document is left", () => {
+  // The application clears its session storage, as a logout does, and then navigates.
+  const stored = new Map()
+  globalThis.sessionStorage = {
+    getItem: (key) => (stored.has(key) ? stored.get(key) : null),
+    setItem: (key, value) => void stored.set(key, String(value)),
+    removeItem: (key) => void stored.delete(key),
+    clear: () => stored.clear()
+  }
+  const load = () => {
+    let leave
+    globalThis.window = {
+      fetch() {},
+      addEventListener(type, handler) {
+        if (type === "pagehide") leave = handler
+      }
+    }
+    ;(0, eval)(NATIVE_DIALOG_SRC)
+    return { dialogs: globalThis.window.__HASGARD_NATIVE_DIALOGS__, leave }
+  }
+  try {
+    const first = load()
+    first.dialogs.handle({ action: "accept", paths: ["/tmp/a.csv"] })
+    globalThis.sessionStorage.clear()
+    first.leave()
+    assert.equal(load().dialogs.list().policy.action, "accept")
+  } finally {
+    delete globalThis.sessionStorage
+  }
+})

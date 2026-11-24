@@ -1,5 +1,10 @@
 # Unreleased
 
+- The native dialog policy is also written again as a document is left, so an application that clears its session storage does not get a real dialog on the next page.
+- An in-process MCP server (`Automation::mcp_server`) can use the `event`, `downloads` and `clipboard` tools: methods that belong to the application rather than a window no longer require one.
+- The MCP `run_scenario` and `replay` tools refuse `eval`, `ipc` and `drop` while dangerous tools are disabled, as the tools themselves do.
+- Playwright `waitForEvent`: two calls waiting at once are no longer answered with the same event.
+- The MCP `wait` tool passes `frame` with `url` or `load`, so the refusal is reported instead of the page being answered for.
 - Shell export: an action aimed at the nth match of a selector, or a drag whose ends are in different frames, exports as a comment instead of a command that acts elsewhere; a press keeps `--completion`, `--wait-for` and `--timeout`; a drag keeps the frame of its ends; a dismissed dialog exports without the options only an accepted one takes; `--window` and `--frame` are written as `--name=value`.
 - `replay --export sh` no longer needs a running application.
 - Fix a scenario's `assert-exists`, which passed for a selector that matched nothing.
@@ -9,7 +14,7 @@
 - Wry: the standing routes and dialog policy are written again as a document is left, so an application that clears its session storage keeps them. `storage.set` refuses Hasgard's own session keys.
 - Fix recordings of `dialog.handle`, `nativeDialog.handle` and `route.add`: their own `action` parameter replaced the entry's method name, so replay skipped them and export wrote an unknown action. The parameter is now kept under `arguments`.
 - Exported commands put options first as `--name=value` and positionals after `--` when one begins with a hyphen, so a recorded value is never read as a flag.
-- Point targets may be fractional (`click 100.5,200`); `scroll` takes a fractional or negative amount; `select`, `--offset`, `--position` and `scroll --target` accept values that begin with a hyphen.
+- Point targets may be fractional (`click 100.5,200`); `scroll` takes a fractional or negative amount; `--offset`, `--position` and `scroll --target` accept values that begin with a hyphen, and `select` takes one after `--`.
 - A scenario's `check` step is accepted; it was rejected as unknown.
 - The native dialog policy is now kept under a session key the bridge treats as its own, so `storage.clear` and `storage.list` leave it alone and it survives to the next document.
 - `downloads.wait` answers with the first download to end after the wait began; a later wait is no longer satisfied by an earlier file, and an abandoned wait takes nothing from the next. With `except` and `session` a caller names the downloads it was already given, so Playwright `waitForDownload` and the MCP `downloads` tool work whether the wait comes before or after the action, per window and with several waits at once. A finish is matched to its download by path when two share an address, where the platform reports one (macOS does not). `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.

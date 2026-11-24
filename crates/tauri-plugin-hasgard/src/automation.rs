@@ -83,9 +83,7 @@ impl Automation {
         if !params.is_object() {
             return Err(RpcError { code: -32602, message: "params must be an object".into(), data: None });
         }
-        if !matches!(method, "ping" | "windows.list")
-            && params.get("window").and_then(Value::as_str).is_none_or(str::is_empty)
-        {
+        if !is_application_wide(method) && params.get("window").and_then(Value::as_str).is_none_or(str::is_empty) {
             return Err(RpcError { code: -32602, message: "An explicit window target is required".into(), data: None });
         }
         if let Some(target) = params.get("window").and_then(Value::as_str) {
@@ -174,4 +172,28 @@ pub fn init_cef_with_executor(
         *engine.executor.lock().expect("executor command") = Some(executor(app)?);
         crate::cef::hooks(app, engine)
     })
+}
+
+/// What belongs to the application rather than to one of its windows needs no target: an
+/// event sent to every listener, the downloads of all windows, the system clipboard.
+fn is_application_wide(method: &str) -> bool {
+    matches!(method, "ping" | "windows.list")
+        || ["event.", "downloads.", "clipboard."].iter().any(|family| method.starts_with(family))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_application_wide;
+
+    #[test]
+    fn only_what_belongs_to_the_application_may_omit_a_window() {
+        for method in
+            ["ping", "windows.list", "event.emit", "event.list", "downloads.list", "downloads.wait", "clipboard.read"]
+        {
+            assert!(is_application_wide(method), "{method} needs no window");
+        }
+        for method in ["click", "eval", "snapshot", "cookies.get", "window.state", "nativeDialog.handle", "events"] {
+            assert!(!is_application_wide(method), "{method} acts on a window");
+        }
+    }
 }

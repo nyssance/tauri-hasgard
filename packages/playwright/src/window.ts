@@ -459,11 +459,12 @@ export class HasgardApplication {
   private readonly eventCursor = new Map<string, number>()
 
   /**
-   * Wait for the application to emit `event` and resolve with it. Recording
-   * starts here, so call this before the action that causes the event and await
-   * it afterwards. Each event answers one wait: a second call resolves with the
-   * next one emitted, not the one the first call returned. `sinceId` sets the
-   * place to wait from instead.
+   * Wait for the application to emit `event` and resolve with it. Each recorded
+   * event answers one call, so the call may come before the action that emits
+   * or after it, once the event is being recorded: the first call for a name
+   * starts recording it, as `events.listen` does. One nobody waited for answers
+   * the next call: start a test from `events.clear()`. `sinceId` sets the place
+   * to wait from instead.
    */
   async waitForEvent(event: string, options: { timeoutMs?: number; sinceId?: number } = {}): Promise<RecordedEvent> {
     const timeoutMs = options.timeoutMs ?? 5_000
@@ -472,8 +473,10 @@ export class HasgardApplication {
     for (let attempt = 0; Date.now() <= deadline; attempt++) {
       const sinceId = options.sinceId ?? this.eventCursor.get(event) ?? 0
       const [first] = await this.events.list({ event, sinceId })
-      if (first) {
-        this.eventCursor.set(event, Math.max(first.id, this.eventCursor.get(event) ?? 0))
+      // A call waiting alongside may have taken this one while the list was read.
+      const taken = options.sinceId === undefined && first && first.id <= (this.eventCursor.get(event) ?? 0)
+      if (first && !taken) {
+        if (options.sinceId === undefined) this.eventCursor.set(event, first.id)
         return first
       }
       await sleep(pollDelay(attempt, deadline) || 1)

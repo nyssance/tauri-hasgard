@@ -96,7 +96,7 @@ await window.press("Tab", {
 })
 ```
 
-- For a download, `const file = await hasgard.waitForDownload()` resolves with the next finished download and its path, before or after the action that starts it; the app must pass Hasgard's observer to `on_download`.
+- For a download, `const file = await hasgard.waitForDownload()` resolves with the next finished download and its path, before or after the action that starts it (one nobody waited for answers the next call, so start a test from `hasgard.downloads.clear()`); the app must pass Hasgard's observer to `on_download`.
 - For Tauri events, `await hasgard.emit("sync:done", payload)` delivers one to the app, and `await hasgard.waitForEvent("file:saved")` resolves with one the app emits.
 - For a file open or save dialog, state the answer first: `await window.nativeDialogs.accept({ paths: ["/tmp/report.csv"] })`, then click. `window.nativeDialogs.list()` shows what the app asked.
 - To check a copy button, click it and read `await hasgard.clipboardText()`.

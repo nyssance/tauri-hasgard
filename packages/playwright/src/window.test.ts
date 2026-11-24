@@ -649,6 +649,24 @@ test("each event answers one waitForEvent", async () => {
   expect(call).toHaveBeenNthCalledWith(4, "event.list", { event: "saved", sinceId: 4 })
 })
 
+test("two waitForEvent calls at once are answered with different events", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const recorded = [
+    { id: 1, timestamp: 1, event: "saved", payload: "first" },
+    { id: 2, timestamp: 2, event: "saved", payload: "second" }
+  ]
+  vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+    if (method === "event.listen") return { listening: ["saved"] }
+    const { sinceId } = params as { sinceId: number }
+    return { events: recorded.filter((event) => event.id > sinceId), listening: ["saved"] }
+  })
+  const application = new HasgardApplication(rpc)
+
+  const both = await Promise.all([application.waitForEvent("saved"), application.waitForEvent("saved")])
+
+  expect(both.map((event) => event.payload).sort()).toEqual(["first", "second"])
+})
+
 test("clipboard methods read and write the system clipboard's text", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
