@@ -1,11 +1,18 @@
 # Unreleased
 
+- Shell export: an action aimed at the nth match of a selector, or a drag whose ends are in different frames, exports as a comment instead of a command that acts elsewhere; a press keeps `--completion`, `--wait-for` and `--timeout`; a drag keeps the frame of its ends; a dismissed dialog exports without the options only an accepted one takes; `--window` and `--frame` are written as `--name=value`.
+- `replay --export sh` no longer needs a running application.
+- Fix a scenario's `assert-exists`, which passed for a selector that matched nothing.
+- Fix Playwright `dragTo` inside a frame: each end is now sent with its own locator's frame.
+- Fix the MCP `clear` tool, which ignored `frame`.
+- A `wait` for `url` or `load` rejects `frame` instead of answering for the page.
+- Wry: the standing routes and dialog policy are written again as a document is left, so an application that clears its session storage keeps them. `storage.set` refuses Hasgard's own session keys.
 - Fix recordings of `dialog.handle`, `nativeDialog.handle` and `route.add`: their own `action` parameter replaced the entry's method name, so replay skipped them and export wrote an unknown action. The parameter is now kept under `arguments`.
 - Exported commands put options first as `--name=value` and positionals after `--` when one begins with a hyphen, so a recorded value is never read as a flag.
 - Point targets may be fractional (`click 100.5,200`); `scroll` takes a fractional or negative amount; `select`, `--offset`, `--position` and `scroll --target` accept values that begin with a hyphen.
 - A scenario's `check` step is accepted; it was rejected as unknown.
 - The native dialog policy is now kept under a session key the bridge treats as its own, so `storage.clear` and `storage.list` leave it alone and it survives to the next document.
-- `downloads.wait` answers with the first download to end after the wait began; a later wait is no longer satisfied by an earlier file, and an abandoned wait takes nothing from the next. Downloads carry `ended`, and `afterEnded` with `session` waits past a known place, so Playwright `waitForDownload` and the MCP `downloads` tool work whether the wait comes before or after the action. A finish is matched to its download by path when two share an address, where the platform reports one (macOS does not). `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
+- `downloads.wait` answers with the first download to end after the wait began; a later wait is no longer satisfied by an earlier file, and an abandoned wait takes nothing from the next. With `except` and `session` a caller names the downloads it was already given, so Playwright `waitForDownload` and the MCP `downloads` tool work whether the wait comes before or after the action, per window and with several waits at once. A finish is matched to its download by path when two share an address, where the platform reports one (macOS does not). `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
 - Playwright `waitForEvent` resolves with each event once: a second call waits for the next one.
 - `event.emit` rejects a `window` that names no window or webview instead of reporting an event delivered to no one.
 - Replaying a recording with `--window` no longer narrows an event that was recorded as a broadcast.

@@ -392,6 +392,29 @@ test("routes and dialog policies hold across a navigation within the tab", async
     )
     assert.equal(globalThis.sessionStorage.getItem("__hasgard__logs"), null, "taken out once read")
 
+    // The application clears its own session storage, as a logout does: the rules are written
+    // again as the document is left, and the next one still finds them.
+    let depart
+    const before = loadBridge({
+      addEventListener(type, handler) {
+        if (type === "pagehide") depart = handler
+      }
+    })
+    globalThis.sessionStorage.clear()
+    depart()
+    assert.equal(loadBridge().hasgard.routes().routes.length, before.hasgard.routes().routes.length)
+    // Hasgard's own keys cannot be written through the page's storage commands.
+    assert.throws(
+      () => loadBridge().hasgard.storageSet({ session: true, key: "__hasgard__", value: "not json" }),
+      /Hasgard's own/
+    )
+    loadBridge().hasgard.storageSet({
+      session: false,
+      key: "__hasgard__",
+      value: "the page's local storage is its own"
+    })
+    globalThis.localStorage.clear()
+
     // Back to defaults leaves nothing behind.
     const last = loadBridge()
     last.hasgard.clearRoutes()

@@ -41,10 +41,10 @@ pub struct HasgardMcpServer {
     app: App,
     window: Option<String>,
     dangerous: bool,
-    /// The last download a `downloads` wait answered with: the application's run and the
-    /// download's place among those that ended in it. An agent acts and then waits, so the
-    /// wait has to count a download that finished in between.
-    last_download: Arc<std::sync::Mutex<Option<(u64, u64)>>>,
+    /// The downloads a `downloads` wait has answered with, and the run of the application
+    /// they belong to. An agent acts and then waits, so the wait has to count a download
+    /// that finished in between, and must not answer twice with one it already gave.
+    downloads_given: Arc<std::sync::Mutex<(u64, Vec<u64>)>>,
 }
 
 impl std::fmt::Debug for HasgardMcpServer {
@@ -58,7 +58,7 @@ impl std::fmt::Debug for HasgardMcpServer {
             .field("app", &app)
             .field("window", &self.window)
             .field("dangerous", &self.dangerous)
-            .field("last_download", &self.last_download)
+            .field("downloads_given", &self.downloads_given)
             .finish()
     }
 }
@@ -114,7 +114,7 @@ impl HasgardMcpServer {
             app: App::Endpoint { socket, resolved: Arc::new(OnceLock::new()) },
             window,
             dangerous: dangerous_mcp_tools_enabled(),
-            last_download: Arc::default(),
+            downloads_given: Arc::default(),
         }
     }
 
@@ -131,7 +131,7 @@ impl HasgardMcpServer {
             app: App::InProcess(Arc::new(move |method, params| Box::pin(call(method, params)))),
             window,
             dangerous: dangerous_mcp_tools_enabled(),
-            last_download: Arc::default(),
+            downloads_given: Arc::default(),
         }
     }
 
@@ -181,26 +181,37 @@ impl HasgardMcpServer {
         })
     }
 
-    /// Wait for the next download to end after the last one this server answered with,
-    /// whether it ends before or after this call.
-    async fn wait_for_next_download(
-        &self, mut params: Value, window: Option<String>,
-    ) -> Result<CallToolResult, McpError> {
+    /// Wait for a finished download this server has not answered with yet, whether it
+    /// finishes before or after this call.
+    async fn wait_for_next_download(&self, params: Value, window: Option<String>) -> Result<CallToolResult, McpError> {
+        let timeout = params["timeout"].as_u64().unwrap_or(10_000);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
         let waited = async {
-            // A place among ended downloads belongs to one run of the application.
-            let listing = self.call_app("downloads.list", Some(json!({})), None).await?;
-            let session = listing["session"].as_u64().context("downloads.list answered without a session")?;
-            let seen = *self.last_download.lock().expect("download cursor");
-            params["session"] = json!(session);
-            params["afterEnded"] = json!(seen.filter(|(run, _)| *run == session).map_or(0, |(_, ended)| ended));
-            let download = self.call_app("downloads.wait", Some(params), window).await?;
-            let ended = download["ended"].as_u64().context("downloads.wait answered without the download's place")?;
-            let mut last = self.last_download.lock().expect("download cursor");
-            // Two waits may be in flight; the later place stands.
-            if last.is_none_or(|(run, place)| run != session || place < ended) {
-                *last = Some((session, ended));
+            loop {
+                // Ids are counted from one in each run of the application.
+                let listing = self.call_app("downloads.list", Some(json!({})), None).await?;
+                let session = listing["session"].as_u64().context("downloads.list answered without a session")?;
+                let except = {
+                    let mut given = self.downloads_given.lock().expect("downloads given");
+                    if given.0 != session {
+                        *given = (session, Vec::new());
+                    }
+                    given.1.clone()
+                };
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                let call = json!({
+                    "session": session, "except": except,
+                    "timeout": u64::try_from(left.as_millis()).unwrap_or(u64::MAX),
+                });
+                let download = self.call_app("downloads.wait", Some(call), window.clone()).await?;
+                let id = download["id"].as_u64().context("downloads.wait answered without the download's id")?;
+                let mut given = self.downloads_given.lock().expect("downloads given");
+                // A wait running alongside may have been answered with this one; ask again then.
+                if given.0 == session && !given.1.contains(&id) {
+                    given.1.push(id);
+                    return Ok::<Value, anyhow::Error>(download);
+                }
             }
-            Ok::<Value, anyhow::Error>(download)
         };
         Ok(match waited.await {
             Ok(download) => tool_success(download),
@@ -368,6 +379,7 @@ impl HasgardMcpServer {
             "clear" => {
                 let mut params = target_params(&required_string(&args, "target")?);
                 params["value"] = json!("");
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("fill", Some(params), window).await
             }
             "wheel" => {
@@ -1203,9 +1215,9 @@ fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "downloads",
-            description: "The files a webview downloads. wait answers with the next one to finish that an earlier \
-                          wait has not answered with, and the path it was saved to; it may be called after the \
-                          action that downloads. On CEF call set_directory first. Available where the application \
+            description: "The files a webview downloads. wait answers with a finished download no earlier wait \
+                          answered with, and the path it was saved to; it may be called after the action that \
+                          downloads. One nobody waited for answers the next wait: clear first to start fresh. On CEF call set_directory first. Available where the application \
                           passes Hasgard's observer to its download hook.",
             schema: downloads_schema,
             read_only: false,

@@ -482,10 +482,19 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
         }
         "assert-exists" => {
             let t = require_target(step)?;
-            client
-                .call("visible", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() }))
-                .await
-                .with_context(|| format!("element '{t}' was not found in the DOM"))?;
+            let scope = Scope { window, ..Scope::default() };
+            // A selector that matches nothing is answered, not refused, so it has to be counted;
+            // a ref or a point that names nothing is refused.
+            if let crate::support::Target::Selector(selector) = crate::support::parse_target(t) {
+                let found = client.call("count", with_scope(Some(json!({"selector": selector})), scope)).await?;
+                let count = found["count"].as_u64().context("count answered without a count")?;
+                anyhow::ensure!(count > 0, "element '{t}' was not found in the DOM");
+            } else {
+                client
+                    .call("visible", with_scope(Some(target_params(t)), scope))
+                    .await
+                    .with_context(|| format!("element '{t}' was not found in the DOM"))?;
+            }
             Ok(json!({"ok": true}))
         }
         "assert-visible" => {

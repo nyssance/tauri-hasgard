@@ -381,16 +381,22 @@ pub fn scoped_cli_command(action: &str, entry: &Value) -> String {
     };
     let mut scope = String::new();
     if let Some(window) = entry.get("window").and_then(Value::as_str) {
-        let _ = write!(scope, "--window {} ", shell_escape(window));
+        let _ = write!(scope, "--window={} ", shell_escape(window));
+    }
+    // A drag names its ends, and each may carry the frame it is in. A command has one frame
+    // for both, so two different ones cannot be said.
+    let ends: Vec<&Value> = ["source", "target"].iter().filter_map(|end| entry.get(end)?.get("frame")).collect();
+    if ends.windows(2).any(|pair| pair[0] != pair[1]) {
+        return format!("# {action}: its ends are in different frames; not exportable as one command");
     }
     // One selector per nesting level, outermost first; a single frame may be recorded bare.
-    let frames: Vec<&str> = match entry.get("frame") {
+    let frames: Vec<&str> = match entry.get("frame").or_else(|| ends.first().copied()) {
         Some(Value::String(frame)) => vec![frame],
         Some(Value::Array(frames)) => frames.iter().filter_map(Value::as_str).collect(),
         _ => Vec::new(),
     };
     for frame in frames {
-        let _ = write!(scope, "--frame {} ", shell_escape(frame));
+        let _ = write!(scope, "--frame={} ", shell_escape(frame));
     }
     format!("tauri-hasgard {scope}{arguments}")
 }
@@ -539,8 +545,51 @@ fn recorded_strings<'a>(entry: &'a Value, field: &str) -> impl Iterator<Item = &
     entry.get(field).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
 }
 
+/// A recorded click, with the options that made it more than a plain one.
+fn click_command(entry: &Value, aimed: String) -> String {
+    let mut line = Line::new("click");
+    for modifier in recorded_strings(entry, "modifiers") {
+        line = line.option("modifier", modifier);
+    }
+    if let Some(button) = recorded_text(entry, "button") {
+        line = line.option("button", button);
+    }
+    if let Some(count) = entry.get("clickCount").and_then(Value::as_u64) {
+        line = line.raw_option("click-count", count);
+    }
+    let offset = |axis: &str| entry.get("position").and_then(|p| p.get(axis)).and_then(Value::as_f64);
+    if let (Some(x), Some(y)) = (offset("x"), offset("y")) {
+        line = line.raw_option("position", format!("{x},{y}"));
+    }
+    line.positional(aimed).render()
+}
+
+/// A recorded key press, with how it was to be confirmed.
+fn press_command(entry: &Value, key: &str) -> String {
+    let mut line = Line::new("press");
+    if let Some(completion) = recorded_text(entry, "completion") {
+        line = line.option("completion", completion);
+    }
+    if let Some(expression) = recorded_text(entry, "waitFor") {
+        line = line.option("wait-for", expression);
+    }
+    if let Some(timeout) = entry.get("timeout").and_then(Value::as_u64) {
+        line = line.raw_option("timeout", timeout);
+    }
+    line.text(key).render()
+}
+
 /// The command for one call: `action` is the method and `entry` its parameters.
 pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
+    // The nth match of a selector has no spelling on a command line; exporting the selector
+    // alone would aim at the first match.
+    if [Some(entry), entry.get("source"), entry.get("target")]
+        .into_iter()
+        .flatten()
+        .any(|aim| aim.get("index").is_some())
+    {
+        return format!("# {action}: aimed at the nth match of a selector; not exportable as a command");
+    }
     // A ref, a selector, or a point: whatever the action was aimed at.
     let target = resolve_export_target(Some(entry));
 
@@ -552,23 +601,7 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
         return missing_field(action, "ref, selector or point");
     };
     match action {
-        "click" => {
-            let mut line = Line::new("click");
-            for modifier in recorded_strings(entry, "modifiers") {
-                line = line.option("modifier", modifier);
-            }
-            if let Some(button) = recorded_text(entry, "button") {
-                line = line.option("button", button);
-            }
-            if let Some(count) = entry.get("clickCount").and_then(Value::as_u64) {
-                line = line.raw_option("click-count", count);
-            }
-            let offset = |axis: &str| entry.get("position").and_then(|p| p.get(axis)).and_then(Value::as_f64);
-            if let (Some(x), Some(y)) = (offset("x"), offset("y")) {
-                line = line.raw_option("position", format!("{x},{y}"));
-            }
-            line.positional(aimed).render()
-        }
+        "click" => click_command(entry, aimed),
         "fill" => match recorded_text(entry, "value") {
             Some(value) => Line::new("fill").positional(aimed).text(value).render(),
             None => missing_field(action, "value"),
@@ -578,7 +611,7 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
             None => missing_field(action, "text"),
         },
         "press" => match recorded_text(entry, "key") {
-            Some(key) => Line::new("press").text(key).render(),
+            Some(key) => press_command(entry, key),
             None => missing_field(action, "key"),
         },
         "select" => {
@@ -684,14 +717,17 @@ fn later_action_command(action: &str, entry: &Value, target: Option<String>) -> 
             if !matches!(policy, "accept" | "dismiss" | "manual") {
                 return format!("# {action}: the recording has an unknown policy");
             }
-            if let Some(text) = recorded_text(entry, "promptText") {
-                line = line.option("prompt-text", text);
-            }
-            for path in recorded_strings(entry, "paths") {
-                line = line.option("path", path);
-            }
-            if let Some(button) = recorded_text(entry, "button") {
-                line = line.option("button", button);
+            // Only an accepted dialog has an answer to give; the other policies take no options.
+            if policy == "accept" {
+                if let Some(text) = recorded_text(entry, "promptText") {
+                    line = line.option("prompt-text", text);
+                }
+                for path in recorded_strings(entry, "paths") {
+                    line = line.option("path", path);
+                }
+                if let Some(button) = recorded_text(entry, "button") {
+                    line = line.option("button", button);
+                }
             }
             line.render()
         }
@@ -997,10 +1033,10 @@ mod tests {
         let framed = json(serde_json::json!({"selector": "#pay", "window": "main", "frame": ["#pane", "#inner"]}));
         assert_eq!(
             scoped_cli_command("click", &framed),
-            "tauri-hasgard --window 'main' --frame '#pane' --frame '#inner' click '#pay'"
+            "tauri-hasgard --window='main' --frame='#pane' --frame='#inner' click '#pay'"
         );
         let bare = json(serde_json::json!({"selector": "#pay", "frame": "#pane"}));
-        assert_eq!(scoped_cli_command("click", &bare), "tauri-hasgard --frame '#pane' click '#pay'");
+        assert_eq!(scoped_cli_command("click", &bare), "tauri-hasgard --frame='#pane' click '#pay'");
         // A comment has nothing to scope.
         assert!(scoped_cli_command("click", &serde_json::json!({"window": "main"})).starts_with("# click"));
 

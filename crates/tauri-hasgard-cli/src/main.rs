@@ -75,6 +75,13 @@ async fn run_cli() -> Result<()> {
             .await;
     }
 
+    // Turning a recording into a script reads a file; there is no application to reach.
+    if let Command::Replay { ref path, export: Some(ref format) } = args.command {
+        let entries = tauri_hasgard_mcp::support::read_replay_entries(path)?;
+        let script = tauri_hasgard_mcp::support::export_replay_command(&entries, format)?;
+        return format_result(OutputKind::Replay, &script, args.json);
+    }
+
     let socket = resolve_socket(args.socket)?;
     let mut client = Client::connect(&socket).await?;
 
@@ -1170,8 +1177,8 @@ mod tests {
             serde_json::json!({"action":"click","timestamp":1,"selector":"#save","window":"main"}),
         ])
         .expect("complete entries export");
-        assert!(script.contains("tauri-hasgard --window 'settings' click '#save'"));
-        assert!(script.contains("tauri-hasgard --window 'main' click '#save'"));
+        assert!(script.contains("tauri-hasgard --window='settings' click '#save'"));
+        assert!(script.contains("tauri-hasgard --window='main' click '#save'"));
     }
 
     use super::*;

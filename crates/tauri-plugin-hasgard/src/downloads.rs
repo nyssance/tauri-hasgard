@@ -51,6 +51,17 @@ struct Log {
     directory: Option<PathBuf>,
 }
 
+/// Which ended download a wait is for.
+enum Wanted {
+    /// One that ended later than this place: what a wait with nothing else to go on asks for,
+    /// with the place it found when it began.
+    EndedAfter(u64),
+    /// One that started after this id, even if it has already ended.
+    StartedAfter(u64),
+    /// Any but these: a caller that acts first and waits afterwards names what it was already given.
+    Except(Vec<u64>),
+}
+
 impl Log {
     fn begin(&mut self, window: String, url: String, path: PathBuf) {
         self.sequence += 1;
@@ -87,14 +98,17 @@ impl Log {
         }
     }
 
-    /// The first download to have ended that a wait should answer with: one that ended later
-    /// than `after`, or with `since` one that started after that id. A wait keeps no state
+    /// The first download to have ended that a wait should answer with. A wait keeps no state
     /// here, so one that is abandoned takes nothing from the wait that follows it.
-    fn first_ended(&self, window: Option<&str>, after: u64, since: Option<u64>) -> Option<Value> {
+    fn first_ended(&self, window: Option<&str>, wanted: &Wanted) -> Option<Value> {
         self.downloads
             .iter()
             .filter(|d| d.succeeded.is_some() && window.is_none_or(|window| d.window == window))
-            .filter(|d| since.map_or(d.ended > after, |since| d.id > since))
+            .filter(|d| match wanted {
+                Wanted::EndedAfter(place) => d.ended > *place,
+                Wanted::StartedAfter(id) => d.id > *id,
+                Wanted::Except(given) => !given.contains(&d.id),
+            })
             .min_by_key(|d| d.ended)
             .map(describe)
     }
@@ -174,8 +188,6 @@ fn describe(download: &Download) -> Value {
         "window": download.window,
         "url": download.url,
         "path": download.path,
-        // Its place among the downloads that have ended, for `afterEnded`; null while in flight.
-        "ended": (download.ended > 0).then_some(download.ended),
         "state": match download.succeeded {
             None => "started",
             Some(true) => "finished",
@@ -245,22 +257,28 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
                     )));
                 }
                 let deadline = Instant::now() + Duration::from_millis(timeout);
-                // A caller that remembers the last download it was given waits for the next one
-                // to end, whether or not that happens before this call. Its place only means
-                // something in the run of the application that issued it; from another run
-                // nothing has been given yet. Without a place, the wait is for what ends from now.
-                let began = match optional_u64(params, "afterEnded", method)? {
-                    Some(place) => match optional_u64(params, "session", method)? {
-                        Some(session) if session == session_id() => place,
-                        Some(_) => 0,
-                        None => {
-                            return Err(invalid("downloads.wait: 'afterEnded' requires the 'session' it came from"));
+                let wanted = match (since, params.get("except").filter(|given| !given.is_null())) {
+                    (Some(_), Some(_)) => return Err(invalid("downloads.wait takes 'sinceId' or 'except', not both")),
+                    (Some(since), None) => Wanted::StartedAfter(since),
+                    (None, Some(given)) => {
+                        let ids = given
+                            .as_array()
+                            .and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                            .ok_or_else(|| invalid("downloads.wait: 'except' must be a list of download ids"))?;
+                        // Ids are counted from one in each run of the application, so a list
+                        // from another run names nothing here.
+                        match optional_u64(params, "session", method)? {
+                            Some(session) if session == session_id() => Wanted::Except(ids),
+                            Some(_) => Wanted::Except(Vec::new()),
+                            None => {
+                                return Err(invalid("downloads.wait: 'except' requires the 'session' it came from"));
+                            }
                         }
-                    },
-                    None => log().ended,
+                    }
+                    (None, None) => Wanted::EndedAfter(log().ended),
                 };
                 loop {
-                    if let Some(mut download) = log().first_ended(label, began, since) {
+                    if let Some(mut download) = log().first_ended(label, &wanted) {
                         download["session"] = json!(session_id());
                         return Ok(download);
                     }
@@ -300,13 +318,13 @@ mod tests {
         started(&mut log, "main", "https://x/report", "/d/report.csv");
         started(&mut log, "main", "https://x/report", "/d/report (1).csv");
         log.finish("main", "https://x/report", Some(PathBuf::from("/d/report (1).csv")), true);
-        let ended = log.first_ended(None, 0, None).expect("the second ended");
+        let ended = log.first_ended(None, &Wanted::EndedAfter(0)).expect("the second ended");
         assert_eq!(ended["id"], 2);
         assert_eq!(ended["path"], "/d/report (1).csv");
-        assert!(log.first_ended(None, 1, None).is_none(), "the first is still in flight");
+        assert!(log.first_ended(None, &Wanted::EndedAfter(1)).is_none(), "the first is still in flight");
         // No path at the end: the oldest in flight is the one.
         log.finish("main", "https://x/report", None, false);
-        let first = log.first_ended(None, 1, None).expect("the first ended");
+        let first = log.first_ended(None, &Wanted::EndedAfter(1)).expect("the first ended");
         assert_eq!((first["id"].as_u64(), first["state"].as_str()), (Some(1), Some("failed")));
     }
 
@@ -317,17 +335,22 @@ mod tests {
         started(&mut log, "side", "https://x/b", "/d/b");
         log.finish("side", "https://x/b", None, true);
         // A wait that began before anything ended sees the first to end, whichever started first.
-        assert_eq!(log.first_ended(None, 0, None).expect("b ended first")["id"], 2);
+        assert_eq!(log.first_ended(None, &Wanted::EndedAfter(0)).expect("b ended first")["id"], 2);
         // Asking again changes nothing: an abandoned wait cannot use up a download.
-        assert_eq!(log.first_ended(None, 0, None).expect("still b")["id"], 2);
+        assert_eq!(log.first_ended(None, &Wanted::EndedAfter(0)).expect("still b")["id"], 2);
         // A wait that began after b ended is not satisfied by it.
         let began = log.ended;
-        assert!(log.first_ended(None, began, None).is_none());
+        assert!(log.first_ended(None, &Wanted::EndedAfter(began)).is_none());
         log.finish("main", "https://x/a", None, true);
-        assert_eq!(log.first_ended(None, began, None).expect("a ended after it began")["id"], 1);
+        assert_eq!(log.first_ended(None, &Wanted::EndedAfter(began)).expect("a ended after it began")["id"], 1);
         // A caller that keeps its own place goes by id instead.
-        assert_eq!(log.first_ended(None, began, Some(1)).expect("after id 1")["id"], 2);
-        assert!(log.first_ended(Some("main"), began, Some(1)).is_none(), "a window sees only its own");
+        assert_eq!(log.first_ended(None, &Wanted::StartedAfter(1)).expect("after id 1")["id"], 2);
+        assert!(log.first_ended(Some("main"), &Wanted::StartedAfter(1)).is_none(), "a window sees only its own");
+        // A caller that names what it was given gets the rest, each window's on its own terms:
+        // being given main's file does not hide side's, whichever ended first.
+        assert_eq!(log.first_ended(Some("side"), &Wanted::Except(vec![1])).expect("side's")["id"], 2);
+        assert_eq!(log.first_ended(None, &Wanted::Except(vec![2])).expect("the other")["id"], 1);
+        assert!(log.first_ended(None, &Wanted::Except(vec![1, 2])).is_none());
     }
 
     #[test]
@@ -342,7 +365,7 @@ mod tests {
         let left: Vec<u64> = log.downloads.iter().map(|d| d.id).collect();
         assert_eq!(left, [2, 3], "main's ended one is gone; side's and the one in flight stay");
         log.finish("main", "https://x/c", None, true);
-        assert_eq!(log.first_ended(Some("main"), 2, None).expect("it ended after the clear")["id"], 3);
+        assert_eq!(log.first_ended(Some("main"), &Wanted::EndedAfter(2)).expect("it ended after the clear")["id"], 3);
         log.clear(None);
         assert!(log.downloads.is_empty());
     }

@@ -797,7 +797,8 @@ async fn handle_wait_location(
 ) -> Result<serde_json::Value, RpcError> {
     let invalid = |message: String| RpcError { code: -32602, message, data: None };
     let params = params.expect("the caller matched on a present url or load");
-    for other in ["selector", "ref", "expression", "gone", "poll"] {
+    // The address and load state are the window's document's; a frame's are not reported.
+    for other in ["selector", "ref", "expression", "gone", "poll", "frame"] {
         if params.get(other).is_some_and(|value| !value.is_null() && value != &serde_json::Value::Bool(false)) {
             return Err(invalid(format!("wait: 'url' and 'load' cannot be combined with '{other}'")));
         }
@@ -1925,6 +1926,8 @@ mod tests {
             json!({"url": 5}),
             json!({"load": "interactive"}),
             json!({"url": "**/home", "selector": "#x"}),
+            // A frame's address is not what this reports; saying nothing would answer for the page.
+            json!({"load": "load", "frame": ["#pane"]}),
             json!({"url": {"source": "home"}}),
         ] {
             let error = dispatch("wait", Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new())

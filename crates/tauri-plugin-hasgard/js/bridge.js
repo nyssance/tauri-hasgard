@@ -398,7 +398,14 @@
   // Everything it restores is declared above, and no request has been wrapped yet.
   restoreState()
   restoreLogs()
-  if (typeof window.addEventListener === "function") window.addEventListener("pagehide", saveLogs)
+  // The state is written again as the document is left: the application may have cleared its
+  // session storage since the last change, and the next document must still find the rules.
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("pagehide", () => {
+      saveState()
+      saveLogs()
+    })
+  }
 
   function recordNetwork(entry) {
     _networkRequests.push(entry)
@@ -2384,6 +2391,9 @@
   function storageSet(params) {
     if (typeof params.key !== "string" || typeof params.value !== "string") {
       throw new Error("storageSet requires string key and value")
+    }
+    if (params.session && isOwnStateKey(params.key)) {
+      throw new Error(`storageSet: keys starting with ${STATE_KEY} are Hasgard's own`)
     }
     const storage = params.session ? sessionStorage : localStorage
     storage.setItem(params.key, params.value)

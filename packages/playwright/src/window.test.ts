@@ -250,6 +250,21 @@ test("dragTo resolves source and destination inside one window lock", async () =
   })
 })
 
+test("dragTo sends each end in its own frame", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ ok: true })
+  const window = new HasgardWindow(rpc, "main")
+
+  // A selector locator resolves in the bridge, so the call carries the frame or acts on the page.
+  await window.frameLocator("#pane").locator("#card").dragTo(window.locator("#bin"))
+
+  expect(call).toHaveBeenLastCalledWith("drag", {
+    source: { selector: "#card", frame: ["#pane"] },
+    target: { selector: "#bin" },
+    window: "main"
+  })
+})
+
 test("dragTo refuses locators from two different windows", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const source = new HasgardWindow(rpc, "main").locator("#card")
@@ -550,7 +565,6 @@ test("downloads are waited for and listed as the application reported them", asy
     window: "main",
     url: "blob:x",
     path: "/tmp/a.txt",
-    ended: 2,
     state: "finished"
   }
 
@@ -573,33 +587,46 @@ test("each finished download answers one waitForDownload, in one run of the appl
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   const application = new HasgardApplication(rpc)
-  const file = (id: number, ended: number) => ({
+  const file = (id: number, window = "main") => ({
     id,
     timestamp: 1,
-    window: "main",
+    window,
     url: "blob:x",
     path: `/tmp/${id}`,
-    ended,
     state: "finished"
   })
-  const waited = () => call.mock.calls.filter(([method]) => method === "downloads.wait").map(([, params]) => params)
+  const answers = (session: number, ...downloads: object[]) => {
+    for (const download of downloads) {
+      call.mockResolvedValueOnce({ downloads: [], directory: null, session })
+      call.mockResolvedValueOnce({ ...download, session })
+    }
+  }
+  const waited = () =>
+    call.mock.calls
+      .filter(([method]) => method === "downloads.wait")
+      .map(([, params]) => {
+        const { timeout: _timeout, ...rest } = params as Record<string, unknown>
+        return rest
+      })
 
-  call.mockResolvedValueOnce({ downloads: [], directory: null, session: 77 })
-  call.mockResolvedValueOnce({ ...file(1, 1), session: 77 })
-  await application.waitForDownload()
-  // The second call waits past the first one's file, even if the next already finished.
-  call.mockResolvedValueOnce({ downloads: [], directory: null, session: 77 })
-  call.mockResolvedValueOnce({ ...file(2, 2), session: 77 })
-  await application.waitForDownload()
-  // The application was restarted: its downloads are counted from the start again.
-  call.mockResolvedValueOnce({ downloads: [], directory: null, session: 99 })
-  call.mockResolvedValueOnce({ ...file(1, 1), session: 99 })
-  await application.waitForDownload()
+  // The second file of window "side" ended before "main"'s; a filtered wait must not hide it.
+  answers(77, file(2, "main"))
+  expect((await application.waitForDownload({ window: "main" })).id).toBe(2)
+  answers(77, file(1, "side"))
+  expect((await application.waitForDownload({ window: "side" })).id).toBe(1)
+  // Answered with one this client was already given, by a call waiting alongside: it asks again.
+  answers(77, file(1, "side"), file(3))
+  expect((await application.waitForDownload()).id).toBe(3)
+  // The application was restarted: its ids are counted from one again.
+  answers(99, file(1))
+  expect((await application.waitForDownload()).id).toBe(1)
 
   expect(waited()).toEqual([
-    { session: 77, afterEnded: 0 },
-    { session: 77, afterEnded: 1 },
-    { session: 99, afterEnded: 0 }
+    { window: "main", session: 77, except: [] },
+    { window: "side", session: 77, except: [2] },
+    { session: 77, except: [2, 1] },
+    { session: 77, except: [2, 1] },
+    { session: 99, except: [] }
   ])
 })
 

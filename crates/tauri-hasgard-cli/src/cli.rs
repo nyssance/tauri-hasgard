@@ -210,7 +210,8 @@ pub(crate) enum Command {
     Select {
         target: String,
         /// An option's value or visible label. Several select that set in a `<select multiple>`.
-        #[arg(required = true, num_args = 1.., allow_hyphen_values = true)]
+        /// Put `--` before a value that begins with a hyphen.
+        #[arg(required = true, num_args = 1..)]
         values: Vec<String>,
     },
     /// Toggle a checkbox, or drive it to a state with --state.
@@ -1167,6 +1168,17 @@ mod position_tests {
     }
 
     #[test]
+    fn options_after_a_select_s_values_are_options() {
+        let cli = Cli::try_parse_from(["tauri-hasgard", "select", "#country", "US", "CA", "--window", "settings"])
+            .expect("select with a window");
+        assert_eq!(cli.window.as_deref(), Some("settings"));
+        assert!(matches!(cli.command, Command::Select { values, .. } if values == ["US", "CA"]));
+        // A value that begins with a hyphen goes after `--`, as the export writes it.
+        let cli = Cli::try_parse_from(["tauri-hasgard", "select", "--", "#delta", "-1"]).expect("select a negative");
+        assert!(matches!(cli.command, Command::Select { values, .. } if values == ["-1"]));
+    }
+
+    #[test]
     fn values_that_begin_with_a_hyphen_are_values() {
         // An exported recording carries whatever the page was given, a leading hyphen included.
         for line in [
@@ -1250,6 +1262,11 @@ mod position_tests {
             ("drag", json!({"source": {"ref": "e1"}, "target": {"selector": "#b"}})),
             ("wheel", json!({"deltaX": -3, "deltaY": 120.5, "selector": "#list"})),
             ("press", json!({"key": "Shift+Tab"})),
+            ("press", json!({"key": "Meta+K", "completion": "native", "waitFor": "-1 < 0", "timeout": 2000})),
+            ("click", json!({"selector": "#save", "window": "-main", "frame": "-pane"})),
+            ("drag", json!({"source": {"selector": "#card", "frame": ["#pane"]}, "offset": {"x": 5, "y": 0}})),
+            ("dialog.handle", json!({"arguments": {"action": "dismiss"}, "promptText": "x"})),
+            ("nativeDialog.handle", json!({"arguments": {"action": "dismiss"}, "paths": ["/a"], "button": "No"})),
             ("navigate", json!({"url": "https://app.test/?q=-1"})),
             ("dialog.handle", json!({"arguments": {"action": "accept"}, "promptText": "-x"})),
             (
@@ -1275,6 +1292,29 @@ mod position_tests {
             let parsed = Cli::try_parse_from(shell_words(&line));
             assert!(parsed.is_ok(), "{line}\ndoes not parse: {}", parsed.err().map_or_default(|e| e.to_string()));
         }
+        // What a command cannot say is said in a comment, never left out of one.
+        for (action, entry) in [
+            ("click", json!({"selector": ".row", "index": 3})),
+            ("drag", json!({"source": {"selector": ".row", "index": 1}, "target": {"selector": "#bin"}})),
+            (
+                "drag",
+                json!({"source": {"selector": "#a", "frame": ["#one"]}, "target": {"selector": "#b", "frame": ["#two"]}}),
+            ),
+        ] {
+            let line = scoped_cli_command(action, &entry);
+            assert!(line.starts_with(&format!("# {action}: ")), "{line}");
+        }
+        let pressed = scoped_cli_command("press", &json!({"key": "Enter", "completion": "native"}));
+        let Command::Press { completion, .. } = Cli::try_parse_from(shell_words(&pressed)).expect("press").command
+        else {
+            panic!("expected press")
+        };
+        assert_eq!(completion.as_deref(), Some("native"));
+        let dragged = scoped_cli_command(
+            "drag",
+            &json!({"source": {"selector": "#c", "frame": ["#pane"]}, "offset": {"x": 5, "y": 0}}),
+        );
+        assert_eq!(Cli::try_parse_from(shell_words(&dragged)).expect("drag").frame, ["#pane"]);
         // The policy and the kind of rule come back from under `arguments`.
         let abort = scoped_cli_command("route.add", &json!({"arguments": {"action": "abort"}, "pattern": "**/x"}));
         assert!(abort.starts_with("tauri-hasgard route abort"), "{abort}");

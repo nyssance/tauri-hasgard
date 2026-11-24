@@ -251,7 +251,6 @@ function parseDownload(value: unknown): Download {
     window: expectString(download.window, "download.window"),
     url: expectString(download.url, "download.url"),
     path: expectNullableString(download.path, "download.path"),
-    ended: download.ended === null ? null : expectNumber(download.ended, "download.ended"),
     state
   }
 }
@@ -503,38 +502,45 @@ export class HasgardApplication {
     }
   }
 
-  /** The last download `waitForDownload` resolved with: its place among those that ended, and the run it ended in. */
-  private downloadCursor: { session: number; ended: number } | null = null
+  /** The downloads `waitForDownload` has resolved with, in one run of the application. */
+  private downloadsGiven: { session: number; ids: Set<number> } | null = null
 
   /**
    * Wait for a download to finish and resolve with it. Each finished download
-   * answers one call, in the order they finished, whether the download ends
-   * before or after the call: start it before the action or after, as suits the
-   * test. `sinceId` waits for one started after that id instead.
+   * answers one call, whether it finishes before or after the call, so the call
+   * may come before the action that downloads or after it. A download nobody
+   * waited for answers the next call: start a test from `downloads.clear()`.
+   * `sinceId` waits for one started after that id instead.
    */
   async waitForDownload(options: { timeoutMs?: number; sinceId?: number; window?: string } = {}): Promise<Download> {
     const params: Record<string, JsonValue> = {}
-    if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
     if (options.window !== undefined) params.window = options.window
     if (options.sinceId !== undefined) {
-      params.sinceId = options.sinceId
-    } else {
-      // Nothing given yet counts as place 0 of the application's current run.
-      const { session } = expectRecord(await this.rpc.call("downloads.list", {}), "downloads.list")
-      const current = expectNumber(session, "downloads.list.session")
-      params.session = current
-      params.afterEnded = this.downloadCursor?.session === current ? this.downloadCursor.ended : 0
+      if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
+      return parseDownload(await this.rpc.call("downloads.wait", { ...params, sinceId: options.sinceId }))
     }
-    const result = expectRecord(await this.rpc.call("downloads.wait", params), "downloads.wait")
-    const download = parseDownload(result)
-    if (options.sinceId === undefined && download.ended !== null) {
-      const session = expectNumber(result.session, "downloads.wait.session")
-      // Two calls may be waiting at once; the later place stands.
-      if (this.downloadCursor?.session !== session || this.downloadCursor.ended < download.ended) {
-        this.downloadCursor = { session, ended: download.ended }
+    const timeoutMs = options.timeoutMs ?? 10_000
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      // Ids are counted from one in each run of the application.
+      const listing = expectRecord(await this.rpc.call("downloads.list", {}), "downloads.list")
+      const session = expectNumber(listing.session, "downloads.list.session")
+      if (this.downloadsGiven?.session !== session) this.downloadsGiven = { session, ids: new Set() }
+      const given = this.downloadsGiven
+      const download = parseDownload(
+        await this.rpc.call("downloads.wait", {
+          ...params,
+          session,
+          except: [...given.ids],
+          timeout: Math.max(0, deadline - Date.now())
+        })
+      )
+      // Another call that was waiting at the same time may have been answered with this one.
+      if (!given.ids.has(download.id)) {
+        given.ids.add(download.id)
+        return download
       }
     }
-    return download
   }
 
   /** The system clipboard's text, or null when it holds none. */
@@ -1451,9 +1457,10 @@ export class HasgardLocator {
     await this.window.runExclusive(async () => {
       const source = await this.resolveUnique()
       const destination = await target.resolveUnique()
+      // Each end is in its own locator's frame.
       await this.window.call("drag", {
-        source: targetParams(source),
-        target: targetParams(destination)
+        source: this.scoped(source),
+        target: target.scoped(destination)
       })
     })
   }
