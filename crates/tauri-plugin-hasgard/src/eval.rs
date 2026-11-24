@@ -26,6 +26,14 @@ struct Pending {
 type PendingMap = HashMap<u64, Pending>;
 pub(crate) type CancelFn = Arc<dyn Fn(&str, bool) -> Result<(), String> + Send + Sync>;
 pub(crate) type CleanupFn = Arc<dyn Fn(Option<&str>) -> Result<(), String> + Send + Sync>;
+/// A native operation: webview label, method, params.
+pub(crate) type NativeFn = Arc<
+    dyn Fn(Option<&str>, &str, &serde_json::Value) -> Result<serde_json::Value, crate::protocol::RpcError>
+        + Send
+        + Sync,
+>;
+/// The methods a native hook answers, and the hook.
+pub(crate) type NativeHook = (&'static [&'static str], NativeFn);
 pub(crate) type ActionFn =
     Arc<dyn Fn(Option<&str>, &str, serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync>;
 
@@ -63,8 +71,8 @@ pub(crate) struct EvalEngine {
     #[cfg(feature = "cef")]
     pub(crate) executor: Arc<Mutex<Option<crate::playwright::ExecutorCommand>>>,
     pub(crate) cancel: Arc<Mutex<Option<CancelFn>>>,
-    /// Native window state and control, supplied by the runtime that owns the windows.
-    pub(crate) window: Arc<Mutex<Option<crate::window_control::WindowFn>>>,
+    /// Operations the page cannot perform — native windows, the cookie store — keyed by method.
+    pub(crate) native: Arc<Mutex<Vec<NativeHook>>>,
     pub(crate) cleanup: Arc<Mutex<Option<CleanupFn>>>,
     allowed: Arc<Mutex<HashMap<String, String>>>,
     handshakes: Arc<Mutex<HashMap<String, (String, String)>>>,
@@ -82,7 +90,7 @@ impl EvalEngine {
             action: Arc::default(),
             observe: Arc::default(),
             cancel: Arc::default(),
-            window: Arc::default(),
+            native: Arc::default(),
             cleanup: Arc::default(),
             #[cfg(feature = "cef")]
             executor: Arc::default(),

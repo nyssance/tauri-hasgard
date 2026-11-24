@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cli::{
-    AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction, StorageArgs,
-    WindowCommand,
+    AssertKind, Cli, Command, CookiesCommand, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction,
+    StorageArgs, WindowCommand,
 };
 #[cfg(test)]
 use tauri_hasgard_mcp::support::{export_shell_script, mime_from_ext};
@@ -623,6 +623,40 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
                 DialogCommand::Clear => ("dialog.clear", None),
             };
             client.call(method, with_scope(params, scope)).await
+        }
+        Command::Cookies(action) => {
+            // Absent options are omitted, so the plugin applies its own defaults.
+            let object = |pairs: Vec<(&str, Option<Value>)>| {
+                Value::Object(pairs.into_iter().filter_map(|(key, value)| Some((key.to_owned(), value?))).collect())
+            };
+            let (method, params) = match action {
+                CookiesCommand::Get { url, name } => {
+                    ("cookies.get", object(vec![("url", url.map(Value::from)), ("name", name.map(Value::from))]))
+                }
+                CookiesCommand::Set { name, value, url, domain, path, expires, http_only, secure, same_site } => (
+                    "cookies.set",
+                    object(vec![
+                        ("name", Some(json!(name))),
+                        ("value", Some(json!(value))),
+                        ("url", url.map(Value::from)),
+                        ("domain", domain.map(Value::from)),
+                        ("path", path.map(Value::from)),
+                        ("expires", expires.map(Value::from)),
+                        ("httpOnly", http_only.then_some(json!(true))),
+                        ("secure", secure.then_some(json!(true))),
+                        ("sameSite", same_site.map(Value::from)),
+                    ]),
+                ),
+                CookiesCommand::Clear { url, name, domain } => (
+                    "cookies.clear",
+                    object(vec![
+                        ("url", url.map(Value::from)),
+                        ("name", name.map(Value::from)),
+                        ("domain", domain.map(Value::from)),
+                    ]),
+                ),
+            };
+            client.call(method, with_scope(Some(params), Scope { window: scope.window, ..Scope::default() })).await
         }
         Command::Window(action) => {
             let (action, size, position) = match action {

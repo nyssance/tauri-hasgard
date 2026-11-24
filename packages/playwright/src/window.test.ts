@@ -476,6 +476,44 @@ test("waitForFunction returns the predicate's own value and forwards the poll in
   })
 })
 
+test("cookie methods use the cookie store and parse what it holds", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const stored = {
+    name: "sid",
+    value: "abc",
+    domain: "example.test",
+    path: "/",
+    expires: null,
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax"
+  }
+  const call = vi.spyOn(rpc, "call")
+  const window = new HasgardWindow(rpc, "main")
+
+  call.mockResolvedValueOnce(stored)
+  expect(await window.setCookie({ name: "sid", value: "abc", url: "https://example.test/", httpOnly: true })).toEqual(
+    stored
+  )
+  call.mockResolvedValueOnce([stored])
+  expect(await window.cookies({ url: "https://example.test/" })).toEqual([stored])
+  call.mockResolvedValueOnce({ removed: 1 })
+  expect(await window.clearCookies({ name: "sid" })).toBe(1)
+
+  expect(call).toHaveBeenNthCalledWith(1, "cookies.set", {
+    name: "sid",
+    value: "abc",
+    url: "https://example.test/",
+    httpOnly: true,
+    window: "main"
+  })
+  expect(call).toHaveBeenNthCalledWith(2, "cookies.get", { url: "https://example.test/", window: "main" })
+  expect(call).toHaveBeenNthCalledWith(3, "cookies.clear", { name: "sid", window: "main" })
+
+  call.mockResolvedValueOnce([{ ...stored, sameSite: "lax" }])
+  await expect(window.cookies()).rejects.toThrow(/sameSite/)
+})
+
 test("native window methods call window.* and parse the reported state", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const state = {

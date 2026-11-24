@@ -146,16 +146,23 @@ pub(crate) async fn dispatch(
                 .and_then(std::convert::identity)
                 .map_err(|message| RpcError { code: -32603, message, data: None })
         }
-        method if crate::window_control::METHODS.contains(&method) => {
-            let control = engine.window.lock().expect("window hook").clone().ok_or_else(|| RpcError {
-                code: -32603,
-                message: "No window manager available".to_owned(),
-                data: None,
-            })?;
+        method if method.starts_with("window.") || method.starts_with("cookies.") => {
+            let control = engine
+                .native
+                .lock()
+                .expect("native hooks")
+                .iter()
+                .find(|(methods, _)| methods.contains(&method))
+                .map(|(_, hook)| hook.clone())
+                .ok_or_else(|| RpcError {
+                    code: -32601,
+                    message: format!("{method} is not available: no runtime supplies it"),
+                    data: None,
+                })?;
             let method = method.to_owned();
             let params = params.cloned().unwrap_or_else(|| serde_json::json!({}));
             let label = window.clone();
-            // Window getters wait on the UI thread, so they stay off the async runtime.
+            // These calls wait on the UI thread, so they stay off the async runtime.
             tokio::task::spawn_blocking(move || control(label.as_deref(), &method, &params))
                 .await
                 .map_err(|error| RpcError { code: -32603, message: error.to_string(), data: None })
@@ -1837,11 +1844,18 @@ mod tests {
         let missing = dispatch("window.resize", Some(&params), &engine, None, None, None, &Recorder::new())
             .await
             .expect_err("no runtime supplied a window hook");
-        assert_eq!(missing.code, -32603);
+        assert_eq!(missing.code, -32601);
 
-        *engine.window.lock().expect("window hook") = Some(std::sync::Arc::new(|label, method, params| {
-            Ok(json!({"label": label, "method": method, "width": params["width"], "hasWindow": params.get("window")}))
-        }));
+        engine.native.lock().expect("native hooks").push((
+            crate::window_control::METHODS,
+            std::sync::Arc::new(|label, method, params| {
+                Ok(json!({"label": label, "method": method, "width": params["width"], "hasWindow": params.get("window")}))
+            }),
+        ));
+        let unknown = dispatch("window.fly", Some(&params), &engine, None, None, None, &Recorder::new())
+            .await
+            .expect_err("a method no hook lists");
+        assert_eq!(unknown.code, -32601);
         let result = dispatch("window.resize", Some(&params), &engine, None, None, None, &Recorder::new())
             .await
             .expect("the hook answers");

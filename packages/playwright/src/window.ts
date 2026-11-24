@@ -9,6 +9,9 @@ import type {
   ClickOptions,
   ConsoleLogEntry,
   ConsoleLogOptions,
+  Cookie,
+  CookieFilter,
+  CookieInit,
   DialogListing,
   DialogPolicy,
   DialogRecord,
@@ -204,6 +207,24 @@ function expectBoolean(value: unknown, context: string): boolean {
 function expectNumber(value: unknown, context: string): number {
   if (typeof value !== "number") throw new Error(`${context} must be a number`)
   return value
+}
+
+function parseCookie(value: unknown): Cookie {
+  const cookie = expectRecord(value, "cookie")
+  const sameSite = expectNullableString(cookie.sameSite, "cookie.sameSite")
+  if (sameSite !== null && sameSite !== "Strict" && sameSite !== "Lax" && sameSite !== "None") {
+    throw new Error(`Invalid Hasgard response: cookie.sameSite is ${sameSite}`)
+  }
+  return {
+    name: expectString(cookie.name, "cookie.name"),
+    value: expectString(cookie.value, "cookie.value"),
+    domain: expectNullableString(cookie.domain, "cookie.domain"),
+    path: expectNullableString(cookie.path, "cookie.path"),
+    expires: cookie.expires === null ? null : expectNumber(cookie.expires, "cookie.expires"),
+    httpOnly: expectBoolean(cookie.httpOnly, "cookie.httpOnly"),
+    secure: expectBoolean(cookie.secure, "cookie.secure"),
+    sameSite
+  }
 }
 
 function parseNativeWindowState(value: unknown): NativeWindowState {
@@ -528,6 +549,23 @@ export class HasgardWindow {
 
   async title(): Promise<string> {
     return expectString(await this.rpc.call("title", withWindow(this.label)), "title result")
+  }
+
+  /** Cookies in this webview's store, `HttpOnly` ones included. */
+  async cookies(filter: CookieFilter = {}): Promise<Cookie[]> {
+    const value = await this.rpc.call("cookies.get", withWindow(this.label, { ...filter }))
+    return expectArray(value, "cookies result").map(parseCookie)
+  }
+
+  /** Write a cookie to the store, for example to start a test signed in. */
+  async setCookie(cookie: CookieInit): Promise<Cookie> {
+    return parseCookie(await this.rpc.call("cookies.set", withWindow(this.label, { ...cookie })))
+  }
+
+  /** Delete the cookies matching every filter given, or all of them. Resolves with how many were removed. */
+  async clearCookies(filter: CookieFilter & { domain?: string } = {}): Promise<number> {
+    const value = expectRecord(await this.rpc.call("cookies.clear", withWindow(this.label, { ...filter })), "result")
+    return expectNumber(value.removed, "cookies.removed")
   }
 
   /** The native window's position, size and flags. */

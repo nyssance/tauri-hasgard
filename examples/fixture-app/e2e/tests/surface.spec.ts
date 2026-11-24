@@ -761,3 +761,21 @@ test("the native window reports its state and takes a new size and position", as
   await expect.poll(async () => (await window.nativeState()).width).toBeCloseTo(before.width, 0)
   await expect(window.setSize(0, 10)).rejects.toThrow(/at least 1/)
 })
+
+test("the cookie store takes, lists and deletes a cookie the page cannot read", async ({ window }) => {
+  const url = "https://hasgard-cookies.example.test/account"
+  await window.clearCookies({ domain: "hasgard-cookies.example.test" })
+
+  const set = await window.setCookie({ name: "session", value: "s3cret", url, httpOnly: true, sameSite: "Lax" })
+  expect(set).toMatchObject({ name: "session", domain: "hasgard-cookies.example.test", path: "/", secure: true })
+
+  const listed = await window.cookies({ url, name: "session" })
+  expect(listed).toHaveLength(1)
+  expect(listed[0]).toMatchObject({ name: "session", value: "s3cret", httpOnly: true, secure: true })
+  // Not this page's cookie, and HttpOnly besides: page script never sees it.
+  expect(await window.evaluate<string>("document.cookie")).not.toContain("s3cret")
+
+  expect(await window.clearCookies({ name: "session", domain: "hasgard-cookies.example.test" })).toBe(1)
+  expect(await window.cookies({ url, name: "session" })).toEqual([])
+  await expect(window.setCookie({ name: "orphan", value: "x" })).rejects.toThrow(/domain.*url/)
+})

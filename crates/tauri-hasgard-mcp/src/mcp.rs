@@ -326,6 +326,36 @@ impl HasgardMcpServer {
                 self.call_app_tool("wheel", Some(params), window).await
             }
             "dialog" => self.call_dialog_tool(args, window).await,
+            "cookies" => {
+                let method = match required_string(&args, "action")?.as_str() {
+                    "get" => "cookies.get",
+                    "set" => "cookies.set",
+                    "clear" => "cookies.clear",
+                    other => {
+                        return Err(invalid_params(format!(
+                            "unknown cookies action: {other}; expected get, set or clear"
+                        )));
+                    }
+                };
+                // Tool arguments are snake case; the protocol's cookie fields are camel case.
+                let mut params = Map::new();
+                for (argument, field) in [
+                    ("name", "name"),
+                    ("value", "value"),
+                    ("url", "url"),
+                    ("domain", "domain"),
+                    ("path", "path"),
+                    ("expires", "expires"),
+                    ("http_only", "httpOnly"),
+                    ("secure", "secure"),
+                    ("same_site", "sameSite"),
+                ] {
+                    if let Some(value) = args.get(argument).filter(|value| !value.is_null()) {
+                        params.insert(field.to_owned(), value.clone());
+                    }
+                }
+                self.call_app_tool(method, Some(Value::Object(params)), window).await
+            }
             "window" => {
                 let pair = |first: &str, second: &str| -> Result<Option<(f64, f64)>, McpError> {
                     let number = |name: &str| match args.get(name) {
@@ -965,6 +995,15 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "set_input_files",
             description: "Attach local files to an <input type=\"file\">. An empty list clears the selection.",
             schema: set_input_files_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "cookies",
+            description: "Read, set or delete cookies in the webview's own store, HttpOnly cookies included. \
+                          Use it to start signed in or to assert on a session cookie.",
+            schema: cookies_schema,
             read_only: false,
             destructive: false,
             idempotent: true,
@@ -1927,6 +1966,33 @@ fn dialog_schema() -> Arc<JsonObject> {
     )
 }
 
+fn cookies_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("action", enum_prop("get lists, set writes one cookie, clear deletes.", &["get", "set", "clear"])),
+            ("name", string_prop("Cookie name: required for set, a filter for get and clear.")),
+            ("value", string_prop("Cookie value, for set.")),
+            (
+                "url",
+                string_prop(
+                    "For set, supplies the domain, the path / and secure for https. \
+                     For get and clear, limits to the cookies a request to this URL would carry.",
+                ),
+            ),
+            ("domain", string_prop("Cookie domain: for set when no url is given, a filter for clear.")),
+            ("path", string_prop("Cookie path for set. Defaults to /.")),
+            (
+                "expires",
+                integer_prop("Expiry for set, in seconds since the Unix epoch. A session cookie when omitted."),
+            ),
+            ("http_only", bool_prop("Hide the cookie from page script, for set.")),
+            ("secure", bool_prop("Send only over https, for set. Defaults to true for an https url.")),
+            ("same_site", enum_prop("SameSite policy for set.", &["Strict", "Lax", "None"])),
+        ]),
+        &["action"],
+    )
+}
+
 fn window_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2287,6 +2353,7 @@ mod tests {
             "check",
             "clear",
             "click",
+            "cookies",
             "dblclick",
             "dialog",
             "diff",

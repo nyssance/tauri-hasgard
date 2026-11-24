@@ -10,8 +10,6 @@ use tauri::{LogicalPosition, LogicalSize, Manager};
 
 use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RpcError};
 
-pub(crate) type WindowFn = Arc<dyn Fn(Option<&str>, &str, &Value) -> Result<Value, RpcError> + Send + Sync>;
-
 pub(crate) const METHODS: &[&str] = &[
     "window.state",
     "window.resize",
@@ -55,7 +53,7 @@ fn state<R: tauri::Runtime>(label: &str, window: &tauri::Window<R>) -> Result<Va
     }))
 }
 
-pub(crate) fn make_window_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> WindowFn {
+pub(crate) fn make_window_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> crate::eval::NativeFn {
     let handle = app.clone();
     Arc::new(move |label, method, params| {
         let label = label.unwrap_or("main");

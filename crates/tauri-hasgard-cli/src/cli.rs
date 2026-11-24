@@ -155,6 +155,9 @@ pub(crate) enum Command {
     /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
     #[command(subcommand)]
     Dialog(DialogCommand),
+    /// Read, set or delete cookies in the webview's store, `HttpOnly` ones included.
+    #[command(subcommand)]
+    Cookies(CookiesCommand),
     /// Read or change the native window: size, position, minimise, maximise, close.
     #[command(subcommand)]
     Window(WindowCommand),
@@ -455,6 +458,46 @@ pub(crate) enum DialogCommand {
     List,
     /// Forget the recorded dialogs, leaving the policy alone.
     Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum CookiesCommand {
+    /// List cookies: all of them, or those a request to --url would carry.
+    Get {
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Set a cookie. --url supplies the domain, the path `/` and `secure` for https.
+    Set {
+        name: String,
+        value: String,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long)]
+        path: Option<String>,
+        /// Expiry in seconds since the Unix epoch. A session cookie when omitted.
+        #[arg(long)]
+        expires: Option<i64>,
+        #[arg(long)]
+        http_only: bool,
+        #[arg(long)]
+        secure: bool,
+        #[arg(long, value_parser = ["Strict", "Lax", "None"])]
+        same_site: Option<String>,
+    },
+    /// Delete cookies: all of them, or those matching every filter given.
+    Clear {
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        domain: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

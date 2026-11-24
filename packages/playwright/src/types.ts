@@ -300,6 +300,39 @@ export interface WaitForFunctionOptions {
   pollMs?: number
 }
 
+export type CookieSameSite = "Strict" | "Lax" | "None"
+
+/** A cookie in the webview's store. `expires` is seconds since the Unix epoch, null for a session cookie. */
+export interface Cookie {
+  name: string
+  value: string
+  domain: string | null
+  path: string | null
+  expires: number | null
+  httpOnly: boolean
+  secure: boolean
+  sameSite: CookieSameSite | null
+}
+
+/** A cookie to set. `url` supplies the domain, the path `/` and `secure` for https. */
+export interface CookieInit {
+  name: string
+  value: string
+  url?: string
+  domain?: string
+  path?: string
+  expires?: number
+  httpOnly?: boolean
+  secure?: boolean
+  sameSite?: CookieSameSite
+}
+
+export interface CookieFilter {
+  /** Only the cookies a request to this URL would carry. */
+  url?: string
+  name?: string
+}
+
 /** The operating-system window: position and size in logical pixels, and its flags. */
 export interface NativeWindowState {
   label: string

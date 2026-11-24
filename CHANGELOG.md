@@ -2,6 +2,7 @@
 
 - Fix a ref that could not be used: once the ref table passed 1,024 entries, a node swept as detached and later re-attached was handed its old ref, which the table no longer knew.
 - Fix request ordering for a request that names no window. It targets `main` and now waits in `main`'s lane; before, it could run alongside a request sent to `main` explicitly.
+- Add cookie store access: `cookies.get`, `cookies.set` and `cookies.clear`, `HttpOnly` cookies included, on Wry and CEF. CLI `cookies`, the MCP `cookies` tool, and Playwright `cookies`, `setCookie` and `clearCookies`.
 - Add native window control: `window.state`, `window.resize`, `window.move`, `window.minimize`, `window.maximize`, `window.restore` and `window.close`, on Wry and CEF. CLI `window`, the MCP `window` tool, and Playwright `nativeState`, `setSize`, `setPosition`, `minimize`, `maximize`, `restore` and `close`.
 - Add a location wait: `wait` takes `url` (glob or pattern) and `load`, and holds across the navigation that reaches them. CLI `wait --url` and `--load`, the MCP `wait` tool, and Playwright `waitForURL` and `waitForLoadState`.
 - Windows: a pipe named through `TAURI_HASGARD_SOCKET` without the `tauri-hasgard-` prefix accepted one connection and then moved to `\\.\pipe\tauri-hasgard-unknown`, so every later client failed to connect. The server keeps the name it was bound to.

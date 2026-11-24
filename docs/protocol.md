@@ -73,9 +73,12 @@ An element target takes one of three forms:
 | Network   | `network.getRequests`, `network.clear`, `route.add`, `route.list`, `route.clear`                     |
 | Dialogs   | `dialog.list`, `dialog.handle`, `dialog.clear`                                                       |
 | Storage   | `storage.get`, `storage.set`, `storage.list`, `storage.clear`                                        |
+| Cookies   | `cookies.get`, `cookies.set`, `cookies.clear` |
 | Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
+
+`cookies.*` use the webview's own cookie store, so `HttpOnly` cookies are included. `cookies.get` takes an optional `url` (the cookies a request to it would carry) and `name`. `cookies.set` takes `name`, `value` and either `domain` or `url` (which supplies the domain, the path `/` and `secure` for https), plus optional `path`, `expires` (seconds since the Unix epoch), `httpOnly`, `secure` and `sameSite` (`Strict`, `Lax`, `None`). `cookies.clear` deletes the cookies matching every one of `url`, `name` and `domain` given, or all of them, and answers `{ removed }`.
 
 `window.*` act on the native window that holds the labelled webview. `window.state` reports `x`, `y`, `width`, `height` (logical pixels), `scaleFactor`, and `visible`, `focused`, `minimized`, `maximized`, `fullscreen`; `window.resize` takes `width` and `height`, `window.move` takes `x` and `y`, and each change answers with the state at reply time, which the window manager may still be applying.
 
