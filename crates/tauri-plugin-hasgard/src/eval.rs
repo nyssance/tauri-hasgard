@@ -122,6 +122,8 @@ impl EvalEngine {
     fn snapshot_key(window: Option<&str>, frame: Option<&serde_json::Value>) -> String {
         let window = window.unwrap_or("main");
         match frame.filter(|frame| !frame.is_null()) {
+            // One selector may be sent bare or as a list of one; both name the same frame.
+            Some(serde_json::Value::String(selector)) => format!("{window}\n{}", serde_json::json!([selector])),
             // A line break cannot occur in a window label, so it keeps the two parts apart.
             Some(frame) => format!("{window}\n{frame}"),
             None => window.to_owned(),
@@ -520,5 +522,6 @@ mod tests {
         assert!(engine.get_last_frame_snapshot(None, Some(&serde_json::Value::Null)).is_none());
         assert_eq!(engine.get_last_frame_snapshot(Some("main"), Some(&frame)), Some(inner));
         assert!(engine.get_last_frame_snapshot(None, Some(&json!(["#other"]))).is_none());
+        assert!(engine.get_last_frame_snapshot(None, Some(&json!("#pane"))).is_some());
     }
 }

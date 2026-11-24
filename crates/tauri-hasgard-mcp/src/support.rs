@@ -273,7 +273,12 @@ pub async fn run_replay_command(
             }
         }
 
-        if let Some(w) = window {
+        // An event recorded without a window was sent to every listener; naming one on replay
+        // would narrow it to that window's.
+        let broadcast = action == "event.emit" && !params.contains_key("window");
+        if let Some(w) = window
+            && !broadcast
+        {
             params.insert("window".to_string(), Value::String(w.to_string()));
         }
 
@@ -499,8 +504,9 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
             if let Some(amt) = entry.get("amount").and_then(serde_json::Value::as_i64) {
                 let _ = write!(cmd, " {amt}");
             }
-            if let Some(r) = entry.get("ref").and_then(|r| r.as_str()) {
-                let _ = write!(cmd, " --ref {}", shell_escape_ref_target(r));
+            // A scroll of an element names it; without one the document scrolls.
+            if !target.is_empty() {
+                let _ = write!(cmd, " --target {target}");
             }
             cmd
         }
@@ -580,6 +586,16 @@ fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
                 if let Some(body) = entry.get("body").and_then(Value::as_str) {
                     let _ = write!(cmd, " --body {}", shell_escape(body));
                 }
+                if let Some(content_type) = entry.get("contentType").and_then(Value::as_str) {
+                    let _ = write!(cmd, " --content-type {}", shell_escape(content_type));
+                }
+            }
+            // Which requests the rule answers is part of the rule.
+            if let Some(method) = entry.get("method").and_then(Value::as_str) {
+                let _ = write!(cmd, " --method {}", shell_escape(method));
+            }
+            if let Some(times) = entry.get("times").and_then(Value::as_u64) {
+                let _ = write!(cmd, " --times {times}");
             }
             cmd
         }
@@ -829,6 +845,30 @@ mod tests {
             entry_to_cli_command("fill", &serde_json::json!({"selector": "#a", "value": ""}))
                 .starts_with("tauri-hasgard fill ")
         );
+    }
+
+    #[test]
+    fn an_exported_route_and_scroll_keep_what_narrows_them() {
+        let route = serde_json::json!({
+            "pattern": "**/api", "status": 201, "body": "{}", "contentType": "application/json",
+            "method": "POST", "times": 1
+        });
+        let command = entry_to_cli_command("route.add", &route);
+        for part in
+            ["route fulfill", "--status 201", "--content-type", "application/json", "--method", "POST", "--times 1"]
+        {
+            assert!(command.contains(part), "{command} lacks {part}");
+        }
+        let abort = entry_to_cli_command(
+            "route.add",
+            &serde_json::json!({"pattern": "**/x", "action": "abort", "method": "GET"}),
+        );
+        assert!(abort.contains("route abort") && abort.contains("--method") && !abort.contains("--status"), "{abort}");
+        // A scroll of an element must not export as a scroll of the document.
+        let scroll = entry_to_cli_command("scroll", &serde_json::json!({"direction": "down", "selector": "#list"}));
+        assert!(scroll.contains("--target") && scroll.contains("#list"), "{scroll}");
+        let page = entry_to_cli_command("scroll", &serde_json::json!({"direction": "down", "amount": 40}));
+        assert_eq!(page, "tauri-hasgard scroll 'down' 40");
     }
 
     #[test]

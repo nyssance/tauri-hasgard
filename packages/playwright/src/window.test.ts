@@ -561,6 +561,25 @@ test("downloads are waited for and listed as the application reported them", asy
   await expect(application.waitForDownload()).rejects.toThrow(/download\.state/)
 })
 
+test("each event answers one waitForEvent", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const application = new HasgardApplication(rpc)
+  const first = { id: 4, timestamp: 1, event: "saved", payload: null }
+  const second = { id: 6, timestamp: 2, event: "saved", payload: null }
+
+  call.mockResolvedValueOnce({ listening: ["saved"] })
+  call.mockResolvedValueOnce({ events: [first], listening: ["saved"] })
+  expect(await application.waitForEvent("saved")).toEqual(first)
+  // The second wait starts after the event the first one returned, so the old one cannot satisfy it.
+  call.mockResolvedValueOnce({ listening: ["saved"] })
+  call.mockResolvedValueOnce({ events: [second], listening: ["saved"] })
+  expect(await application.waitForEvent("saved")).toEqual(second)
+
+  expect(call).toHaveBeenNthCalledWith(2, "event.list", { event: "saved", sinceId: 0 })
+  expect(call).toHaveBeenNthCalledWith(4, "event.list", { event: "saved", sinceId: 4 })
+})
+
 test("clipboard methods read and write the system clipboard's text", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")

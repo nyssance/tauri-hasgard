@@ -394,3 +394,10 @@ test("native dialogs are answered at the IPC boundary and everything else passes
   assert.throws(() => hasgard.handleNativeDialogs({ action: "close" }), /must be "accept", "dismiss" or "manual"/)
   assert.throws(() => hasgard.handleNativeDialogs({ action: "accept", paths: "/tmp/x" }), /array of non-empty strings/)
 })
+
+test("the native dialog policy is stored under a key the bridge treats as its own", () => {
+  // storage.clear and storage.list skip keys with this prefix; a key outside it would be
+  // wiped by a test clearing session storage, and the next document would open a real dialog.
+  const key = NATIVE_DIALOG_SRC.match(/const STATE_KEY = "([^"]+)"/)?.[1]
+  assert.ok(key?.startsWith("__hasgard__"), `native dialog state key is ${key}`)
+})

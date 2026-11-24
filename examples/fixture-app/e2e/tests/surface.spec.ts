@@ -836,6 +836,11 @@ test("native dialogs are answered in advance and recorded, and nothing else is i
   await window.locator("#native-ask").click()
   await expect(log).toHaveText('message:"Yes"')
 
+  // The policy is the bridge's own state: clearing the page's session storage must not take
+  // it, or the next document would open the real dialog.
+  await window.storage.clear({ session: true })
+  expect((await window.storage.list({ session: true })).entries).toEqual([])
+  expect((await window.nativeDialogs.list()).policy.action).toBe("accept")
   await window.nativeDialogs.dismiss()
   await window.locator("#native-save").click()
   await expect(log).toHaveText("save:null")
@@ -910,6 +915,7 @@ test("Tauri events reach the application and its own are recorded", async ({ has
   await hasgard.events.clear()
   expect(await hasgard.events.list()).toEqual([])
   await expect(hasgard.emit("not a name")).rejects.toThrow(/event names may contain only/)
+  await expect(hasgard.emit("fixture:ping", null, { window: "nowhere" })).rejects.toThrow(/no window or webview/)
 })
 
 test("a download is reported with the file it saved", async ({ hasgard }) => {
@@ -937,6 +943,10 @@ test("a download is reported with the file it saved", async ({ hasgard }) => {
     expect(basename(download.path ?? "")).toBe("hasgard-report.txt")
     expect(await readFile(download.path ?? "", "utf8")).toBe("hello hasgard")
     expect((await hasgard.downloads.list("downloads")).map((entry) => entry.id)).toEqual([download.id])
+    // That download answered its wait; a second wait is for the next one, and there is none.
+    await expect(hasgard.waitForDownload({ timeoutMs: 300, window: "downloads" })).rejects.toThrow(
+      /No download finished/
+    )
     // The other windows were not built with the observer and have no downloads of their own.
     expect(await hasgard.downloads.list("main")).toEqual([])
   } finally {

@@ -953,9 +953,8 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
         if method == "heap.snapshot" {
             return client.heap_snapshot(&view, &params);
         }
-        // Requests are paused only while something wants to answer them: a route, or a
-        // native dialog policy. Only the kinds the Wry bridge wraps are paused; documents
-        // and assets load untouched.
+        // Requests are paused only while a route wants to answer them. Only the kinds the
+        // Wry bridge wraps are paused; documents and assets load untouched.
         let intercept = |wanted: bool| -> Result<(), String> {
             let enabled = client.routes.lock().expect("CEF routes lock").send.is_some();
             if wanted && !enabled {

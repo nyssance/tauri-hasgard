@@ -355,35 +355,55 @@ test("a drag resolves its source and target inside the frame", () => {
   assert.deepEqual(outer.lane.dispatched, [])
 })
 
-test("a frame's screenshot area is the frame's box, and an element's is placed inside it", () => {
-  const pay = makeElement("pay", {
+test("a frame's screenshot area is the frame's content box, and an element's is clipped to it", () => {
+  const at = (x, y, width, height) => ({
     getBoundingClientRect() {
-      return { x: 12, y: 30, width: 80, height: 24 }
+      return { x, y, width, height }
     }
   })
+  const main = makeDocument()
   const hasgard = loadBridge({
-    frames: { "#pane": makeDocument({ "#pay": pay }) },
+    main,
+    frames: {
+      "#pane": makeDocument({
+        "#pay": makeElement("pay", at(12, 30, 80, 24)),
+        "#edge": makeElement("edge", at(250, 120, 100, 60)),
+        "#below": makeElement("below", at(0, 400, 50, 50))
+      })
+    },
     boxes: {
       "#pane": {
         clientLeft: 2,
         clientTop: 2,
-        clientWidth: 300,
-        clientHeight: 150,
+        // The client box includes the padding: 300x150 of content inside 10px on every side.
+        clientWidth: 320,
+        clientHeight: 170,
         getBoundingClientRect() {
-          return { x: 40, y: 500, width: 304, height: 154 }
+          return { x: 40, y: 500, width: 324, height: 174 }
         }
       }
     }
   })
   globalThis.window.scrollY = 100
+  main.defaultView = {
+    getComputedStyle: () => ({ paddingLeft: "10px", paddingTop: "10px", paddingRight: "10px", paddingBottom: "10px" })
+  }
 
-  assert.deepEqual(hasgard.screenshotArea({ frame: ["#pane"] }), { x: 42, y: 602, width: 300, height: 150 })
-  assert.deepEqual(hasgard.screenshotArea({ frame: ["#pane"], selector: "#pay" }), {
-    x: 54,
-    y: 632,
+  assert.deepEqual(hasgard.screenshotArea({ frame: ["#pane"] }), { x: 52, y: 612, width: 300, height: 150 })
+  assert.deepEqual(hasgard.screenshotArea({ frame: "#pane", selector: "#pay" }), {
+    x: 64,
+    y: 642,
     width: 80,
     height: 24
   })
+  // Half out of the frame on both axes: only the part the frame shows.
+  assert.deepEqual(hasgard.screenshotArea({ frame: ["#pane"], selector: "#edge" }), {
+    x: 302,
+    y: 732,
+    width: 50,
+    height: 30
+  })
+  assert.throws(() => hasgard.screenshotArea({ frame: ["#pane"], selector: "#below" }), /scrolled out of its frame/)
   assert.throws(() => hasgard.screenshotArea({ frame: ["#pane"], selector: "#absent" }), /Element not found/)
   assert.throws(() => hasgard.screenshotArea({ frame: ["#nowhere"] }), /No frame matches/)
 })

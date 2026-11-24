@@ -26,6 +26,8 @@ use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RPC_METHOD_NOT_FOU
 pub(crate) const METHODS: &[&str] = &["downloads.list", "downloads.wait", "downloads.setDirectory", "downloads.clear"];
 
 const MAX_DOWNLOADS: usize = 200;
+/// A wait holds a worker thread, so it is bounded.
+const MAX_WAIT_MS: u64 = 600_000;
 const WAIT_POLL: Duration = Duration::from_millis(25);
 
 struct Download {
@@ -36,18 +38,80 @@ struct Download {
     path: Option<PathBuf>,
     /// `None` while the download is in flight.
     succeeded: Option<bool>,
+    /// Its place among the downloads that have ended; 0 while in flight.
+    ended: u64,
+    /// Whether a `downloads.wait` has already answered with it.
+    reported: bool,
 }
 
 #[derive(Default)]
 struct Log {
     downloads: VecDeque<Download>,
     sequence: u64,
+    ended: u64,
     /// Where requested downloads are redirected, when a test asked for that.
     directory: Option<PathBuf>,
 }
 
+impl Log {
+    fn begin(&mut self, window: String, url: String, path: PathBuf) {
+        self.sequence += 1;
+        self.downloads.push_back(Download {
+            id: self.sequence,
+            timestamp: now_ms(),
+            window,
+            url,
+            path: Some(path),
+            succeeded: None,
+            ended: 0,
+            reported: false,
+        });
+        if self.downloads.len() > MAX_DOWNLOADS {
+            self.downloads.pop_front();
+        }
+    }
+
+    fn finish(&mut self, window: &str, url: &str, path: Option<PathBuf>, success: bool) {
+        let in_flight = |d: &Download| d.succeeded.is_none() && d.window == window && d.url == url;
+        // Two downloads of one address end in either order, and the path says which this is.
+        // Where the platform reports no path, the oldest still in flight is taken.
+        let position = path
+            .as_ref()
+            .and_then(|path| self.downloads.iter().position(|d| in_flight(d) && d.path.as_ref() == Some(path)))
+            .or_else(|| self.downloads.iter().position(in_flight));
+        let Some(position) = position else { return };
+        self.ended += 1;
+        let download = &mut self.downloads[position];
+        download.ended = self.ended;
+        download.succeeded = Some(success);
+        // Some platforms report no path at the end; the destination asked for stands then.
+        if path.is_some() {
+            download.path = path;
+        }
+    }
+
+    /// The first download to have ended that this wait should answer with. With `since` the
+    /// caller keeps its own place; without it each ended download is answered once, so a
+    /// second wait is not satisfied by the first one's file.
+    fn take_ended(&mut self, window: Option<&str>, since: Option<u64>) -> Option<Value> {
+        let download = self
+            .downloads
+            .iter_mut()
+            .filter(|d| d.succeeded.is_some() && window.is_none_or(|window| d.window == window))
+            .filter(|d| since.map_or(!d.reported, |since| d.id > since))
+            .min_by_key(|d| d.ended)?;
+        download.reported = true;
+        Some(describe(download))
+    }
+
+    /// Forget what has ended. One still in flight is kept: its end is yet to be seen.
+    fn clear(&mut self, window: Option<&str>) {
+        self.downloads.retain(|d| d.succeeded.is_none() || window.is_some_and(|window| d.window != window));
+    }
+}
+
 static OBSERVED: AtomicBool = AtomicBool::new(false);
-static LOG: Mutex<Log> = Mutex::new(Log { downloads: VecDeque::new(), sequence: 0, directory: None });
+static LOG: Mutex<Log> = Mutex::new(Log { downloads: VecDeque::new(), sequence: 0, ended: 0, directory: None });
 
 fn log() -> std::sync::MutexGuard<'static, Log> {
     LOG.lock().expect("download log")
@@ -87,36 +151,13 @@ where
                 if let (Some(directory), Some(name)) = (log.directory.clone(), destination.file_name()) {
                     *destination = directory.join(name);
                 }
-                log.sequence += 1;
-                let download = Download {
-                    id: log.sequence,
-                    timestamp: now_ms(),
-                    window,
-                    url: url.to_string(),
-                    path: Some(destination.clone()),
-                    succeeded: None,
-                };
-                log.downloads.push_back(download);
-                if log.downloads.len() > MAX_DOWNLOADS {
-                    log.downloads.pop_front();
-                }
+                log.begin(window, url.to_string(), destination.clone());
                 true
             }
             DownloadEvent::Finished { url, path, success } => {
                 let allowed =
                     handler(webview, DownloadEvent::Finished { url: url.clone(), path: path.clone(), success });
-                let mut log = log();
-                let address = url.to_string();
-                // The oldest one still in flight for this address is the one that just ended.
-                if let Some(download) = log.downloads.iter_mut().find(|download| {
-                    download.succeeded.is_none() && download.window == window && download.url == address
-                }) {
-                    download.succeeded = Some(success);
-                    // Some platforms report no path at the end; the destination asked for stands then.
-                    if path.is_some() {
-                        download.path = path;
-                    }
-                }
+                log().finish(&window, url.as_str(), path, success);
                 allowed
             }
             _ => handler(webview, event),
@@ -163,7 +204,7 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
                 "directory": log().directory,
             })),
             "downloads.clear" => {
-                log().downloads.clear();
+                log().clear(label);
                 Ok(json!({"cleared": true}))
             }
             "downloads.setDirectory" => {
@@ -191,28 +232,24 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
                 Ok(json!({"directory": directory}))
             }
             "downloads.wait" => {
-                let since = optional_u64(params, "sinceId", method)?.unwrap_or(0);
-                let timeout = Duration::from_millis(optional_u64(params, "timeout", method)?.unwrap_or(10_000));
-                let deadline = Instant::now() + timeout;
+                let since = optional_u64(params, "sinceId", method)?;
+                let timeout = optional_u64(params, "timeout", method)?.unwrap_or(10_000);
+                if timeout > MAX_WAIT_MS {
+                    return Err(invalid(format!(
+                        "downloads.wait: 'timeout' must be at most {MAX_WAIT_MS} milliseconds"
+                    )));
+                }
+                let deadline = Instant::now() + Duration::from_millis(timeout);
                 loop {
-                    {
-                        let log = log();
-                        let ended = log
-                            .downloads
-                            .iter()
-                            .filter(seen)
-                            .find(|download| download.id > since && download.succeeded.is_some());
-                        if let Some(download) = ended {
-                            return Ok(describe(download));
-                        }
+                    if let Some(download) = log().take_ended(label, since) {
+                        return Ok(download);
                     }
                     if Instant::now() >= deadline {
-                        let in_flight = log().downloads.iter().filter(seen).filter(|d| d.id > since).count();
+                        let in_flight = log().downloads.iter().filter(seen).filter(|d| d.succeeded.is_none()).count();
                         return Err(RpcError {
                             code: RPC_INTERNAL_ERROR,
                             message: format!(
-                                "No download finished within {} ms ({in_flight} started and still in flight)",
-                                timeout.as_millis()
+                                "No download finished within {timeout} ms ({in_flight} started and still in flight)"
                             ),
                             data: None,
                         });
@@ -227,4 +264,61 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
             }),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn started(log: &mut Log, window: &str, url: &str, file: &str) {
+        log.begin(window.to_owned(), url.to_owned(), PathBuf::from(file));
+    }
+
+    #[test]
+    fn a_finish_is_matched_by_path_when_two_downloads_share_an_address() {
+        let mut log = Log::default();
+        started(&mut log, "main", "https://x/report", "/d/report.csv");
+        started(&mut log, "main", "https://x/report", "/d/report (1).csv");
+        log.finish("main", "https://x/report", Some(PathBuf::from("/d/report (1).csv")), true);
+        let ended = log.take_ended(None, None).expect("the second ended");
+        assert_eq!(ended["id"], 2);
+        assert_eq!(ended["path"], "/d/report (1).csv");
+        assert!(log.take_ended(None, None).is_none(), "the first is still in flight");
+        // No path at the end: the oldest in flight is the one.
+        log.finish("main", "https://x/report", None, false);
+        let first = log.take_ended(None, None).expect("the first ended");
+        assert_eq!((first["id"].as_u64(), first["state"].as_str()), (Some(1), Some("failed")));
+    }
+
+    #[test]
+    fn each_ended_download_answers_one_wait_in_the_order_they_ended() {
+        let mut log = Log::default();
+        started(&mut log, "main", "https://x/a", "/d/a");
+        started(&mut log, "side", "https://x/b", "/d/b");
+        log.finish("side", "https://x/b", None, true);
+        log.finish("main", "https://x/a", None, true);
+        assert_eq!(log.take_ended(None, None).expect("b ended first")["id"], 2);
+        assert_eq!(log.take_ended(None, None).expect("then a")["id"], 1);
+        assert!(log.take_ended(None, None).is_none(), "neither answers a second wait");
+        // A caller that keeps its own place still sees them, by id.
+        assert_eq!(log.take_ended(None, Some(1)).expect("after id 1")["id"], 2);
+        assert!(log.take_ended(Some("main"), Some(1)).is_none(), "a window sees only its own");
+    }
+
+    #[test]
+    fn clear_forgets_one_window_and_keeps_what_is_in_flight() {
+        let mut log = Log::default();
+        started(&mut log, "main", "https://x/a", "/d/a");
+        started(&mut log, "side", "https://x/b", "/d/b");
+        started(&mut log, "main", "https://x/c", "/d/c");
+        log.finish("main", "https://x/a", None, true);
+        log.finish("side", "https://x/b", None, true);
+        log.clear(Some("main"));
+        let left: Vec<u64> = log.downloads.iter().map(|d| d.id).collect();
+        assert_eq!(left, [2, 3], "main's ended one is gone; side's and the one in flight stay");
+        log.finish("main", "https://x/c", None, true);
+        assert_eq!(log.take_ended(Some("main"), None).expect("it ended after the clear")["id"], 3);
+        log.clear(None);
+        assert!(log.downloads.is_empty());
+    }
 }

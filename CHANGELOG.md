@@ -1,5 +1,14 @@
 # Unreleased
 
+- The native dialog policy is now kept under a session key the bridge treats as its own, so `storage.clear` and `storage.list` leave it alone and it survives to the next document.
+- `downloads.wait` answers with each ended download once, in the order they ended; a second wait is no longer satisfied by the first one's file. A finish is matched to its download by path when two share an address. `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
+- Playwright `waitForEvent` resolves with each event once: a second call waits for the next one.
+- `event.emit` rejects a `window` that names no window or webview instead of reporting an event delivered to no one.
+- Replaying a recording with `--window` no longer narrows an event that was recorded as a broadcast.
+- Shell export of a recording keeps a route's `method`, `times` and content type, and a scroll's target.
+- A scenario's `set-input-files` requires `files`; leaving it out used to clear the input.
+- A frame's snapshot baseline is the same whether the frame is named as one selector or a list of one.
+- A frame capture from composited pixels uses the frame's content box, without its padding, and an element capture is clipped to what the frame shows.
 - Fix a native `press` that timed out when the release of a modifier pressed just before it arrived during its own observation: a `keyup` for a key the press never saw go down is no longer counted.
 - The bridge rejects a `depth`, `amount`, `poll` or `stable` of the wrong type instead of using the default, and `scroll` with `amount: 0` scrolls nothing rather than the default distance.
 

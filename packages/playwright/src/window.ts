@@ -455,18 +455,27 @@ export class HasgardApplication {
     }
   }
 
+  /** The last event of each name that `waitForEvent` resolved with. */
+  private readonly eventCursor = new Map<string, number>()
+
   /**
    * Wait for the application to emit `event` and resolve with it. Recording
    * starts here, so call this before the action that causes the event and await
-   * it afterwards; `sinceId` skips events already seen.
+   * it afterwards. Each event answers one wait: a second call resolves with the
+   * next one emitted, not the one the first call returned. `sinceId` sets the
+   * place to wait from instead.
    */
   async waitForEvent(event: string, options: { timeoutMs?: number; sinceId?: number } = {}): Promise<RecordedEvent> {
     const timeoutMs = options.timeoutMs ?? 5_000
     await this.events.listen(event)
     const deadline = Date.now() + timeoutMs
     for (let attempt = 0; Date.now() <= deadline; attempt++) {
-      const [first] = await this.events.list({ event, sinceId: options.sinceId ?? 0 })
-      if (first) return first
+      const sinceId = options.sinceId ?? this.eventCursor.get(event) ?? 0
+      const [first] = await this.events.list({ event, sinceId })
+      if (first) {
+        this.eventCursor.set(event, Math.max(first.id, this.eventCursor.get(event) ?? 0))
+        return first
+      }
       await sleep(pollDelay(attempt, deadline) || 1)
     }
     throw new Error(`The application did not emit "${event}" within ${timeoutMs}ms`)
@@ -493,8 +502,9 @@ export class HasgardApplication {
   }
 
   /**
-   * Wait for a download to finish and resolve with it. Pass the id of the last
-   * download already seen as `sinceId` to wait for a new one.
+   * Wait for a download to finish and resolve with it. Each finished download
+   * answers one wait, in the order they finished, so a second call resolves with
+   * the next file. `sinceId` waits for one started after that id instead.
    */
   async waitForDownload(options: { timeoutMs?: number; sinceId?: number; window?: string } = {}): Promise<Download> {
     const params: Record<string, JsonValue> = {}

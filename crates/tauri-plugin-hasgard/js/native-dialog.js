@@ -19,7 +19,8 @@
   const NATIVE_DIALOG_PREFIX = "plugin:dialog|"
   const NATIVE_DIALOG_KINDS = ["open", "save", "message"]
   // Kept with the tab so the policy holds across a navigation within one origin.
-  const STATE_KEY = "__hasgard_native_dialogs__"
+  // The bridge hides and preserves every session key that starts with `__hasgard__`.
+  const STATE_KEY = "__hasgard__native_dialogs"
   const MAX_LOGS = 500
   const _nativeDialogs = []
   let _nativeDialogIdCounter = 0

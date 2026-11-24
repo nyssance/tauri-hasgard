@@ -50,6 +50,11 @@ fn now_ms() -> u64 {
         .map_or(0, |elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
 }
 
+fn names_a_target<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, label: &str) -> bool {
+    use tauri::Manager;
+    handle.get_webview(label).is_some() || handle.get_window(label).is_some()
+}
+
 pub(crate) fn make_event_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> crate::eval::NativeFn {
     let handle = app.clone();
     let recorded = Arc::new(Mutex::new(Recorded::default()));
@@ -60,6 +65,10 @@ pub(crate) fn make_event_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> cra
                 let payload = params.get("payload").cloned().unwrap_or(Value::Null);
                 // Naming a window delivers to that window only; otherwise every listener hears it.
                 let sent = match label {
+                    // Tauri delivers to no one, and reports success, when nothing carries the label.
+                    Some(label) if !names_a_target(&handle, label) => {
+                        return Err(invalid(format!("{method}: no window or webview is labelled {label:?}")));
+                    }
                     Some(label) => handle.emit_to(label, name, payload),
                     None => handle.emit(name, payload),
                 };

@@ -2311,16 +2311,32 @@
         const inner = frameDocument(chain.slice(0, depth + 1))
         const host = doc.querySelector(chain[depth])
         const rect = host.getBoundingClientRect()
-        x += rect.x + host.clientLeft
-        y += rect.y + host.clientTop
-        box = { x, y, width: host.clientWidth, height: host.clientHeight }
+        // The frame's document starts inside its border and its padding.
+        const style = doc.defaultView.getComputedStyle(host)
+        const pad = (side) => Number.parseFloat(style[`padding${side}`]) || 0
+        x += rect.x + host.clientLeft + pad("Left")
+        y += rect.y + host.clientTop + pad("Top")
+        box = {
+          x,
+          y,
+          width: host.clientWidth - pad("Left") - pad("Right"),
+          height: host.clientHeight - pad("Top") - pad("Bottom")
+        }
         doc = inner
       }
       if (!selector) return box
       const el = doc.querySelector(selector)
       if (!el) throw new Error(`Element not found: ${selector}`)
       const rect = el.getBoundingClientRect()
-      return { x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height }
+      // What lies outside the frame's box is not shown, and the pixels there belong to the page.
+      const left = Math.max(x + rect.x, box.x)
+      const top = Math.max(y + rect.y, box.y)
+      const right = Math.min(x + rect.x + rect.width, box.x + box.width)
+      const bottom = Math.min(y + rect.y + rect.height, box.y + box.height)
+      if (right <= left || bottom <= top) {
+        throw new Error(`Element is scrolled out of its frame: ${selector}; scroll it into view first`)
+      }
+      return { x: left, y: top, width: right - left, height: bottom - top }
     }
     if (!selector) {
       const el = document.documentElement

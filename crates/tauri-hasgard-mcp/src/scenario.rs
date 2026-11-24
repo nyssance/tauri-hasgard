@@ -174,8 +174,12 @@ pub fn parse_scenario(content: &str) -> Result<Scenario> {
 
 fn validate_step(step: &Step) -> Result<()> {
     let required: &[(&str, Option<&str>)] = match step.action.as_str() {
-        "click" | "dblclick" | "hover" | "focus" | "blur" | "set-input-files" | "assert-exists" | "assert-visible"
-        | "assert-hidden" => &[("target", step.target.as_deref())],
+        "click" | "dblclick" | "hover" | "focus" | "blur" | "assert-exists" | "assert-visible" | "assert-hidden" => {
+            &[("target", step.target.as_deref())]
+        }
+        // An empty list clears the input, so the list has to be stated.
+        "set-input-files" if step.files.is_none() => &[("target", step.target.as_deref()), ("files", None)],
+        "set-input-files" => &[("target", step.target.as_deref())],
         "select" if step.values.is_some() => &[("target", step.target.as_deref())],
         "fill" | "select" => &[("target", step.target.as_deref()), ("value", step.value.as_deref())],
         "drag" => &[("target", step.target.as_deref()), ("to", step.to.as_deref())],
@@ -317,7 +321,7 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             client.call("drag", with_scope(Some(p), Scope { window, ..Scope::default() })).await
         }
         "set-input-files" => {
-            let files = step.files.clone().unwrap_or_default();
+            let files = step.files.clone().ok_or_else(|| anyhow::anyhow!("set-input-files requires 'files'"))?;
             crate::support::run_set_input_files_command(
                 client,
                 require_target(step)?,
@@ -727,6 +731,9 @@ mod tests {
         }
         assert!(super::parse_scenario("[[step]]\naction='fill'\ntarget='#x'\nvalue=''").is_ok());
         assert!(super::parse_scenario("[[step]]\naction='wait'\ntimout_ms=1").is_err());
+        // Leaving the list out would clear the input; clearing has to be asked for.
+        assert!(super::parse_scenario("[[step]]\naction='set-input-files'\ntarget='#f'").is_err());
+        assert!(super::parse_scenario("[[step]]\naction='set-input-files'\ntarget='#f'\nfiles=[]").is_ok());
     }
 
     use super::*;
