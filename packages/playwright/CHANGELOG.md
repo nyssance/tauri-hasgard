@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3 — 2026-11-24
+
+- No client changes; released with plugin 0.8.3.
+
 ## 0.8.2 — 2026-11-24
 
 - Add `hasgard.waitForDownload` and `hasgard.downloads` (`list`, `setDirectory`, `clear`). The app passes Hasgard's observer to `on_download`.

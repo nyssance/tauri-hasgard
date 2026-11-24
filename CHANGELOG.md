@@ -1,4 +1,4 @@
-# Unreleased
+# 0.8.3 (2026-11-24)
 
 - `wait` and `watch` reject a `timeout` that is not a whole number instead of using the default.
 - A recording exported as CLI commands names the field an entry lacks instead of emitting a command without it, and a multiple selection exports every value.
