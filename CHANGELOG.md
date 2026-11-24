@@ -1,5 +1,6 @@
 # Unreleased
 
+- Add Tauri events: `event.emit` delivers an event to the application as its backend would, and `event.listen`, `event.list`, `event.unlisten` and `event.clear` record the events it emits. CLI `event`, the MCP `event` tool, and Playwright `hasgard.emit`, `hasgard.events` and `hasgard.waitForEvent`.
 - Add `visible`, `checked` and `count` to the CLI and as MCP tools: answers, where the `assert_*` forms fail. `scroll` takes `--target` (CLI) or `target` (MCP) as well as a ref.
 - `select` takes several values for a `<select multiple>`: `values` in the protocol and MCP, repeated values in the CLI, an array in Playwright `selectOption`. An empty list clears the selection.
 - Playwright `locator.waitFor` accepts `visible` and `hidden` as well as `attached` and `detached`.

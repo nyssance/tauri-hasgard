@@ -515,6 +515,31 @@ test("nativeDialogs sets the policy for native dialogs and lists what was answer
   await expect(window.nativeDialogs.dismiss()).rejects.toThrow(/policy\.action/)
 })
 
+test("events are emitted to the application and read back from what it emitted", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const application = new HasgardApplication(rpc)
+  const recorded = { id: 3, timestamp: 9, event: "saved", payload: { id: 7 } }
+
+  call.mockResolvedValueOnce({ emitted: "ping" })
+  await application.emit("ping", { n: 1 }, { window: "settings" })
+  call.mockResolvedValueOnce({ emitted: "ping" })
+  await application.emit("ping")
+  // waitForEvent: listen, an empty read, then the event.
+  call.mockResolvedValueOnce({ listening: ["saved"] })
+  call.mockResolvedValueOnce({ events: [], listening: ["saved"] })
+  call.mockResolvedValueOnce({ events: [recorded], listening: ["saved"] })
+  expect(await application.waitForEvent("saved", { timeoutMs: 2_000, sinceId: 2 })).toEqual(recorded)
+
+  expect(call).toHaveBeenNthCalledWith(1, "event.emit", { event: "ping", payload: { n: 1 }, window: "settings" })
+  expect(call).toHaveBeenNthCalledWith(2, "event.emit", { event: "ping", payload: null })
+  expect(call).toHaveBeenNthCalledWith(3, "event.listen", { event: "saved" })
+  expect(call).toHaveBeenNthCalledWith(4, "event.list", { event: "saved", sinceId: 2 })
+
+  call.mockResolvedValue({ events: [], listening: [] })
+  await expect(application.waitForEvent("never", { timeoutMs: 30 })).rejects.toThrow(/did not emit "never"/)
+})
+
 test("clipboard methods read and write the system clipboard's text", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")

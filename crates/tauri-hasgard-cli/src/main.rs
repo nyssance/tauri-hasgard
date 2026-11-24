@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cli::{
-    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, FormsArgs, NativeDialogCommand,
-    RecordAction, RouteCommand, StorageAction, StorageArgs, WindowCommand,
+    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, EventCommand, FormsArgs,
+    NativeDialogCommand, RecordAction, RouteCommand, StorageAction, StorageArgs, WindowCommand,
 };
 #[cfg(test)]
 use tauri_hasgard_mcp::support::{export_shell_script, mime_from_ext};
@@ -639,6 +639,33 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
                 NativeDialogCommand::Clear => ("nativeDialog.clear", None),
             };
             client.call(method, with_scope(params, Scope { window: scope.window, ..Scope::default() })).await
+        }
+        Command::Event(action) => {
+            let (method, params) = match action {
+                EventCommand::Emit { event, payload } => {
+                    let payload = match payload {
+                        Some(raw) => serde_json::from_str::<Value>(&raw).context("--payload must be JSON")?,
+                        None => Value::Null,
+                    };
+                    ("event.emit", json!({"event": event, "payload": payload}))
+                }
+                EventCommand::Listen { event } => ("event.listen", json!({"event": event})),
+                EventCommand::Unlisten { event } => ("event.unlisten", json!({"event": event})),
+                EventCommand::List { event, since_id } => {
+                    let mut params = json!({});
+                    if let Some(event) = event {
+                        params["event"] = json!(event);
+                    }
+                    if let Some(since_id) = since_id {
+                        params["sinceId"] = json!(since_id);
+                    }
+                    ("event.list", params)
+                }
+                EventCommand::Clear => ("event.clear", json!({})),
+            };
+            // Only `emit` is scoped by a window: it then reaches that window alone.
+            let window = if method == "event.emit" { scope.window } else { None };
+            client.call(method, with_scope(Some(params), Scope { window, ..Scope::default() })).await
         }
         Command::Clipboard(ClipboardCommand::Read) => client.call("clipboard.read", None).await,
         Command::Clipboard(ClipboardCommand::Write { text }) => {

@@ -346,6 +346,14 @@ export interface WaitForFunctionOptions {
   pollMs?: number
 }
 
+/** A Tauri event the application emitted while it was being recorded. */
+export interface RecordedEvent {
+  id: number
+  timestamp: number
+  event: string
+  payload: JsonValue
+}
+
 export type CookieSameSite = "Strict" | "Lax" | "None"
 
 /** A cookie in the webview's store. `expires` is seconds since the Unix epoch, null for a session cookie. */

@@ -164,6 +164,9 @@ pub(crate) enum Command {
     /// Answer the dialog plugin's native dialogs (open, save, message) in advance.
     #[command(subcommand)]
     NativeDialog(NativeDialogCommand),
+    /// Emit a Tauri event to the application, or record the events it emits.
+    #[command(subcommand)]
+    Event(EventCommand),
     /// Read or write the system clipboard's text.
     #[command(subcommand)]
     Clipboard(ClipboardCommand),
@@ -499,6 +502,31 @@ pub(crate) enum NativeDialogCommand {
     /// Show the native dialogs answered so far, and the current policy.
     List,
     /// Forget the recorded native dialogs, leaving the policy alone.
+    Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum EventCommand {
+    /// Emit an event. With --window it reaches that window only; otherwise every listener.
+    Emit {
+        event: String,
+        /// The payload, as JSON. Null when omitted.
+        #[arg(long)]
+        payload: Option<String>,
+    },
+    /// Start recording an event the application emits.
+    Listen { event: String },
+    /// Stop recording an event. What was recorded stays until cleared.
+    Unlisten { event: String },
+    /// Show the recorded events, oldest first.
+    List {
+        #[arg(long)]
+        event: Option<String>,
+        /// Only events recorded after this one.
+        #[arg(long)]
+        since_id: Option<u64>,
+    },
+    /// Forget the recorded events, leaving the listeners in place.
     Clear,
 }
 

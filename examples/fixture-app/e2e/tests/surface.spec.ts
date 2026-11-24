@@ -884,3 +884,26 @@ test("routes and the dialog policy hold across a navigation", async ({ hasgard }
     await settings.waitForURL(/settings\.html$/, { waitUntil: "load", timeoutMs: 10_000 })
   }
 })
+
+test("Tauri events reach the application and its own are recorded", async ({ hasgard, window }) => {
+  await hasgard.events.clear()
+  // To the application: its listener receives the payload as if the backend had sent it.
+  await hasgard.emit("fixture:ping", { from: "test", n: 1 })
+  await expect(window.locator("#event-log")).toHaveText('ping:{"from":"test","n":1}')
+
+  // From the application: recorded from the moment the wait begins.
+  const saved = hasgard.waitForEvent("fixture:saved", { timeoutMs: 5_000 })
+  await hasgard.events.listen("fixture:saved")
+  await window.locator("#emit-saved").click()
+  expect(await saved).toMatchObject({ event: "fixture:saved", payload: { id: 7 } })
+
+  await window.locator("#emit-saved").click()
+  await expect.poll(async () => (await hasgard.events.list({ event: "fixture:saved" })).length).toBe(2)
+  const [first, second] = await hasgard.events.list({ event: "fixture:saved" })
+  expect(await hasgard.events.list({ sinceId: first.id })).toEqual([second])
+
+  await hasgard.events.unlisten("fixture:saved")
+  await hasgard.events.clear()
+  expect(await hasgard.events.list()).toEqual([])
+  await expect(hasgard.emit("not a name")).rejects.toThrow(/event names may contain only/)
+})

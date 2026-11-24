@@ -42,6 +42,7 @@ import type {
   NetworkRequestOptions,
   PressOptions,
   QueryDimension,
+  RecordedEvent,
   RecorderEntry,
   RecorderResult,
   RecorderStatus,
@@ -398,6 +399,60 @@ export class HasgardApplication {
       status: expectString(value.status, "ping.status"),
       plugin_version: expectString(value.plugin_version, "ping.plugin_version")
     }
+  }
+
+  /**
+   * Emit a Tauri event to the application, as its backend would. Naming a
+   * window delivers it to that window only; otherwise every listener hears it.
+   */
+  async emit(event: string, payload: JsonValue = null, options: { window?: string } = {}): Promise<void> {
+    const params: Record<string, JsonValue> = { event, payload }
+    if (options.window !== undefined) params.window = options.window
+    await this.rpc.call("event.emit", params)
+  }
+
+  /** The Tauri events the application emits: record them, then read what was recorded. */
+  readonly events = {
+    /** Start recording `event`. Emissions before this call are not seen. */
+    listen: async (event: string): Promise<void> => {
+      await this.rpc.call("event.listen", { event })
+    },
+    unlisten: async (event: string): Promise<void> => {
+      await this.rpc.call("event.unlisten", { event })
+    },
+    /** Recorded events, oldest first, optionally one name and only those after `sinceId`. */
+    list: async (filter: { event?: string; sinceId?: number } = {}): Promise<RecordedEvent[]> => {
+      const value = expectRecord(await this.rpc.call("event.list", { ...filter }), "event.list result")
+      return expectArray(value.events, "event.list.events").map((entry, index) => {
+        const event = expectRecord(entry, `events[${index}]`)
+        return {
+          id: expectNumber(event.id, `events[${index}].id`),
+          timestamp: expectNumber(event.timestamp, `events[${index}].timestamp`),
+          event: expectString(event.event, `events[${index}].event`),
+          payload: event.payload as JsonValue
+        }
+      })
+    },
+    clear: async (): Promise<void> => {
+      await this.rpc.call("event.clear")
+    }
+  }
+
+  /**
+   * Wait for the application to emit `event` and resolve with it. Recording
+   * starts here, so call this before the action that causes the event and await
+   * it afterwards; `sinceId` skips events already seen.
+   */
+  async waitForEvent(event: string, options: { timeoutMs?: number; sinceId?: number } = {}): Promise<RecordedEvent> {
+    const timeoutMs = options.timeoutMs ?? 5_000
+    await this.events.listen(event)
+    const deadline = Date.now() + timeoutMs
+    for (let attempt = 0; Date.now() <= deadline; attempt++) {
+      const [first] = await this.events.list({ event, sinceId: options.sinceId ?? 0 })
+      if (first) return first
+      await sleep(pollDelay(attempt, deadline) || 1)
+    }
+    throw new Error(`The application did not emit "${event}" within ${timeoutMs}ms`)
   }
 
   /** The system clipboard's text, or null when it holds none. */

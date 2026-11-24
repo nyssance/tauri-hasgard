@@ -76,6 +76,7 @@ An element target takes one of three forms:
 | Storage   | `storage.get`, `storage.set`, `storage.list`, `storage.clear`                                        |
 | Cookies   | `cookies.get`, `cookies.set`, `cookies.clear` |
 | Clipboard | `clipboard.read`, `clipboard.write` |
+| Events    | `event.emit`, `event.listen`, `event.unlisten`, `event.list`, `event.clear` |
 | Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
@@ -85,6 +86,8 @@ Parameters match the CLI options; `tauri-hasgard <command> --help` documents eac
 `nativeDialog.*` answer the dialog plugin's `open`, `save` and `message` commands in advance, because nothing can click an operating-system dialog reliably. `nativeDialog.handle` takes `action`: `accept` (with `paths` for open and save, and optionally `button`, a message dialog's label), `dismiss` (open and save return `null`; a message dialog returns its last button), or `manual`, the default, which leaves the dialogs on screen. `nativeDialog.list` answers `{ dialogs, policy }`, each dialog with its `kind`, `title`, options and the `result` the application received. Only these three commands are answered; every other command reaches the application's backend. A real dialog also grants file access to the path it returns and an answered one does not, so the path must already be allowed by the application's permissions. Available on Wry and CEF.
 
 Routes and dialog policies are standing state. On CEF they belong to the webview's browser and survive any navigation. On Wry they are handed from one document to the next through the tab's session storage, so they hold across navigation within one origin and are lost when the webview moves to another; the entries (their keys start with `__hasgard__`) exist only while a rule or a non-default policy does. The native dialog policy is kept this way on both backends. Console and network logs describe the current document on Wry and persist on CEF.
+
+`event.*` are Tauri events. `event.emit` takes `event` and `payload` and delivers it as the application's backend would: to every listener, or with `window` to that window only. `event.listen` starts recording an event the application emits and `event.unlisten` stops; `event.list` answers `{ events, listening }`, each event with `id`, `timestamp`, `event` and `payload`, optionally filtered by `event` and `sinceId`. Up to 500 events are kept. Event names follow Tauri's rule: letters, digits, `-`, `/`, `:` and `_`.
 
 `clipboard.read` answers `{ text }` with the system clipboard's text, or `null` when it holds none; `clipboard.write` takes `text`. The clipboard is shared with whoever uses the machine.
 

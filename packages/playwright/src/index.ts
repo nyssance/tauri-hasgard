@@ -66,6 +66,7 @@ export type {
   NativeDialogPolicy,
   NativeDialogRecord,
   NativeWindowState,
+  RecordedEvent,
   WaitForFunctionOptions,
   WaitForURLOptions,
   WaitOptions,

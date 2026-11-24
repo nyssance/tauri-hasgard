@@ -367,6 +367,37 @@ impl HasgardMcpServer {
                 };
                 self.call_app_tool(method, params, window).await
             }
+            "event" => {
+                let action = required_string(&args, "action")?;
+                let mut params = json!({});
+                if let Some(event) = optional_string(&args, "event")? {
+                    params["event"] = json!(event);
+                }
+                let method = match action.as_str() {
+                    "emit" => {
+                        params["payload"] = args.get("payload").cloned().unwrap_or(Value::Null);
+                        "event.emit"
+                    }
+                    "listen" => "event.listen",
+                    "unlisten" => "event.unlisten",
+                    "list" => {
+                        if let Some(since) = optional_u64(&args, "since_id")? {
+                            params["sinceId"] = json!(since);
+                        }
+                        "event.list"
+                    }
+                    "clear" => "event.clear",
+                    other => {
+                        return Err(invalid_params(format!(
+                            "unknown event action: {other}; expected emit, listen, unlisten, list or clear"
+                        )));
+                    }
+                };
+                // Only `emit` is scoped by a window: it then reaches that window alone,
+                // and only when the caller names one.
+                let target = if method == "event.emit" { optional_string(&args, "window")? } else { None };
+                self.call_app_tool(method, Some(params), target).await
+            }
             "clipboard" => match required_string(&args, "action")?.as_str() {
                 "read" => self.call_app_tool("clipboard.read", None, None).await,
                 "write" => {
@@ -1087,6 +1118,15 @@ fn tool_specs() -> Vec<ToolSpec> {
             read_only: false,
             destructive: false,
             idempotent: true,
+        },
+        ToolSpec {
+            name: "event",
+            description: "Tauri events. emit delivers one to the application, as its backend would; listen starts \
+                          recording an event the application emits, and list shows what was recorded.",
+            schema: event_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: false,
         },
         ToolSpec {
             name: "clipboard",
@@ -2149,6 +2189,18 @@ fn native_dialog_schema() -> Arc<JsonObject> {
     )
 }
 
+fn event_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("action", enum_prop("What to do.", &["emit", "listen", "unlisten", "list", "clear"])),
+            ("event", string_prop("Event name. Required for emit, listen and unlisten; a filter for list.")),
+            ("payload", json!({"description": "For emit: the payload, any JSON value."})),
+            ("since_id", integer_prop("For list: only events recorded after this id.")),
+        ]),
+        &["action"],
+    )
+}
+
 fn clipboard_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2604,6 +2656,7 @@ mod tests {
             "drag",
             "drop",
             "eval",
+            "event",
             "fill",
             "focus",
             "forms",

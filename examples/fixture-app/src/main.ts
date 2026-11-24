@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { emit, listen } from "@tauri-apps/api/event"
 
 const displayName = document.querySelector<HTMLInputElement>("#display-name")
 const save = document.querySelector<HTMLButtonElement>("#save")
@@ -91,6 +92,14 @@ const uploads = probe<HTMLInputElement>("#uploads")
 const uploadsLog = probe<HTMLParagraphElement>("#uploads-log")
 uploads.addEventListener("change", () => {
   uploadsLog.textContent = describeFiles(uploads)
+})
+
+const eventLog = probe<HTMLParagraphElement>("#event-log")
+void listen<unknown>("fixture:ping", (event) => {
+  eventLog.textContent = `ping:${JSON.stringify(event.payload)}`
+})
+probe<HTMLButtonElement>("#emit-saved").addEventListener("click", () => {
+  void emit("fixture:saved", { id: 7 }).catch(reportError)
 })
 
 const nativeLog = probe<HTMLParagraphElement>("#native-log")

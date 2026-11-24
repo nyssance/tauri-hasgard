@@ -160,7 +160,10 @@ pub(crate) async fn dispatch(
                 .map_err(|message| RpcError { code: -32603, message, data: None })
         }
         method
-            if method.starts_with("window.") || method.starts_with("cookies.") || method.starts_with("clipboard.") =>
+            if method.starts_with("window.")
+                || method.starts_with("cookies.")
+                || method.starts_with("clipboard.")
+                || method.starts_with("event.") =>
         {
             let control = engine
                 .native
