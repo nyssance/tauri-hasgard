@@ -280,6 +280,13 @@ pub(crate) enum Command {
         poll: Option<u64>,
         #[arg(long)]
         gone: bool,
+        /// Wait until the window is at a URL. A glob: `*` stays within a path
+        /// segment, `**` crosses them. Holds across the navigation that gets there.
+        #[arg(long, conflicts_with_all = ["target", "selector", "expression", "gone"])]
+        url: Option<String>,
+        /// Wait for the document to reach a load state. Combines with --url.
+        #[arg(long, value_parser = ["load", "domcontentloaded"], conflicts_with_all = ["target", "selector", "expression", "gone"])]
+        load: Option<String>,
         #[arg(long, default_value = "10000")]
         timeout: u64,
     },

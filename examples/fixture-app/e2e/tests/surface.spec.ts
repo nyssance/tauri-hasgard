@@ -721,3 +721,18 @@ test("role assertions cover value, state and count without a snapshot per poll",
   await expect(window.locator("[data-turn]")).toHaveCount(80)
   await expect(window.locator("#status")).not.toContainText("never")
 })
+
+test("waitForURL holds across the navigation that reaches it", async ({ hasgard }) => {
+  const settings = await hasgard.waitForWindow("settings", 5_000)
+  // Registered first: the wait is answered by whichever document is current, not by the one it started in.
+  const reached = settings.waitForURL("**/embedded.html", { waitUntil: "load", timeoutMs: 10_000 })
+  await settings.navigate("embedded.html")
+  await reached
+  expect(await settings.url()).toMatch(/embedded\.html$/)
+
+  await expect(settings.waitForURL("**/never.html", { timeoutMs: 300 })).rejects.toThrow(/Timeout waiting/)
+
+  await settings.navigate("settings.html")
+  await settings.waitForURL(/settings\.html$/, { timeoutMs: 10_000 })
+  await settings.waitForLoadState("load")
+})

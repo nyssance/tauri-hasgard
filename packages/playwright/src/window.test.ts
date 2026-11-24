@@ -476,6 +476,22 @@ test("waitForFunction returns the predicate's own value and forwards the poll in
   })
 })
 
+test("waitForURL sends a glob as is and a RegExp as its source and flags", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, url: "app://x/home", readyState: "complete" })
+  const window = new HasgardWindow(rpc, "main")
+
+  await window.waitForURL("**/home", { waitUntil: "load", timeoutMs: 2_000 })
+  await window.waitForURL(/\/HOME$/i)
+  await window.waitForLoadState()
+  await window.waitForLoadState("domcontentloaded", { timeoutMs: 500 })
+
+  expect(call).toHaveBeenNthCalledWith(1, "wait", { url: "**/home", load: "load", timeout: 2_000, window: "main" })
+  expect(call).toHaveBeenNthCalledWith(2, "wait", { url: { source: "\\/HOME$", flags: "i" }, window: "main" })
+  expect(call).toHaveBeenNthCalledWith(3, "wait", { load: "load", window: "main" })
+  expect(call).toHaveBeenNthCalledWith(4, "wait", { load: "domcontentloaded", timeout: 500, window: "main" })
+})
+
 test("waitForFunction omits timing options so the bridge keeps its own defaults", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, value: true })

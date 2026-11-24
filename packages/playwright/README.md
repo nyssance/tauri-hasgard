@@ -96,6 +96,7 @@ await window.press("Tab", {
 })
 ```
 
+- After an action that navigates, `await window.waitForURL("**/home")` or `waitForLoadState()`; both hold across the navigation.
 - Use `fill` for exact text. `press` sends native input through the active input method.
 - For shortcuts that close or navigate a document, use `press(key, { completion: "native" })`; it confirms posting only. Do not blindly retry a key that may already have been injected.
 - CSS locators use the live selector. Role locators take a fresh accessibility snapshot and require exactly one match for an action.

@@ -213,6 +213,9 @@ pub(crate) async fn dispatch(
         // `wait` and `watch` both honor a JS-side `options.timeout`; the Rust
         // channel timeout must outlive that so the bridge can surface its own
         // rejection (issue #91).
+        "wait" if params.is_some_and(|p| p.get("url").is_some() || p.get("load").is_some()) => {
+            handle_wait_location(params, engine, eval_fn, win).await
+        }
         "wait" | "watch" => handle_eval_method(method, params, engine, eval_fn, win, bridge_eval_timeout(params)).await,
         // The bare `screenshot` JSON-RPC method returns a base64 PNG data URL
         // of the document or of one element; native window
@@ -663,6 +666,70 @@ fn injection_error(error: &crate::server::InjectionError) -> RpcError {
 }
 
 /// Handle a method that requires JS evaluation via the bridge.
+/// How often a location wait asks the current document where it is.
+const LOCATION_POLL: Duration = Duration::from_millis(50);
+
+/// `wait` for a URL, a load state, or both.
+///
+/// A navigation replaces the document, and with it any wait running inside the
+/// page, so this one is held here: each poll asks whichever document is current.
+/// An answer that fails while a navigation is under way is expected and retried
+/// until the deadline; invalid parameters fail at once.
+async fn handle_wait_location(
+    params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>, window: Option<&str>,
+) -> Result<serde_json::Value, RpcError> {
+    let invalid = |message: String| RpcError { code: -32602, message, data: None };
+    let params = params.expect("the caller matched on a present url or load");
+    for other in ["selector", "ref", "expression", "gone", "poll"] {
+        if params.get(other).is_some_and(|value| !value.is_null() && value != &serde_json::Value::Bool(false)) {
+            return Err(invalid(format!("wait: 'url' and 'load' cannot be combined with '{other}'")));
+        }
+    }
+    let mut query = serde_json::Map::new();
+    if let Some(url) = params.get("url").filter(|value| !value.is_null()) {
+        let pattern = url.get("source").is_some_and(serde_json::Value::is_string)
+            && url.get("flags").is_some_and(serde_json::Value::is_string);
+        if !(url.is_string() || pattern) {
+            return Err(invalid("wait: 'url' must be a glob string or a { source, flags } pattern".to_owned()));
+        }
+        query.insert("url".to_owned(), url.clone());
+    }
+    if let Some(load) = params.get("load").filter(|value| !value.is_null()) {
+        if !matches!(load.as_str(), Some("load" | "domcontentloaded")) {
+            return Err(invalid("wait: 'load' must be \"load\" or \"domcontentloaded\"".to_owned()));
+        }
+        query.insert("load".to_owned(), load.clone());
+    }
+    if query.is_empty() {
+        return Err(invalid("wait: 'url' or 'load' must not be null".to_owned()));
+    }
+    let query = serde_json::Value::Object(query);
+    let timeout = Duration::from_millis(
+        params.get("timeout").and_then(serde_json::Value::as_u64).unwrap_or(DEFAULT_BRIDGE_TIMEOUT_MS),
+    );
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        // One answer never waits past the caller's deadline, however long the document takes.
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let answer = remaining.clamp(LOCATION_POLL, DEFAULT_TIMEOUT);
+        let last = match handle_eval_method("locationState", Some(&query), engine, eval_fn, window, answer).await {
+            Ok(state) if state["matched"] == true => {
+                return Ok(serde_json::json!({
+                    "found": true, "url": state["url"], "readyState": state["readyState"]
+                }));
+            }
+            Ok(state) => format!("at {} ({})", state["url"], state["readyState"]),
+            // A pattern the engine rejects will never match; say so now.
+            Err(error) if error.message.contains("Invalid regular expression") => return Err(invalid(error.message)),
+            Err(error) => error.message,
+        };
+        if tokio::time::Instant::now() + LOCATION_POLL > deadline {
+            return Err(RpcError { code: -32603, message: format!("Timeout waiting for {query}: {last}"), data: None });
+        }
+        tokio::time::sleep(LOCATION_POLL).await;
+    }
+}
+
 async fn handle_eval_method(
     method: &str, params: Option<&serde_json::Value>, engine: &EvalEngine, eval_fn: Option<&EvalFn>,
     window: Option<&str>, timeout: Duration,
@@ -1682,5 +1749,70 @@ mod tests {
             .await
             .expect_err("no active recording");
         assert!(error.message.contains("No active recording"));
+    }
+    /// An eval hook that answers each bridge call from `answers`, in order.
+    fn scripted_eval(engine: &EvalEngine, answers: Vec<Result<serde_json::Value, String>>) -> EvalFn {
+        let engine = engine.clone();
+        let answers = std::sync::Mutex::new(answers.into_iter());
+        std::sync::Arc::new(move |_window, id, _script| {
+            let answer = answers.lock().expect("answers").next().expect("an answer for every bridge call");
+            engine.resolve(id.expect("bridge evals carry an id"), answer);
+            Ok(())
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_a_url_survives_the_navigation_that_reaches_it() {
+        let engine = EvalEngine::new();
+        let eval_fn = scripted_eval(
+            &engine,
+            vec![
+                Ok(json!({"url": "app://localhost/login", "readyState": "complete", "matched": false})),
+                // The old document is gone and the new one has not loaded the bridge yet.
+                Err("Eval failed: navigation in progress".to_owned()),
+                Ok(json!({"url": "app://localhost/home", "readyState": "complete", "matched": true})),
+            ],
+        );
+        let params = json!({"window": "main", "url": "**/home", "load": "load", "timeout": 5000});
+        let result = dispatch("wait", Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new())
+            .await
+            .expect("the wait resolves once the new document matches");
+        assert_eq!(result, json!({"found": true, "url": "app://localhost/home", "readyState": "complete"}));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_a_url_times_out_with_where_the_document_was() {
+        let engine = EvalEngine::new();
+        let eval_fn = scripted_eval(
+            &engine,
+            std::iter::repeat_with(|| {
+                Ok(json!({"url": "app://localhost/login", "readyState": "complete", "matched": false}))
+            })
+            .take(64)
+            .collect(),
+        );
+        let params = json!({"url": "**/home", "timeout": 200});
+        let error = dispatch("wait", Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new())
+            .await
+            .expect_err("the document never reaches the URL");
+        assert_eq!(error.code, -32603);
+        assert!(error.message.contains("app://localhost/login"), "{}", error.message);
+    }
+
+    #[tokio::test]
+    async fn wait_for_a_location_rejects_invalid_parameters_without_waiting() {
+        let engine = EvalEngine::new();
+        let eval_fn = scripted_eval(&engine, Vec::new());
+        for params in [
+            json!({"url": 5}),
+            json!({"load": "interactive"}),
+            json!({"url": "**/home", "selector": "#x"}),
+            json!({"url": {"source": "home"}}),
+        ] {
+            let error = dispatch("wait", Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new())
+                .await
+                .expect_err("invalid parameters");
+            assert_eq!(error.code, -32602, "{params}");
+        }
     }
 }

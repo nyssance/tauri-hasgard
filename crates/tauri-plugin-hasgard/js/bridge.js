@@ -1717,6 +1717,29 @@
     return document.title
   }
 
+  // Where this document is, for a `wait` on a URL or a load state. The plugin
+  // polls it across navigations, so each new document answers for itself; a wait
+  // held inside one document would die with it.
+  function locationState(options) {
+    const href = window.location.href
+    const readyState = document.readyState
+    let matched = true
+    const wanted = options?.url
+    if (wanted != null) {
+      if (typeof wanted === "string") matched = globToRegExp(wanted).test(href)
+      else if (typeof wanted === "object" && typeof wanted.source === "string" && typeof wanted.flags === "string")
+        matched = new RegExp(wanted.source, wanted.flags).test(href)
+      else throw new Error("wait: 'url' must be a glob string or a { source, flags } pattern")
+    }
+    const load = options?.load
+    if (load != null) {
+      if (load === "load") matched = matched && readyState === "complete"
+      else if (load === "domcontentloaded") matched = matched && readyState !== "loading"
+      else throw new Error(`wait: 'load' must be "load" or "domcontentloaded"`)
+    }
+    return { url: href, readyState, matched }
+  }
+
   function state() {
     return {
       url: window.location.href,
@@ -2374,6 +2397,7 @@
     url,
     title,
     state,
+    locationState,
     eval: evalScript,
     wait: waitFor,
     screenshot,

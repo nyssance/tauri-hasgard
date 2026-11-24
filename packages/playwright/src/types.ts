@@ -300,6 +300,14 @@ export interface WaitForFunctionOptions {
   pollMs?: number
 }
 
+export type LoadState = "load" | "domcontentloaded"
+
+export interface WaitForURLOptions {
+  timeoutMs?: number
+  /** Also require the document to have reached this load state. */
+  waitUntil?: LoadState
+}
+
 export interface WatchOptions {
   selector?: string
   timeoutMs?: number

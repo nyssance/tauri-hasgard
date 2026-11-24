@@ -290,3 +290,22 @@ test("a node swept as detached gets a working ref when it returns to the documen
   assert.equal(again.length, 1)
   assert.equal(hasgard.resolve(again[0].ref), node, "the ref handed out must resolve to the node")
 })
+
+test("locationState reports the document and matches a glob, a pattern and a load state", () => {
+  const hasgard = loadBridge(el("body", {}, []))
+  globalThis.window.location = { href: "app://localhost/settings/profile" }
+  globalThis.document.readyState = "interactive"
+
+  assert.deepEqual(hasgard.locationState({}), {
+    url: "app://localhost/settings/profile",
+    readyState: "interactive",
+    matched: true
+  })
+  assert.equal(hasgard.locationState({ url: "**/profile" }).matched, true)
+  assert.equal(hasgard.locationState({ url: "app://localhost/*" }).matched, false, "* stays within a segment")
+  assert.equal(hasgard.locationState({ url: { source: "SETTINGS", flags: "i" } }).matched, true)
+  assert.equal(hasgard.locationState({ url: "**/profile", load: "domcontentloaded" }).matched, true)
+  assert.equal(hasgard.locationState({ url: "**/profile", load: "load" }).matched, false)
+  assert.throws(() => hasgard.locationState({ url: 5 }), /must be a glob string/)
+  assert.throws(() => hasgard.locationState({ load: "interactive" }), /must be "load" or "domcontentloaded"/)
+})

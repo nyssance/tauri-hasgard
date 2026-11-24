@@ -74,7 +74,9 @@ An element target takes one of three forms:
 | Storage   | `storage.get`, `storage.set`, `storage.list`, `storage.clear`                                        |
 | Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
-Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms. CEF differences are listed in the [CEF guide](cef.md#what-works).
+Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
+
+`wait` takes an element (`selector` or `ref`, optionally `gone`), an `expression`, or a location: `url` (a glob string in which `*` stays within a path segment and `**` crosses them, or `{ source, flags }`) and `load` (`load` or `domcontentloaded`), alone or together. A location wait is held by the plugin and polls whichever document is current, so it survives the navigation that reaches the URL; it resolves with `{ found, url, readyState }`. CEF differences are listed in the [CEF guide](cef.md#what-works).
 
 Platform support for capture:
 

@@ -172,6 +172,18 @@ pub fn build_wait_params(
     }
 }
 
+/// Params for a `wait` on where the window is rather than on an element.
+pub fn build_location_wait_params(url: Option<&str>, load: Option<&str>, timeout: u64) -> serde_json::Value {
+    let mut params = json!({ "timeout": timeout });
+    if let Some(url) = url {
+        params["url"] = json!(url);
+    }
+    if let Some(load) = load {
+        params["load"] = json!(load);
+    }
+    params
+}
+
 pub fn mime_from_ext(path: &std::path::Path) -> &'static str {
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     match ext.as_deref() {

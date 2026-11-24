@@ -25,6 +25,7 @@ import type {
   HasgardTarget,
   InterceptedRequest,
   JsonValue,
+  LoadState,
   NativeScreenshot,
   NativeScreenshotOptions,
   NetworkRequestEntry,
@@ -48,6 +49,7 @@ import type {
   StorageOptions,
   TextQuery,
   WaitForFunctionOptions,
+  WaitForURLOptions,
   WaitOptions,
   WatchChanges,
   WatchNode,
@@ -558,6 +560,28 @@ export class HasgardWindow {
     if (options.pollMs !== undefined) params.poll = options.pollMs
     const value = expectRecord(await this.rpc.call("wait", withWindow(this.label, params)), "wait result")
     return value.value as T
+  }
+
+  /**
+   * Wait until the window is at `url`. A string is a glob in which `*` stays
+   * within a path segment and `**` crosses them; a `RegExp` is tested against
+   * the whole URL. The wait is held by the application, not by the page, so it
+   * survives the navigation that reaches the URL.
+   */
+  async waitForURL(url: string | RegExp, options: WaitForURLOptions = {}): Promise<void> {
+    const params: Record<string, JsonValue> = {
+      url: url instanceof RegExp ? { source: url.source, flags: url.flags } : url
+    }
+    if (options.waitUntil !== undefined) params.load = options.waitUntil
+    if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
+    await this.rpc.call("wait", withWindow(this.label, params))
+  }
+
+  /** Wait until the current document has reached `state`, across a navigation in progress. */
+  async waitForLoadState(state: LoadState = "load", options: { timeoutMs?: number } = {}): Promise<void> {
+    const params: Record<string, JsonValue> = { load: state }
+    if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
+    await this.rpc.call("wait", withWindow(this.label, params))
   }
 
   /** Observe DOM mutations until they settle, or reject when nothing changes. */

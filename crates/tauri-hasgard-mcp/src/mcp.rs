@@ -21,8 +21,8 @@ use crate::{
     client::{Client, InProcessCall},
     protocol::RpcError,
     support::{
-        Scope, build_wait_params, export_replay_file, resolve_socket, run_drop_command, run_replay_command,
-        run_set_input_files_command, target_params, with_scope,
+        Scope, build_location_wait_params, build_wait_params, export_replay_file, resolve_socket, run_drop_command,
+        run_replay_command, run_set_input_files_command, target_params, with_scope,
     },
 };
 
@@ -382,14 +382,25 @@ impl HasgardMcpServer {
                 let poll = optional_u64(&args, "poll")?;
                 let gone = optional_bool(&args, "gone")?.unwrap_or(false);
                 let timeout = optional_u64(&args, "timeout")?.unwrap_or(10_000);
-                let params = build_wait_params(
-                    target.as_deref(),
-                    selector.as_deref(),
-                    expression.as_deref(),
-                    poll,
-                    gone,
-                    timeout,
-                );
+                let url = optional_string(&args, "url")?;
+                let load = optional_string(&args, "load")?;
+                let params = if url.is_some() || load.is_some() {
+                    if target.is_some() || selector.is_some() || expression.is_some() || gone {
+                        return Err(invalid_params(
+                            "'url' and 'load' cannot be combined with an element or expression wait",
+                        ));
+                    }
+                    build_location_wait_params(url.as_deref(), load.as_deref(), timeout)
+                } else {
+                    build_wait_params(
+                        target.as_deref(),
+                        selector.as_deref(),
+                        expression.as_deref(),
+                        poll,
+                        gone,
+                        timeout,
+                    )
+                };
                 self.call_app_tool("wait", Some(params), window).await
             }
             "watch" => {
@@ -1973,6 +1984,14 @@ fn wait_schema() -> Arc<JsonObject> {
             ),
             ("poll", integer_prop("How often to re-evaluate `expression`, in milliseconds.")),
             ("gone", bool_prop("Wait for the element to disappear.")),
+            (
+                "url",
+                string_prop(
+                    "Wait until the window is at this URL instead of waiting for an element. A glob: `*` stays within \
+                     a path segment, `**` crosses them. Holds across the navigation that gets there.",
+                ),
+            ),
+            ("load", string_prop("Wait for a load state: load or domcontentloaded. Combines with url.")),
             ("timeout", integer_prop("Timeout in milliseconds.")),
         ]),
         &[],

@@ -16,8 +16,8 @@ use tauri_hasgard_mcp::{
     client::{self, Client},
     scenario, style,
     support::{
-        Scope, build_wait_params, resolve_socket, run_drop_command, run_replay_command, run_set_input_files_command,
-        target_params, with_scope,
+        Scope, build_location_wait_params, build_wait_params, resolve_socket, run_drop_command, run_replay_command,
+        run_set_input_files_command, target_params, with_scope,
     },
 };
 
@@ -376,9 +376,12 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
         Command::Navigate { url } => client.call("navigate", with_scope(Some(json!({"url": url})), scope)).await,
         Command::Url => client.call("url", with_scope(None, scope)).await,
         Command::Title => client.call("title", with_scope(None, scope)).await,
-        Command::Wait { target, selector, expression, poll, gone, timeout } => {
-            let params =
-                build_wait_params(target.as_deref(), selector.as_deref(), expression.as_deref(), poll, gone, timeout);
+        Command::Wait { target, selector, expression, poll, gone, url, load, timeout } => {
+            let params = if url.is_some() || load.is_some() {
+                build_location_wait_params(url.as_deref(), load.as_deref(), timeout)
+            } else {
+                build_wait_params(target.as_deref(), selector.as_deref(), expression.as_deref(), poll, gone, timeout)
+            };
             client.call("wait", with_scope(Some(params), scope)).await
         }
         Command::Watch { selector, timeout, stable, require_mutation } => {
