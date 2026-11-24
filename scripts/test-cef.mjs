@@ -3,7 +3,7 @@
 // Local runs use the secondary display; CI may explicitly select 0.
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -102,7 +102,8 @@ try {
       env: {
         TAURI_HASGARD_DISPLAY: process.env.TAURI_HASGARD_DISPLAY ?? "secondary",
         HASGARD_CEF_GUEST_URL: guestUrl,
-        HASGARD_CEF_PROFILE: join(temp, "cef-profile")
+        HASGARD_CEF_PROFILE: join(temp, "cef-profile"),
+        HASGARD_CEF_LOG: join(artifacts, "cef.log")
       }
     },
     socketPath
@@ -454,6 +455,11 @@ print(json.dumps(out))`,
     join(artifacts, "report.json"),
     JSON.stringify({ status: "failed", checks, error: String(error) }, null, 2)
   )
+  // A process that dies before it listens leaves only Chromium's log to explain itself.
+  const cefLog = join(artifacts, "cef.log")
+  if (existsSync(cefLog)) console.error(`CEF log:\n${readFileSync(cefLog, "utf8").split("\n").slice(-80).join("\n")}`)
+  else
+    console.error(`No CEF log was written; files beside the executable: ${readdirSync(dirname(executable)).join(", ")}`)
   for (const label of ["second", "guest"]) {
     try {
       console.error(label, await evaluate(label, "({url:location.href,title:document.title})"))

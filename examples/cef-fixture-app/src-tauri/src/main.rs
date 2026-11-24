@@ -50,6 +50,12 @@ fn main() {
         .disable_features(["AperitifHelpers"])
         .root_cache_path(profile)
         .secret_storage(tauri_runtime_cef::SecretStorage::Mock);
+    // A windowed process has no console, so a startup failure is only visible in Chromium's own log.
+    let runtime = match std::env::var("HASGARD_CEF_LOG") {
+        Ok(path) => runtime.log_file(path),
+        Err(std::env::VarError::NotPresent) => runtime,
+        Err(error) => panic!("Invalid HASGARD_CEF_LOG: {error}"),
+    };
     // Custom SDK validation must explicitly select its matching API version.
     let runtime = match std::env::var("HASGARD_CEF_API_VERSION") {
         Ok(value) => runtime.cef_api_version(value.parse().expect("Invalid HASGARD_CEF_API_VERSION")),
