@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 — 2026-11-24
+
+- Add `window.waitForURL` and `window.waitForLoadState`; both hold across the navigation that reaches them.
+- Add `window.nativeState`, `setSize`, `setPosition`, `minimize`, `maximize`, `restore` and `close` for the native window.
+- Add `window.cookies`, `setCookie` and `clearCookies` for the webview's cookie store, `HttpOnly` cookies included.
+- Add `hasgard.clipboardText` and `setClipboardText` for the system clipboard.
+- `setInputFiles` sends a file too large for one request by path, for the application to read; small files travel inline as before.
+- `HasgardProcess.diagnostics()` reports the application's pid and exit on Windows.
+- These need plugin 0.8.0.
+
 ## 0.7.3 — 2026-11-23
 
 - Add `toBeHidden`, `toBeEnabled`, `toBeDisabled`, `toBeChecked`, `toContainText`, `toHaveValue`, `toHaveAttribute` and `toHaveCount`.
