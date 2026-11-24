@@ -64,6 +64,8 @@ jobs:
     timeout-minutes: 40
     env:
       TAURI_HASGARD_DISPLAY: "0"
+      # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
+      CEF_PATH: ${{ runner.temp }}/cef-cache
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -84,9 +86,6 @@ jobs:
       - name: Build CEF native fixture
         working-directory: examples/cef-fixture-app
         shell: bash
-        # Keep CEF outside target/: rust-cache restores that tree without the CEF files.
-        env:
-          CEF_PATH: ${{ runner.temp }}/cef-cache
         run: bun ../fixture-app/node_modules/@tauri-apps/cli/tauri.js build --debug ${{ matrix.build }}
       - name: Run CEF native fixture
         run: bun scripts/test-cef.mjs

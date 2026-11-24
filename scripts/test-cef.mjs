@@ -27,6 +27,24 @@ mkdirSync(artifacts, { recursive: true })
 rmSync(join(artifacts, "report.json"), { force: true })
 const temp = mkdtempSync(join(tmpdir(), "hg-cef-"))
 const socketPath = hasgardEndpointPath(`hg-cef-${process.pid}`)
+// An unbundled Windows build has no CEF beside it: `libcef.dll` and the resources it loads
+// from its own directory stay in the CEF download. Put that directory on the search path.
+const launchEnv = {}
+if (!mac) {
+  const cefRoot = resolve(process.env.CEF_PATH ?? join(root, "target/cef-cache"))
+  const found = []
+  const visit = (directory, depth) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name === "libcef.dll") found.push(directory)
+      else if (entry.isDirectory() && depth < 3) visit(join(directory, entry.name), depth + 1)
+    }
+  }
+  visit(cefRoot, 0)
+  if (found.length !== 1) throw new Error(`Expected one libcef.dll under ${cefRoot}, found ${found.length}`)
+  const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PATH")
+  if (!pathKey) throw new Error("The environment has no PATH")
+  launchEnv[pathKey] = `${found[0]};${process.env[pathKey]}`
+}
 const app = new HasgardProcess()
 const client = new HasgardRpcClient(socketPath)
 const rpc = (method, params = {}, window) => client.call(method, { ...params, ...(window ? { window } : {}) })
@@ -100,6 +118,7 @@ try {
       cwd: root,
       timeoutMs: 60_000,
       env: {
+        ...launchEnv,
         TAURI_HASGARD_DISPLAY: process.env.TAURI_HASGARD_DISPLAY ?? "secondary",
         HASGARD_CEF_GUEST_URL: guestUrl,
         HASGARD_CEF_PROFILE: join(temp, "cef-profile"),
