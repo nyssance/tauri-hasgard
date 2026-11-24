@@ -1,3 +1,7 @@
+# Unreleased
+
+- Add answers for native dialogs: `nativeDialog.handle`, `nativeDialog.list` and `nativeDialog.clear` answer the dialog plugin's open, save and message commands in advance and record them; nothing else in the application's IPC is intercepted. The default, `manual`, leaves the system dialog on screen. CLI `native-dialog`, the MCP `native_dialog` tool, and Playwright `window.nativeDialogs`. Wry only.
+
 # 0.8.0 (2026-11-24)
 
 - Fix a ref that could not be used: once the ref table passed 1,024 entries, a node swept as detached and later re-attached was handed its old ref, which the table no longer knew.

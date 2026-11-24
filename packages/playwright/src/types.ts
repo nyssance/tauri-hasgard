@@ -176,6 +176,43 @@ export interface DialogListing {
   policy: DialogPolicy
 }
 
+/** How the dialog plugin's open, save and message dialogs are answered. */
+export interface NativeDialogPolicy {
+  /** `manual` leaves them to the operating system, as for a person. */
+  action: "accept" | "dismiss" | "manual"
+  paths: string[]
+  button: string | null
+}
+
+export interface NativeDialogAnswer {
+  /** What an open or save dialog returns. An open dialog that allows several takes them all. */
+  paths?: string[]
+  /** The message dialog button to press, by its label. Defaults to the affirmative one. */
+  button?: string
+}
+
+/** One native dialog the application asked for while a policy was answering them. */
+export interface NativeDialogRecord {
+  id: number
+  timestamp: number
+  kind: "open" | "save" | "message"
+  accepted: boolean
+  title?: string
+  message?: string
+  defaultPath?: string
+  multiple?: boolean
+  directory?: boolean
+  /** The labels a message dialog offered. */
+  buttons?: string[]
+  /** What the application received: a path, several, a button label, or null. */
+  result: string | string[] | null
+}
+
+export interface NativeDialogListing {
+  dialogs: NativeDialogRecord[]
+  policy: NativeDialogPolicy
+}
+
 /** How a matched request is answered. */
 export interface RouteOptions {
   /**

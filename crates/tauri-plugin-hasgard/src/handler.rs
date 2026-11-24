@@ -116,7 +116,15 @@ pub(crate) async fn dispatch(
     // Isolated CEF worlds cannot observe or monkey-patch the page's main-world
     // console/fetch/dialog APIs. Fail explicitly instead of returning empty data.
     if engine.cef.load(std::sync::atomic::Ordering::Relaxed)
-        && matches!(method, "dialog.list" | "dialog.clear" | "dialog.handle")
+        && matches!(
+            method,
+            "dialog.list"
+                | "dialog.clear"
+                | "dialog.handle"
+                | "nativeDialog.list"
+                | "nativeDialog.clear"
+                | "nativeDialog.handle"
+        )
     {
         return Err(RpcError {
             code: -32601,
@@ -317,6 +325,13 @@ pub(crate) async fn dispatch(
         "dialog.list" => handle_eval_method("dialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "dialog.clear" => handle_eval_method("clearDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "dialog.handle" => handle_eval_method("handleDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "nativeDialog.list" => handle_eval_method("nativeDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
+        "nativeDialog.clear" => {
+            handle_eval_method("clearNativeDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
+        }
+        "nativeDialog.handle" => {
+            handle_eval_method("handleNativeDialogs", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await
+        }
         "route.add" => handle_eval_method("route", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "route.list" => handle_eval_method("routes", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
         "route.clear" => handle_eval_method("clearRoutes", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,

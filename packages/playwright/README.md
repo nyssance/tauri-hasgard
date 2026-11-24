@@ -96,6 +96,7 @@ await window.press("Tab", {
 })
 ```
 
+- For a file open or save dialog, state the answer first: `await window.nativeDialogs.accept({ paths: ["/tmp/report.csv"] })`, then click. `window.nativeDialogs.list()` shows what the app asked.
 - To check a copy button, click it and read `await hasgard.clipboardText()`.
 - To start a test signed in, `await window.setCookie({ name, value, url })`; `window.cookies()` reads the store, `HttpOnly` cookies included.
 - To test a layout at another size, `await window.setSize(480, 800)`, then assert once `window.nativeState()` reports it.

@@ -21,6 +21,8 @@ hasgard-testing = ["dep:tauri-plugin-global-shortcut", "dep:rmcp", "dep:serde_js
 [dependencies]
 tauri = { version = "3.0.0-alpha.6", features = [] }
 tauri-runtime-wry = "3.0.0-alpha.6"
+# Its open, save and message commands are what `nativeDialog.*` answers.
+tauri-plugin-dialog = "3.0.0-alpha.4"
 tauri-plugin-hasgard = { path = "../../../crates/tauri-plugin-hasgard" }
 # The in-process MCP check drives the plugin's server with an rmcp client over an in-memory pipe.
 rmcp = { version = "3", default-features = false, features = ["client", "server", "transport-async-rw"], optional = true }

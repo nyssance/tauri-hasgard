@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cli::{
-    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, FormsArgs, RecordAction, RouteCommand,
-    StorageAction, StorageArgs, WindowCommand,
+    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, FormsArgs, NativeDialogCommand,
+    RecordAction, RouteCommand, StorageAction, StorageArgs, WindowCommand,
 };
 #[cfg(test)]
 use tauri_hasgard_mcp::support::{export_shell_script, mime_from_ext};
@@ -623,6 +623,22 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
                 DialogCommand::Clear => ("dialog.clear", None),
             };
             client.call(method, with_scope(params, scope)).await
+        }
+        Command::NativeDialog(action) => {
+            let (method, params) = match action {
+                NativeDialogCommand::Accept { paths, button } => {
+                    let mut params = json!({"action": "accept", "paths": paths});
+                    if let Some(button) = button {
+                        params["button"] = json!(button);
+                    }
+                    ("nativeDialog.handle", Some(params))
+                }
+                NativeDialogCommand::Dismiss => ("nativeDialog.handle", Some(json!({"action": "dismiss"}))),
+                NativeDialogCommand::Manual => ("nativeDialog.handle", Some(json!({"action": "manual"}))),
+                NativeDialogCommand::List => ("nativeDialog.list", None),
+                NativeDialogCommand::Clear => ("nativeDialog.clear", None),
+            };
+            client.call(method, with_scope(params, Scope { window: scope.window, ..Scope::default() })).await
         }
         Command::Clipboard(ClipboardCommand::Read) => client.call("clipboard.read", None).await,
         Command::Clipboard(ClipboardCommand::Write { text }) => {

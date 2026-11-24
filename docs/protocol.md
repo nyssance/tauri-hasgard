@@ -72,6 +72,7 @@ An element target takes one of three forms:
 | Console   | `console.getLogs`, `console.clear`                                                                   |
 | Network   | `network.getRequests`, `network.clear`, `route.add`, `route.list`, `route.clear`                     |
 | Dialogs   | `dialog.list`, `dialog.handle`, `dialog.clear`                                                       |
+| Native dialogs | `nativeDialog.handle`, `nativeDialog.list`, `nativeDialog.clear` |
 | Storage   | `storage.get`, `storage.set`, `storage.list`, `storage.clear`                                        |
 | Cookies   | `cookies.get`, `cookies.set`, `cookies.clear` |
 | Clipboard | `clipboard.read`, `clipboard.write` |
@@ -80,6 +81,8 @@ An element target takes one of three forms:
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
 
 `drop` and `setInputFiles` take `files`, each either `{ name, type?, data }` with base64 contents or `{ name?, type?, path }` with an absolute path the application reads itself. Inline data counts toward the request limit; paths do not, and one call reads at most 64 MiB.
+
+`nativeDialog.*` answer the dialog plugin's `open`, `save` and `message` commands in advance, because nothing can click an operating-system dialog reliably. `nativeDialog.handle` takes `action`: `accept` (with `paths` for open and save, and optionally `button`, a message dialog's label), `dismiss` (open and save return `null`; a message dialog returns its last button), or `manual`, the default, which leaves the dialogs on screen. `nativeDialog.list` answers `{ dialogs, policy }`, each dialog with its `kind`, `title`, options and the `result` the application received. Only these three commands are answered; every other command reaches the application's backend. A real dialog also grants file access to the path it returns and an answered one does not, so the path must already be allowed by the application's permissions. The policy belongs to the document and resets on navigation. Wry only; CEF answers `-32601`.
 
 `clipboard.read` answers `{ text }` with the system clipboard's text, or `null` when it holds none; `clipboard.write` takes `text`. The clipboard is shared with whoever uses the machine.
 

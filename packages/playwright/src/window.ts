@@ -31,6 +31,10 @@ import type {
   InterceptedRequest,
   JsonValue,
   LoadState,
+  NativeDialogAnswer,
+  NativeDialogListing,
+  NativeDialogPolicy,
+  NativeDialogRecord,
   NativeScreenshot,
   NativeScreenshotOptions,
   NativeWindowState,
@@ -216,6 +220,21 @@ function expectBoolean(value: unknown, context: string): boolean {
 function expectNumber(value: unknown, context: string): number {
   if (typeof value !== "number") throw new Error(`${context} must be a number`)
   return value
+}
+
+function parseNativeDialogPolicy(value: unknown): NativeDialogPolicy {
+  const policy = expectRecord(value, "native dialog policy")
+  const action = expectString(policy.action, "nativeDialog.policy.action")
+  if (action !== "accept" && action !== "dismiss" && action !== "manual") {
+    throw new Error(`Invalid Hasgard response: nativeDialog.policy.action is ${action}`)
+  }
+  return {
+    action,
+    paths: expectArray(policy.paths, "nativeDialog.policy.paths").map((path) =>
+      expectString(path, "nativeDialog.policy.paths[]")
+    ),
+    button: expectNullableString(policy.button, "nativeDialog.policy.button")
+  }
 }
 
 function parseCookie(value: unknown): Cookie {
@@ -922,6 +941,45 @@ export class HasgardWindow {
     /** Forget the recorded dialogs. Leaves the accept/dismiss policy alone. */
     clear: async (): Promise<void> => {
       await this.call("dialog.clear")
+    }
+  }
+
+  /**
+   * The dialog plugin's native dialogs: open, save and message.
+   *
+   * Nothing can click an operating-system file panel reliably, so a test states
+   * the answer in advance and the application receives it where the dialog's
+   * result would arrive. Only those three commands are answered; the rest of the
+   * application's IPC stays real. The default, `manual`, leaves them to the system.
+   *
+   * A real dialog also grants file access to the path it returns. An answered one
+   * does not, so the path must already be allowed by the application's permissions.
+   */
+  readonly nativeDialogs = {
+    /** Answer every subsequent native dialog affirmatively, with these paths or this button. */
+    accept: async (answer: NativeDialogAnswer = {}): Promise<NativeDialogPolicy> => {
+      const params: Record<string, JsonValue> = { action: "accept" }
+      if (answer.paths !== undefined) params.paths = answer.paths
+      if (answer.button !== undefined) params.button = answer.button
+      return parseNativeDialogPolicy(await this.call("nativeDialog.handle", params))
+    },
+    /** Answer every subsequent native dialog as if it were cancelled. */
+    dismiss: async (): Promise<NativeDialogPolicy> =>
+      parseNativeDialogPolicy(await this.call("nativeDialog.handle", { action: "dismiss" })),
+    /** Stop answering: native dialogs appear on screen again. */
+    manual: async (): Promise<NativeDialogPolicy> =>
+      parseNativeDialogPolicy(await this.call("nativeDialog.handle", { action: "manual" })),
+    /** Every native dialog answered so far, oldest first. */
+    list: async (): Promise<NativeDialogListing> => {
+      const value = expectRecord(await this.call("nativeDialog.list"), "nativeDialog.list result")
+      return {
+        dialogs: expectArray(value.dialogs, "nativeDialog.list.dialogs") as NativeDialogRecord[],
+        policy: parseNativeDialogPolicy(value.policy)
+      }
+    },
+    /** Forget the recorded native dialogs. Leaves the policy alone. */
+    clear: async (): Promise<void> => {
+      await this.call("nativeDialog.clear")
     }
   }
 

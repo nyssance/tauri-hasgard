@@ -93,6 +93,7 @@ pub fn run() {
             app.get_webview_window("main").ok_or("Main window not found")?.show()?;
             Ok(())
         })
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![open_settings, fixture_process_id]);
 
     #[cfg(all(not(target_os = "macos"), feature = "hasgard-testing"))]

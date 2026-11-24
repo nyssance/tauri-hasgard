@@ -155,6 +155,9 @@ pub(crate) enum Command {
     /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
     #[command(subcommand)]
     Dialog(DialogCommand),
+    /// Answer the dialog plugin's native dialogs (open, save, message) in advance.
+    #[command(subcommand)]
+    NativeDialog(NativeDialogCommand),
     /// Read or write the system clipboard's text.
     #[command(subcommand)]
     Clipboard(ClipboardCommand),
@@ -460,6 +463,27 @@ pub(crate) enum DialogCommand {
     /// Show the dialogs the page has opened, and the current policy.
     List,
     /// Forget the recorded dialogs, leaving the policy alone.
+    Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum NativeDialogCommand {
+    /// Answer subsequent native dialogs affirmatively.
+    Accept {
+        /// What an open or save dialog returns. Repeat for an open dialog that allows several.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// The message dialog button to press, by its label. The affirmative one when omitted.
+        #[arg(long)]
+        button: Option<String>,
+    },
+    /// Answer subsequent native dialogs as if they were cancelled.
+    Dismiss,
+    /// Stop answering: native dialogs appear on screen again. This is the default.
+    Manual,
+    /// Show the native dialogs answered so far, and the current policy.
+    List,
+    /// Forget the recorded native dialogs, leaving the policy alone.
     Clear,
 }
 

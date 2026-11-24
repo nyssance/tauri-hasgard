@@ -326,6 +326,29 @@ impl HasgardMcpServer {
                 self.call_app_tool("wheel", Some(params), window).await
             }
             "dialog" => self.call_dialog_tool(args, window).await,
+            "native_dialog" => {
+                let action = required_string(&args, "action")?;
+                let (method, params) = match action.as_str() {
+                    "accept" | "dismiss" | "manual" => {
+                        let mut params = json!({"action": action});
+                        if let Some(paths) = args.get("paths").filter(|value| !value.is_null()) {
+                            params["paths"] = paths.clone();
+                        }
+                        if let Some(button) = optional_string(&args, "button")? {
+                            params["button"] = json!(button);
+                        }
+                        ("nativeDialog.handle", Some(params))
+                    }
+                    "list" => ("nativeDialog.list", None),
+                    "clear" => ("nativeDialog.clear", None),
+                    other => {
+                        return Err(invalid_params(format!(
+                            "unknown native_dialog action: {other}; expected accept, dismiss, manual, list or clear"
+                        )));
+                    }
+                };
+                self.call_app_tool(method, params, window).await
+            }
             "clipboard" => match required_string(&args, "action")?.as_str() {
                 "read" => self.call_app_tool("clipboard.read", None, None).await,
                 "write" => {
@@ -1003,6 +1026,16 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "set_input_files",
             description: "Attach local files to an <input type=\"file\">. An empty list clears the selection.",
             schema: set_input_files_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "native_dialog",
+            description: "Answer the dialog plugin's native open, save and message dialogs in advance, since nothing \
+                          can click an operating-system dialog. Set the policy before the action that opens one. \
+                          The default, manual, leaves them on screen. Not available on CEF.",
+            schema: native_dialog_schema,
             read_only: false,
             destructive: false,
             idempotent: true,
@@ -1983,6 +2016,31 @@ fn dialog_schema() -> Arc<JsonObject> {
     )
 }
 
+fn native_dialog_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            (
+                "action",
+                enum_prop(
+                    "accept and dismiss answer every later native dialog; manual stops answering; \
+                     list shows what was answered; clear forgets the record.",
+                    &["accept", "dismiss", "manual", "list", "clear"],
+                ),
+            ),
+            (
+                "paths",
+                json!({
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For accept: what an open or save dialog returns. Several for an open dialog that allows them.",
+                }),
+            ),
+            ("button", string_prop("For accept: the message dialog button to press, by its label.")),
+        ]),
+        &["action"],
+    )
+}
+
 fn clipboard_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2400,6 +2458,7 @@ mod tests {
             "html",
             "ipc",
             "logs",
+            "native_dialog",
             "navigate",
             "network",
             "ping",

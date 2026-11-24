@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default fixture capability",
   "windows": ["main", "settings"],
-  "permissions": ["core:default", "hasgard:default"]
+  "permissions": ["core:default", "hasgard:default", "dialog:default"]
 }

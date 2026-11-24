@@ -476,6 +476,45 @@ test("waitForFunction returns the predicate's own value and forwards the poll in
   })
 })
 
+test("nativeDialogs sets the policy for native dialogs and lists what was answered", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const window = new HasgardWindow(rpc, "main")
+
+  call.mockResolvedValueOnce({ action: "accept", paths: ["/tmp/a.csv"], button: null })
+  expect(await window.nativeDialogs.accept({ paths: ["/tmp/a.csv"] })).toEqual({
+    action: "accept",
+    paths: ["/tmp/a.csv"],
+    button: null
+  })
+  call.mockResolvedValueOnce({ action: "accept", paths: [], button: "Discard" })
+  await window.nativeDialogs.accept({ button: "Discard" })
+  call.mockResolvedValueOnce({ action: "dismiss", paths: [], button: null })
+  await window.nativeDialogs.dismiss()
+  call.mockResolvedValueOnce({ action: "manual", paths: [], button: null })
+  await window.nativeDialogs.manual()
+  const record = { id: 1, timestamp: 5, kind: "save", accepted: true, title: "Export", result: "/tmp/a.csv" }
+  call.mockResolvedValueOnce({ dialogs: [record], policy: { action: "manual", paths: [], button: null } })
+  expect((await window.nativeDialogs.list()).dialogs).toEqual([record])
+
+  expect(call).toHaveBeenNthCalledWith(1, "nativeDialog.handle", {
+    action: "accept",
+    paths: ["/tmp/a.csv"],
+    window: "main"
+  })
+  expect(call).toHaveBeenNthCalledWith(2, "nativeDialog.handle", {
+    action: "accept",
+    button: "Discard",
+    window: "main"
+  })
+  expect(call).toHaveBeenNthCalledWith(3, "nativeDialog.handle", { action: "dismiss", window: "main" })
+  expect(call).toHaveBeenNthCalledWith(4, "nativeDialog.handle", { action: "manual", window: "main" })
+  expect(call).toHaveBeenNthCalledWith(5, "nativeDialog.list", { window: "main" })
+
+  call.mockResolvedValueOnce({ action: "always", paths: [], button: null })
+  await expect(window.nativeDialogs.dismiss()).rejects.toThrow(/policy\.action/)
+})
+
 test("clipboard methods read and write the system clipboard's text", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")

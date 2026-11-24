@@ -81,6 +81,12 @@
           <label for="uploads">Attachments</label>
           <input id="uploads" name="uploads" type="file" multiple />
           <p class="readout" data-label="Files" id="uploads-log">none</p>
+          <!-- Each calls the dialog plugin as an application would; the readout is
+               what the application received back. -->
+          <button id="native-save" type="button">Export report</button>
+          <button id="native-open" type="button">Attach files</button>
+          <button id="native-ask" type="button">Discard draft</button>
+          <p class="readout" data-label="Native dialog" id="native-log">none</p>
         </section>
         <section class="probe-group">
           <h2>Scrolling</h2>

@@ -807,3 +807,41 @@ test("the system clipboard's text is read and written from the application", asy
     if (before !== null) await hasgard.setClipboardText(before)
   }
 })
+
+test("native dialogs are answered in advance and recorded, and nothing else is intercepted", async ({ window }) => {
+  const log = window.locator("#native-log")
+  expect((await window.nativeDialogs.list()).policy).toEqual({ action: "manual", paths: [], button: null })
+  await window.nativeDialogs.clear()
+
+  // The policy is set before the click: no operating-system dialog ever opens.
+  await window.nativeDialogs.accept({ paths: ["/tmp/hasgard-report.csv"] })
+  await window.locator("#native-save").click()
+  await expect(log).toHaveText('save:"/tmp/hasgard-report.csv"')
+
+  await window.nativeDialogs.accept({ paths: ["/tmp/a.txt", "/tmp/b.txt"] })
+  await window.locator("#native-open").click()
+  await expect(log).toHaveText('open:["/tmp/a.txt","/tmp/b.txt"]')
+  await window.locator("#native-ask").click()
+  await expect(log).toHaveText('message:"Yes"')
+
+  await window.nativeDialogs.dismiss()
+  await window.locator("#native-save").click()
+  await expect(log).toHaveText("save:null")
+  await window.locator("#native-ask").click()
+  await expect(log).toHaveText('message:"No"')
+
+  const { dialogs } = await window.nativeDialogs.list()
+  expect(dialogs.map(({ kind, accepted, title, result }) => ({ kind, accepted, title, result }))).toEqual([
+    { kind: "save", accepted: true, title: "Export report", result: "/tmp/hasgard-report.csv" },
+    { kind: "open", accepted: true, title: "Attach files", result: ["/tmp/a.txt", "/tmp/b.txt"] },
+    { kind: "message", accepted: true, title: "Draft", result: "Yes" },
+    { kind: "save", accepted: false, title: "Export report", result: null },
+    { kind: "message", accepted: false, title: "Draft", result: "No" }
+  ])
+  expect(dialogs[2]).toMatchObject({ message: "Discard draft?", buttons: ["Yes", "No"] })
+
+  // The application's own commands still reach its real backend.
+  expect(await window.invoke<number>("fixture_process_id", {})).toBeGreaterThan(0)
+  expect((await window.nativeDialogs.manual()).action).toBe("manual")
+  await window.nativeDialogs.clear()
+})

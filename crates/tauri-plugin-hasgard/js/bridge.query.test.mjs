@@ -60,13 +60,13 @@ function flatten(node, out = []) {
   return out
 }
 
-function loadBridge(body) {
+function loadBridge(body, fetch = () => {}) {
   Object.assign(console, REAL_CONSOLE)
 
   const all = flatten(body).filter((n) => n !== body)
 
   globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 }
-  globalThis.window = { fetch() {} }
+  globalThis.window = { fetch }
   globalThis.document = {
     body,
     documentElement: body,
@@ -308,4 +308,86 @@ test("locationState reports the document and matches a glob, a pattern and a loa
   assert.equal(hasgard.locationState({ url: "**/profile", load: "load" }).matched, false)
   assert.throws(() => hasgard.locationState({ url: 5 }), /must be a glob string/)
   assert.throws(() => hasgard.locationState({ load: "interactive" }), /must be "load" or "domcontentloaded"/)
+})
+
+test("native dialogs are answered at the IPC boundary and everything else passes through", async () => {
+  const real = []
+  const hasgard = loadBridge(el("body", {}, []), (input) => {
+    real.push(String(input))
+    return Promise.resolve(
+      new Response(JSON.stringify({ real: true }), {
+        headers: { "Content-Type": "application/json", "Tauri-Response": "ok" }
+      })
+    )
+  })
+  // What Tauri's own transport does for `invoke(command, args)`.
+  const invoke = async (command, args, base = "ipc://localhost/") => {
+    const response = await globalThis.window.fetch(base + encodeURIComponent(command), {
+      method: "POST",
+      body: JSON.stringify(args ?? {}),
+      headers: { "Content-Type": "application/json" }
+    })
+    const value =
+      response.headers.get("content-type") === "application/json" ? await response.json() : await response.text()
+    if (response.headers.get("Tauri-Response") !== "ok") throw new Error(value)
+    return value
+  }
+
+  // Untouched until a policy asks for it.
+  assert.deepEqual(hasgard.nativeDialogs(), { dialogs: [], policy: { action: "manual", paths: [], button: null } })
+  assert.deepEqual(await invoke("plugin:dialog|save", { options: {} }), { real: true })
+
+  hasgard.handleNativeDialogs({ action: "accept", paths: ["/tmp/report.csv"] })
+  assert.equal(
+    await invoke("plugin:dialog|save", { options: { title: "Export", defaultPath: "report.csv" } }),
+    "/tmp/report.csv"
+  )
+  assert.equal(await invoke("plugin:dialog|open", { options: {} }), "/tmp/report.csv")
+  assert.deepEqual(await invoke("plugin:dialog|open", { options: { multiple: true } }), ["/tmp/report.csv"])
+  assert.equal(await invoke("plugin:dialog|message", { message: "Delete?", buttons: "YesNo" }), "Yes")
+  assert.equal(await invoke("plugin:dialog|message", { message: "Saved" }), "Ok")
+  // Windows reaches the same endpoint over http.
+  assert.equal(await invoke("plugin:dialog|save", { options: {} }, "http://ipc.localhost/"), "/tmp/report.csv")
+  // Only the dialog plugin's commands are answered; the application's own IPC is real.
+  assert.deepEqual(await invoke("plugin:fs|read_file", { path: "/x" }), { real: true })
+  assert.deepEqual(await invoke("my_command"), { real: true })
+
+  hasgard.handleNativeDialogs({ action: "accept", paths: ["/a", "/b"], button: "Keep" })
+  assert.deepEqual(await invoke("plugin:dialog|open", { options: { multiple: true } }), ["/a", "/b"])
+  await assert.rejects(invoke("plugin:dialog|save", { options: {} }), /takes one path, and 2 are set/)
+  assert.equal(
+    await invoke("plugin:dialog|message", {
+      message: "Unsaved",
+      buttons: { YesNoCancelCustom: ["Save", "Discard", "Keep"] }
+    }),
+    "Keep"
+  )
+  await assert.rejects(invoke("plugin:dialog|message", { message: "x", buttons: "YesNo" }), /"Keep" is not one of/)
+
+  hasgard.handleNativeDialogs({ action: "dismiss" })
+  assert.equal(await invoke("plugin:dialog|save", { options: {} }), null)
+  assert.equal(await invoke("plugin:dialog|message", { message: "Delete?", buttons: "YesNo" }), "No")
+  assert.equal(await invoke("plugin:dialog|message", { message: "Quit?", buttons: "OkCancel" }), "Cancel")
+
+  const recorded = hasgard.nativeDialogs().dialogs
+  assert.deepEqual(
+    recorded
+      .slice(0, 2)
+      .map(({ kind, accepted, title, defaultPath, result }) => ({ kind, accepted, title, defaultPath, result })),
+    [
+      { kind: "save", accepted: true, title: "Export", defaultPath: "report.csv", result: "/tmp/report.csv" },
+      { kind: "open", accepted: true, title: undefined, defaultPath: undefined, result: "/tmp/report.csv" }
+    ]
+  )
+  assert.deepEqual(recorded.at(-1).buttons, ["Ok", "Cancel"])
+
+  // Back to the system dialog, with the record kept until cleared.
+  assert.equal(hasgard.handleNativeDialogs({ action: "manual" }).action, "manual")
+  assert.deepEqual(await invoke("plugin:dialog|save", { options: {} }), { real: true })
+  assert.equal(real.filter((url) => url.includes("dialog")).length, 2)
+  assert.deepEqual(hasgard.clearNativeDialogs(), { cleared: true })
+  assert.equal(hasgard.nativeDialogs().dialogs.length, 0)
+
+  assert.throws(() => hasgard.handleNativeDialogs({ action: "close" }), /must be "accept", "dismiss" or "manual"/)
+  assert.throws(() => hasgard.handleNativeDialogs({ action: "accept", paths: "/tmp/x" }), /array of non-empty strings/)
 })

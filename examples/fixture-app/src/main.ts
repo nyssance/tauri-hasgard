@@ -93,6 +93,22 @@ uploads.addEventListener("change", () => {
   uploadsLog.textContent = describeFiles(uploads)
 })
 
+const nativeLog = probe<HTMLParagraphElement>("#native-log")
+const nativeDialog = (button: string, kind: string, args: Record<string, unknown>) => {
+  probe<HTMLButtonElement>(button).addEventListener("click", () => {
+    invoke(`plugin:dialog|${kind}`, args)
+      .then((result) => {
+        nativeLog.textContent = `${kind}:${JSON.stringify(result)}`
+      })
+      .catch((error: unknown) => {
+        nativeLog.textContent = `${kind}:error:${String(error)}`
+      })
+  })
+}
+nativeDialog("#native-save", "save", { options: { title: "Export report", defaultPath: "report.csv" } })
+nativeDialog("#native-open", "open", { options: { title: "Attach files", multiple: true } })
+nativeDialog("#native-ask", "message", { title: "Draft", message: "Discard draft?", buttons: "YesNo" })
+
 const wheelLog = probe<HTMLParagraphElement>("#wheel-log")
 let wheelEvents = 0
 const sizeScroller = (id: string, innerId: string): HTMLDivElement => {
