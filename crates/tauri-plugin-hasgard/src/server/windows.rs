@@ -373,12 +373,14 @@ pub fn bind(pipe_path: &Path) -> Result<(NamedPipeServer, RegistryGuard), Error>
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), path = %pipe_path.display(), "tauri-hasgard named pipe listening");
 
-    let identifier = pipe_path
+    // The registry entry is named after the pipe. A name chosen through
+    // `TAURI_HASGARD_SOCKET` need not carry the default prefix, and two such
+    // applications must not share one entry.
+    let name = pipe_path
         .file_name()
         .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_prefix("tauri-hasgard-"))
-        .unwrap_or("unknown")
-        .to_string();
+        .ok_or_else(|| Error::from(std::io::Error::other(format!("pipe path has no name: {}", pipe_path.display()))))?;
+    let identifier = name.strip_prefix("tauri-hasgard-").unwrap_or(name).to_string();
 
     register_instance(&identifier, pipe_path)?;
     let guard = RegistryGuard { identifier };
@@ -398,27 +400,27 @@ pub async fn run(
     pipe_path: PathBuf, engine: EvalEngine, eval_fn: Option<EvalFn>, list_fn: Option<ListWindowsFn>,
     press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) {
-    let (first_server, guard) = match bind(&pipe_path) {
+    let (first_server, _guard) = match bind(&pipe_path) {
         Ok(bound) => bound,
         Err(e) => {
             tracing::error!(path = %pipe_path.display(), "failed to bind named pipe: {e}");
             return;
         }
     };
-    let identifier = guard.identifier.clone();
-    if let Err(e) = accept_loop(first_server, &identifier, engine, eval_fn, list_fn, press_hooks, recorder).await {
+    // `_guard` stays alive for the whole loop: dropping it removes the registry entry.
+    if let Err(e) = accept_loop(first_server, &pipe_path, engine, eval_fn, list_fn, press_hooks, recorder).await {
         tracing::error!("named pipe server error: {e}");
     }
 }
 
 async fn accept_loop(
-    first_server: NamedPipeServer, identifier: &str, engine: EvalEngine, eval_fn: Option<EvalFn>,
+    first_server: NamedPipeServer, pipe_path: &Path, engine: EvalEngine, eval_fn: Option<EvalFn>,
     list_fn: Option<ListWindowsFn>, press_hooks: Option<PressHooksRef>, recorder: Recorder,
 ) -> Result<(), Error> {
     let ctx = Arc::new((engine, eval_fn, list_fn, press_hooks, recorder));
     let mut server = first_server;
-    let pipe_path = socket_path(identifier);
-
+    // Every later instance must carry the name the first one was bound to. Rebuilding
+    // it from an identifier moved the pipe to another name after the first connection.
     loop {
         // A failure here means the current pipe is genuinely dead (handle closed,
         // etc.) — propagate it so the supervising task can react.
@@ -438,7 +440,7 @@ async fn accept_loop(
                 unsafe {
                     ServerOptions::new()
                         .pipe_mode(tokio::net::windows::named_pipe::PipeMode::Byte)
-                        .create_with_security_attributes_raw(&pipe_path, (&raw mut sa).cast::<c_void>())
+                        .create_with_security_attributes_raw(pipe_path, (&raw mut sa).cast::<c_void>())
                 }
                 .map_err(std::io::Error::other)
             })();
@@ -525,6 +527,29 @@ mod tests {
         let result = resp.result.expect("ping returns a result");
         assert_eq!(result["status"], serde_json::json!("ok"));
         assert_eq!(result["plugin_version"], serde_json::json!(env!("CARGO_PKG_VERSION")));
+
+        handle.abort();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_pipe_without_the_default_prefix_keeps_its_name_for_later_connections() {
+        let n = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pipe = PathBuf::from(format!(r"\\.\pipe\custom-endpoint-{}-{n}", std::process::id()));
+        let handle = start_test_server(&pipe).await;
+
+        // The first connection is what a readiness probe makes; the second is the real client.
+        drop(ClientOptions::new().open(&pipe).expect("first connection"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let client = ClientOptions::new().open(&pipe).expect("the pipe must still exist under its own name");
+        let (reader, mut writer) = tokio::io::split(client);
+        writer.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n").await.expect("write ping request");
+        writer.flush().await.expect("flush");
+        let mut line = String::new();
+        BufReader::new(reader).read_line(&mut line).await.expect("read response");
+        let resp: Response = serde_json::from_str(&line).expect("parse response");
+        assert_eq!(resp.result.expect("ping result")["status"], serde_json::json!("ok"));
 
         handle.abort();
         let _ = handle.await;
