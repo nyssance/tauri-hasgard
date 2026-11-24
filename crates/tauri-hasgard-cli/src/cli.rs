@@ -110,7 +110,7 @@ pub(crate) enum Command {
         #[arg(long)]
         click_count: Option<u32>,
         /// Press at this offset from the element's top-left, not its centre.
-        #[arg(long, value_name = "X,Y", value_parser = parse_position)]
+        #[arg(long, value_name = "X,Y", value_parser = parse_position, allow_hyphen_values = true)]
         position: Option<(f64, f64)>,
     },
     /// Double-click an element. Shorthand for `click --click-count 2`.
@@ -210,7 +210,7 @@ pub(crate) enum Command {
     Select {
         target: String,
         /// An option's value or visible label. Several select that set in a `<select multiple>`.
-        #[arg(required = true, num_args = 1..)]
+        #[arg(required = true, num_args = 1.., allow_hyphen_values = true)]
         values: Vec<String>,
     },
     /// Toggle a checkbox, or drive it to a state with --state.
@@ -224,12 +224,14 @@ pub(crate) enum Command {
     /// Scroll the webview document or an element.
     Scroll {
         direction: String,
-        amount: Option<i32>,
+        /// Pixels. 300 when omitted.
+        #[arg(allow_negative_numbers = true)]
+        amount: Option<f64>,
         /// Scroll this element instead of the document, by snapshot ref.
         #[arg(long, conflicts_with = "target")]
         r#ref: Option<String>,
         /// Scroll this element instead of the document: a ref, a CSS selector, or x,y.
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         target: Option<String>,
     },
     /// Drag an element to another element or by offset.
@@ -238,7 +240,7 @@ pub(crate) enum Command {
         #[arg(conflicts_with = "offset")]
         target: Option<String>,
         /// Pixel offset as X,Y (e.g., "0,100").
-        #[arg(long, value_name = "X,Y", conflicts_with = "target")]
+        #[arg(long, value_name = "X,Y", conflicts_with = "target", allow_hyphen_values = true)]
         offset: Option<String>,
     },
     /// Simulate a file drop on an element.
@@ -551,8 +553,12 @@ pub(crate) enum DownloadsCommand {
     /// Show the downloads seen so far: every window's, or one window's with --window.
     List,
     /// Wait for a download to finish and print it, with the path it was saved to.
+    ///
+    /// Without --since-id this waits for one that finishes after the command starts, so run
+    /// it before the action that downloads. To wait after the action, pass the id of the last
+    /// download `downloads list` showed beforehand, or 0 when there was none.
     Wait {
-        /// Only a download started after this one.
+        /// A download started after this one, even if it has already finished.
         #[arg(long)]
         since_id: Option<u64>,
         #[arg(long, default_value = "10000")]
@@ -721,8 +727,8 @@ mod tests {
 
     #[test]
     fn test_parse_target_coords() {
-        assert_eq!(parse_target("100,200"), Target::Coords(100, 200));
-        assert_eq!(parse_target("0, 0"), Target::Coords(0, 0));
+        assert_eq!(parse_target("100,200"), Target::Coords(100.0, 200.0));
+        assert_eq!(parse_target("0, 0"), Target::Coords(0.0, 0.0));
     }
 
     #[test]
@@ -1185,5 +1191,98 @@ mod position_tests {
         } else {
             panic!("expected fill");
         }
+    }
+
+    /// Split a line the export wrote: words, with single-quoted ones as the shell reads them.
+    fn shell_words(line: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut word = String::new();
+        let mut quoted = false;
+        let mut open = false;
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\'' => {
+                    quoted = !quoted;
+                    open = true;
+                }
+                '\\' if !quoted => {
+                    if let Some(next) = chars.next() {
+                        word.push(next);
+                    }
+                }
+                ' ' if !quoted => {
+                    if open || !word.is_empty() {
+                        words.push(std::mem::take(&mut word));
+                    }
+                    open = false;
+                }
+                other => word.push(other),
+            }
+        }
+        if open || !word.is_empty() {
+            words.push(word);
+        }
+        words
+    }
+
+    #[test]
+    fn every_exported_command_is_one_this_cli_reads_back() {
+        use serde_json::json;
+        use tauri_hasgard_mcp::support::scoped_cli_command;
+        // Entries as the plugin records them: a parameter named `action` sits under `arguments`.
+        let recorded = [
+            (
+                "click",
+                json!({"selector": "#pay", "window": "main", "frame": ["#pane"], "modifiers": ["Shift"],
+                "button": "right", "clickCount": 2, "position": {"x": -3, "y": 4.5}}),
+            ),
+            ("click", json!({"x": 100.5, "y": 200})),
+            ("click", json!({"x": -5, "y": 10})),
+            ("fill", json!({"ref": "e3", "value": "-h"})),
+            ("fill", json!({"selector": "#a", "value": "--json"})),
+            ("type", json!({"selector": "#a", "text": "--help"})),
+            ("select", json!({"selector": "#s", "values": ["-1", "b c"]})),
+            ("check", json!({"selector": "#agree", "checked": false})),
+            ("scroll", json!({"direction": "down", "amount": -40.5, "x": -5, "y": 10})),
+            ("scroll", json!({"direction": "up", "amount": 120})),
+            ("drag", json!({"source": {"selector": "#a"}, "offset": {"x": -10, "y": 20}})),
+            ("drag", json!({"source": {"ref": "e1"}, "target": {"selector": "#b"}})),
+            ("wheel", json!({"deltaX": -3, "deltaY": 120.5, "selector": "#list"})),
+            ("press", json!({"key": "Shift+Tab"})),
+            ("navigate", json!({"url": "https://app.test/?q=-1"})),
+            ("dialog.handle", json!({"arguments": {"action": "accept"}, "promptText": "-x"})),
+            (
+                "nativeDialog.handle",
+                json!({"arguments": {"action": "accept"}, "paths": ["-x", "/tmp/a b"], "button": "-y"}),
+            ),
+            ("route.add", json!({"arguments": {"action": "abort"}, "pattern": "**/x", "method": "GET", "times": 2})),
+            (
+                "route.add",
+                json!({"pattern": "-weird", "status": 201, "body": "-1", "contentType": "-t", "method": "POST"}),
+            ),
+            ("route.clear", json!({})),
+            ("window.resize", json!({"width": 480.5, "height": 800})),
+            ("window.move", json!({"x": -20, "y": 30})),
+            ("event.emit", json!({"event": "a:b", "payload": -1})),
+            ("storage.set", json!({"session": true, "key": "-k", "value": "-h"})),
+            ("storage.clear", json!({})),
+            ("cookies.clear", json!({"name": "-x", "domain": "app.test"})),
+        ];
+        for (action, entry) in recorded {
+            let line = scoped_cli_command(action, &entry);
+            assert!(line.starts_with("tauri-hasgard "), "{action} exported as a comment: {line}");
+            let parsed = Cli::try_parse_from(shell_words(&line));
+            assert!(parsed.is_ok(), "{line}\ndoes not parse: {}", parsed.err().map_or_default(|e| e.to_string()));
+        }
+        // The policy and the kind of rule come back from under `arguments`.
+        let abort = scoped_cli_command("route.add", &json!({"arguments": {"action": "abort"}, "pattern": "**/x"}));
+        assert!(abort.starts_with("tauri-hasgard route abort"), "{abort}");
+        let accept = scoped_cli_command("dialog.handle", &json!({"arguments": {"action": "accept"}}));
+        assert_eq!(accept, "tauri-hasgard dialog accept");
+        // A value that is itself a flag stays a value.
+        let filled =
+            Cli::try_parse_from(shell_words(&scoped_cli_command("fill", &json!({"selector": "#a", "value": "-h"}))));
+        assert!(matches!(filled.expect("fill").command, Command::Fill { value, .. } if value == "-h"));
     }
 }

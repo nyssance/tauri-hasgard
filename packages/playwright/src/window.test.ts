@@ -544,11 +544,19 @@ test("downloads are waited for and listed as the application reported them", asy
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")
   const application = new HasgardApplication(rpc)
-  const download = { id: 4, timestamp: 9, window: "main", url: "blob:x", path: "/tmp/a.txt", state: "finished" }
+  const download = {
+    id: 4,
+    timestamp: 9,
+    window: "main",
+    url: "blob:x",
+    path: "/tmp/a.txt",
+    ended: 2,
+    state: "finished"
+  }
 
-  call.mockResolvedValueOnce(download)
+  call.mockResolvedValueOnce({ ...download, session: 77 })
   expect(await application.waitForDownload({ timeoutMs: 3_000, sinceId: 3, window: "main" })).toEqual(download)
-  call.mockResolvedValueOnce({ downloads: [download], directory: null })
+  call.mockResolvedValueOnce({ downloads: [download], directory: null, session: 77 })
   expect(await application.downloads.list()).toEqual([download])
   call.mockResolvedValueOnce({ directory: "/tmp/out" })
   await application.downloads.setDirectory("/tmp/out")
@@ -558,7 +566,41 @@ test("downloads are waited for and listed as the application reported them", asy
   expect(call).toHaveBeenNthCalledWith(3, "downloads.setDirectory", { path: "/tmp/out" })
 
   call.mockResolvedValueOnce({ ...download, state: "paused" })
-  await expect(application.waitForDownload()).rejects.toThrow(/download\.state/)
+  await expect(application.waitForDownload({ sinceId: 0 })).rejects.toThrow(/download\.state/)
+})
+
+test("each finished download answers one waitForDownload, in one run of the application", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const application = new HasgardApplication(rpc)
+  const file = (id: number, ended: number) => ({
+    id,
+    timestamp: 1,
+    window: "main",
+    url: "blob:x",
+    path: `/tmp/${id}`,
+    ended,
+    state: "finished"
+  })
+  const waited = () => call.mock.calls.filter(([method]) => method === "downloads.wait").map(([, params]) => params)
+
+  call.mockResolvedValueOnce({ downloads: [], directory: null, session: 77 })
+  call.mockResolvedValueOnce({ ...file(1, 1), session: 77 })
+  await application.waitForDownload()
+  // The second call waits past the first one's file, even if the next already finished.
+  call.mockResolvedValueOnce({ downloads: [], directory: null, session: 77 })
+  call.mockResolvedValueOnce({ ...file(2, 2), session: 77 })
+  await application.waitForDownload()
+  // The application was restarted: its downloads are counted from the start again.
+  call.mockResolvedValueOnce({ downloads: [], directory: null, session: 99 })
+  call.mockResolvedValueOnce({ ...file(1, 1), session: 99 })
+  await application.waitForDownload()
+
+  expect(waited()).toEqual([
+    { session: 77, afterEnded: 0 },
+    { session: 77, afterEnded: 1 },
+    { session: 99, afterEnded: 0 }
+  ])
 })
 
 test("each event answers one waitForEvent", async () => {

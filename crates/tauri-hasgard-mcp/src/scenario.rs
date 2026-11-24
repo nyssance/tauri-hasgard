@@ -70,7 +70,7 @@ pub struct Step {
     pub expected: Option<String>,
     pub selector: Option<String>,
     pub direction: Option<String>,
-    pub amount: Option<i32>,
+    pub amount: Option<f64>,
     #[serde(rename = "ref")]
     pub step_ref: Option<String>,
     pub gone: Option<bool>,
@@ -174,12 +174,10 @@ pub fn parse_scenario(content: &str) -> Result<Scenario> {
 
 fn validate_step(step: &Step) -> Result<()> {
     let required: &[(&str, Option<&str>)] = match step.action.as_str() {
-        "click" | "dblclick" | "hover" | "focus" | "blur" | "assert-exists" | "assert-visible" | "assert-hidden" => {
-            &[("target", step.target.as_deref())]
-        }
         // An empty list clears the input, so the list has to be stated.
         "set-input-files" if step.files.is_none() => &[("target", step.target.as_deref()), ("files", None)],
-        "set-input-files" => &[("target", step.target.as_deref())],
+        "click" | "dblclick" | "hover" | "focus" | "blur" | "check" | "set-input-files" | "assert-exists"
+        | "assert-visible" | "assert-hidden" => &[("target", step.target.as_deref())],
         "select" if step.values.is_some() => &[("target", step.target.as_deref())],
         "fill" | "select" => &[("target", step.target.as_deref()), ("value", step.value.as_deref())],
         "drag" => &[("target", step.target.as_deref()), ("to", step.to.as_deref())],
@@ -730,6 +728,9 @@ mod tests {
         // Leaving the list out would clear the input; clearing has to be asked for.
         assert!(super::parse_scenario("[[step]]\naction='set-input-files'\ntarget='#f'").is_err());
         assert!(super::parse_scenario("[[step]]\naction='set-input-files'\ntarget='#f'\nfiles=[]").is_ok());
+        // Every action the runner dispatches has to pass validation; `check` did not.
+        assert!(super::parse_scenario("[[step]]\naction='check'\ntarget='#agree'").is_ok());
+        assert!(super::parse_scenario("[[step]]\naction='check'").is_err());
     }
 
     use super::*;

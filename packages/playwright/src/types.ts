@@ -355,6 +355,8 @@ export interface Download {
   url: string
   /** Where the file is, or was to be, saved. */
   path: string | null
+  /** Its place among the downloads that have ended, or null while it is in flight. */
+  ended: number | null
   state: "started" | "finished" | "failed"
 }
 

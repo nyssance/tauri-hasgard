@@ -507,7 +507,26 @@ try {
   await until(
     async () => (await evaluate("guest", 'document.querySelector("#delayed-result").textContent')) === "true",
     "Trusted click on #delayed"
-  )
+  ).catch(async (error) => {
+    // Say what the page looked like: whether the button was enabled, and what lay at its centre.
+    const seen = await evaluate(
+      "guest",
+      `(() => {
+        const button = document.querySelector("#delayed")
+        const box = button.getBoundingClientRect()
+        const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+        return JSON.stringify({
+          disabled: button.disabled,
+          result: document.querySelector("#delayed-result").textContent,
+          box: [box.x, box.y, box.width, box.height],
+          viewport: [innerWidth, innerHeight, scrollX, scrollY],
+          atCentre: at ? at.tagName + "#" + at.id : null,
+          focused: document.hasFocus()
+        })
+      })()`
+    )
+    throw new Error(`${error.message}: ${seen}`)
+  })
   const referenced = await rpc("query", { by: "selector", value: "#trusted" }, "guest")
   await rpc("click", { ref: referenced.elements[0].ref }, "guest")
   assert.equal(await evaluate("guest", 'document.querySelectorAll("[data-hasgard-action]").length'), 0)

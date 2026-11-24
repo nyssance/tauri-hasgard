@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     model::{
@@ -41,6 +41,10 @@ pub struct HasgardMcpServer {
     app: App,
     window: Option<String>,
     dangerous: bool,
+    /// The last download a `downloads` wait answered with: the application's run and the
+    /// download's place among those that ended in it. An agent acts and then waits, so the
+    /// wait has to count a download that finished in between.
+    last_download: Arc<std::sync::Mutex<Option<(u64, u64)>>>,
 }
 
 impl std::fmt::Debug for HasgardMcpServer {
@@ -54,6 +58,7 @@ impl std::fmt::Debug for HasgardMcpServer {
             .field("app", &app)
             .field("window", &self.window)
             .field("dangerous", &self.dangerous)
+            .field("last_download", &self.last_download)
             .finish()
     }
 }
@@ -109,6 +114,7 @@ impl HasgardMcpServer {
             app: App::Endpoint { socket, resolved: Arc::new(OnceLock::new()) },
             window,
             dangerous: dangerous_mcp_tools_enabled(),
+            last_download: Arc::default(),
         }
     }
 
@@ -125,6 +131,7 @@ impl HasgardMcpServer {
             app: App::InProcess(Arc::new(move |method, params| Box::pin(call(method, params)))),
             window,
             dangerous: dangerous_mcp_tools_enabled(),
+            last_download: Arc::default(),
         }
     }
 
@@ -170,6 +177,33 @@ impl HasgardMcpServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(match self.call_app(method, params, window).await {
             Ok(result) => tool_success(result),
+            Err(err) => tool_error(&err),
+        })
+    }
+
+    /// Wait for the next download to end after the last one this server answered with,
+    /// whether it ends before or after this call.
+    async fn wait_for_next_download(
+        &self, mut params: Value, window: Option<String>,
+    ) -> Result<CallToolResult, McpError> {
+        let waited = async {
+            // A place among ended downloads belongs to one run of the application.
+            let listing = self.call_app("downloads.list", Some(json!({})), None).await?;
+            let session = listing["session"].as_u64().context("downloads.list answered without a session")?;
+            let seen = *self.last_download.lock().expect("download cursor");
+            params["session"] = json!(session);
+            params["afterEnded"] = json!(seen.filter(|(run, _)| *run == session).map_or(0, |(_, ended)| ended));
+            let download = self.call_app("downloads.wait", Some(params), window).await?;
+            let ended = download["ended"].as_u64().context("downloads.wait answered without the download's place")?;
+            let mut last = self.last_download.lock().expect("download cursor");
+            // Two waits may be in flight; the later place stands.
+            if last.is_none_or(|(run, place)| run != session || place < ended) {
+                *last = Some((session, ended));
+            }
+            Ok::<Value, anyhow::Error>(download)
+        };
+        Ok(match waited.await {
+            Ok(download) => tool_success(download),
             Err(err) => tool_error(&err),
         })
     }
@@ -301,7 +335,7 @@ impl HasgardMcpServer {
                     (None, None) => json!({}),
                 };
                 params["direction"] = json!(optional_string(&args, "direction")?.unwrap_or_else(|| "down".to_owned()));
-                params["amount"] = json!(optional_i32(&args, "amount")?);
+                params["amount"] = json!(optional_number(&args, "amount")?);
                 insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("scroll", Some(params), window).await
             }
@@ -401,16 +435,20 @@ impl HasgardMcpServer {
             }
             "downloads" => {
                 let mut params = json!({});
+                let window = optional_string(&args, "window")?;
                 let method = match required_string(&args, "action")?.as_str() {
                     "list" => "downloads.list",
                     "wait" => {
                         if let Some(timeout) = optional_u64(&args, "timeout")? {
                             params["timeout"] = json!(timeout);
                         }
-                        if let Some(since) = optional_u64(&args, "since_id")? {
-                            params["sinceId"] = json!(since);
-                        }
-                        "downloads.wait"
+                        return match optional_u64(&args, "since_id")? {
+                            Some(since) => {
+                                params["sinceId"] = json!(since);
+                                self.call_app_tool("downloads.wait", Some(params), window).await
+                            }
+                            None => self.wait_for_next_download(params, window).await,
+                        };
                     }
                     "set_directory" => {
                         params["path"] = json!(optional_string(&args, "path")?);
@@ -424,7 +462,7 @@ impl HasgardMcpServer {
                     }
                 };
                 // A window narrows the view to its own downloads, and only when the caller names one.
-                self.call_app_tool(method, Some(params), optional_string(&args, "window")?).await
+                self.call_app_tool(method, Some(params), window).await
             }
             "clipboard" => match required_string(&args, "action")?.as_str() {
                 "read" => self.call_app_tool("clipboard.read", None, None).await,
@@ -1165,8 +1203,10 @@ fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "downloads",
-            description: "The files a webview downloads. wait resolves when one finishes, with the path it was saved \
-                          to. Available where the application passes Hasgard's observer to its download hook.",
+            description: "The files a webview downloads. wait answers with the next one to finish that an earlier \
+                          wait has not answered with, and the path it was saved to; it may be called after the \
+                          action that downloads. On CEF call set_directory first. Available where the application \
+                          passes Hasgard's observer to its download hook.",
             schema: downloads_schema,
             read_only: false,
             destructive: false,
@@ -1769,16 +1809,6 @@ fn optional_usize(args: &JsonObject, name: &str) -> Result<Option<usize>, McpErr
         .transpose()
 }
 
-fn optional_i32(args: &JsonObject, name: &str) -> Result<Option<i32>, McpError> {
-    match args.get(name) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => {
-            let parsed = value.as_i64().ok_or_else(|| invalid_params(format!("'{name}' must be an integer")))?;
-            i32::try_from(parsed).map(Some).map_err(|_| invalid_params(format!("'{name}' is out of range for i32")))
-        }
-    }
-}
-
 fn optional_u8(args: &JsonObject, name: &str) -> Result<Option<u8>, McpError> {
     match optional_u64(args, name)? {
         Some(value) => {
@@ -2146,7 +2176,7 @@ fn scroll_schema() -> Arc<JsonObject> {
     object_schema(
         props([
             ("direction", enum_prop("Direction to scroll.", &["up", "down", "left", "right", "top", "bottom"])),
-            ("amount", integer_prop("Pixel amount to scroll.")),
+            ("amount", number_prop("Pixels to scroll. 300 when omitted.")),
             ("ref", string_prop("Optional element ref, with or without @.")),
             ("target", string_prop("Scroll this element instead of the document: ref, CSS selector, or x,y.")),
         ]),

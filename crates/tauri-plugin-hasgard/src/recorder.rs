@@ -3,13 +3,36 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// A single recorded user action.
+/// A single recorded user action: the method under `action`, when it ran, and the
+/// method's own parameters beside them.
+///
+/// A parameter that is itself called `action` or `timestamp` cannot sit beside the
+/// entry's own; it is kept under [`ARGUMENTS`] instead, and replay puts it back.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct RecordEntry {
     pub action: String,
     pub timestamp: u64,
     #[serde(flatten)]
     pub params: serde_json::Map<String, Value>,
+}
+
+/// Where an entry keeps the parameters whose names its own fields already use.
+const ARGUMENTS: &str = "arguments";
+const RESERVED: [&str; 2] = ["action", "timestamp"];
+
+/// A method's parameters as an entry stores them.
+fn entry_params(params: Option<&Value>) -> serde_json::Map<String, Value> {
+    let mut map = params.and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    let mut displaced = serde_json::Map::new();
+    for name in RESERVED {
+        if let Some(value) = map.remove(name) {
+            displaced.insert(name.to_owned(), value);
+        }
+    }
+    if !displaced.is_empty() {
+        map.insert(ARGUMENTS.to_owned(), Value::Object(displaced));
+    }
+    map
 }
 
 struct RecorderState {
@@ -69,9 +92,7 @@ impl Recorder {
         let timestamp = u64::try_from(s.start_time.expect("start_time must be set when active").elapsed().as_millis())
             .unwrap_or(u64::MAX);
 
-        let map = params.and_then(|v| v.as_object().cloned()).unwrap_or_default();
-
-        s.entries.push(RecordEntry { action: method.to_string(), timestamp, params: map });
+        s.entries.push(RecordEntry { action: method.to_string(), timestamp, params: entry_params(params) });
     }
 
     /// Explicitly add an entry (used by CLI-side `record.add`).
@@ -275,5 +296,23 @@ mod tests {
         }
         let entries = recorder.stop().expect("recording");
         assert_eq!(entries.len(), 6);
+    }
+
+    #[test]
+    fn a_parameter_named_like_the_entry_s_own_fields_does_not_replace_them() {
+        // `dialog.handle`, `nativeDialog.handle` and `route.add` each take an `action` of their own.
+        let recorder = Recorder::new();
+        recorder.start();
+        recorder.record("dialog.handle", Some(&serde_json::json!({"action": "accept", "promptText": "x"})));
+        recorder.record("route.add", Some(&serde_json::json!({"pattern": "**/x", "action": "abort", "timestamp": 9})));
+        recorder.record("click", Some(&serde_json::json!({"selector": "#a"})));
+        let entries = serde_json::to_value(recorder.stop().expect("active")).expect("entries serialize");
+        assert_eq!(entries[0]["action"], "dialog.handle");
+        assert_eq!(entries[0]["arguments"], serde_json::json!({"action": "accept"}));
+        assert_eq!(entries[0]["promptText"], "x");
+        assert_eq!(entries[1]["action"], "route.add");
+        assert_eq!(entries[1]["arguments"], serde_json::json!({"action": "abort", "timestamp": 9}));
+        assert!(entries[1]["timestamp"].as_u64().is_some_and(|at| at != 9), "the entry's own time stands");
+        assert!(entries[2].get("arguments").is_none(), "nothing is displaced where nothing collides");
     }
 }

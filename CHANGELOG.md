@@ -1,7 +1,11 @@
 # Unreleased
 
+- Fix recordings of `dialog.handle`, `nativeDialog.handle` and `route.add`: their own `action` parameter replaced the entry's method name, so replay skipped them and export wrote an unknown action. The parameter is now kept under `arguments`.
+- Exported commands put options first as `--name=value` and positionals after `--` when one begins with a hyphen, so a recorded value is never read as a flag.
+- Point targets may be fractional (`click 100.5,200`); `scroll` takes a fractional or negative amount; `select`, `--offset`, `--position` and `scroll --target` accept values that begin with a hyphen.
+- A scenario's `check` step is accepted; it was rejected as unknown.
 - The native dialog policy is now kept under a session key the bridge treats as its own, so `storage.clear` and `storage.list` leave it alone and it survives to the next document.
-- `downloads.wait` answers with the first download to end after the wait began; a later wait is no longer satisfied by an earlier file, and an abandoned wait takes nothing from the next. A finish is matched to its download by path when two share an address, where the platform reports one (macOS does not). `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
+- `downloads.wait` answers with the first download to end after the wait began; a later wait is no longer satisfied by an earlier file, and an abandoned wait takes nothing from the next. Downloads carry `ended`, and `afterEnded` with `session` waits past a known place, so Playwright `waitForDownload` and the MCP `downloads` tool work whether the wait comes before or after the action. A finish is matched to its download by path when two share an address, where the platform reports one (macOS does not). `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
 - Playwright `waitForEvent` resolves with each event once: a second call waits for the next one.
 - `event.emit` rejects a `window` that names no window or webview instead of reporting an event delivered to no one.
 - Replaying a recording with `--window` no longer narrows an event that was recorded as a broadcast.

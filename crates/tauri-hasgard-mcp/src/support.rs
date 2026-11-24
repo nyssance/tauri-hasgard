@@ -18,11 +18,11 @@ use serde_json::{Value, json};
 use crate::client::Client;
 
 /// Parsed target for element-targeting commands.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Target {
     Ref(String),
     Selector(String),
-    Coords(i32, i32),
+    Coords(f64, f64),
 }
 
 /// Parse a target string into a `Target` variant.
@@ -32,7 +32,7 @@ pub fn parse_target(s: &str) -> Target {
     }
 
     if let Some((x_str, y_str)) = s.split_once(',')
-        && let (Ok(x), Ok(y)) = (x_str.trim().parse::<i32>(), y_str.trim().parse::<i32>())
+        && let (Ok(x), Ok(y)) = (x_str.trim().parse::<f64>(), y_str.trim().parse::<f64>())
     {
         return Target::Coords(x, y);
     }
@@ -235,6 +235,25 @@ pub fn mime_from_ext(path: &std::path::Path) -> &'static str {
     }
 }
 
+/// The parameters a recorded entry was called with: everything beside the entry's own
+/// `action` and `timestamp`, with the parameters that share those names taken back out of
+/// `arguments`, where the recorder keeps them.
+pub fn replay_params(entry: &Value) -> serde_json::Map<String, Value> {
+    let mut params = serde_json::Map::new();
+    let Some(fields) = entry.as_object() else { return params };
+    for (name, value) in fields {
+        if name != "action" && name != "timestamp" && name != "arguments" {
+            params.insert(name.clone(), value.clone());
+        }
+    }
+    if let Some(displaced) = fields.get("arguments").and_then(Value::as_object) {
+        for (name, value) in displaced {
+            params.insert(name.clone(), value.clone());
+        }
+    }
+    params
+}
+
 pub async fn run_replay_command(
     client: &mut Client, path: &std::path::Path, export: Option<&str>, window: Option<&str>,
 ) -> Result<Value> {
@@ -264,14 +283,7 @@ pub async fn run_replay_command(
             continue;
         }
 
-        let mut params = serde_json::Map::new();
-        if let Some(obj) = entry.as_object() {
-            for (k, v) in obj {
-                if k != "action" && k != "timestamp" {
-                    params.insert(k.clone(), v.clone());
-                }
-            }
-        }
+        let mut params = replay_params(entry);
 
         // An event recorded without a window was sent to every listener; naming one on replay
         // would narrow it to that window's.
@@ -360,6 +372,8 @@ pub fn export_shell_script(entries: &[Value]) -> Result<String> {
 
 /// The command for one recorded entry, aimed at the window and the frame it was recorded in.
 pub fn scoped_cli_command(action: &str, entry: &Value) -> String {
+    // The call as it was made: a parameter named like the entry's own fields is put back.
+    let entry = &Value::Object(replay_params(entry));
     let command = entry_to_cli_command(action, entry);
     let Some(arguments) = command.strip_prefix("tauri-hasgard ") else {
         // A comment: there is no command to scope.
@@ -464,178 +478,232 @@ fn missing_field(action: &str, field: &str) -> String {
     format!("# {action}: the recording has no {field}")
 }
 
+/// One exported command line. Options come first, each as `--name=value`, and the
+/// positionals follow `--` when one of them begins with a hyphen: a recorded value is
+/// whatever the page was given, and must not be read as a flag.
+struct Line {
+    command: String,
+    options: Vec<String>,
+    positionals: Vec<String>,
+}
+
+impl Line {
+    fn new(command: &str) -> Self {
+        Self { command: command.to_owned(), options: Vec::new(), positionals: Vec::new() }
+    }
+
+    /// An option whose value is text.
+    fn option(mut self, name: &str, value: &str) -> Self {
+        self.options.push(format!("--{name}={}", shell_escape(value)));
+        self
+    }
+
+    /// An option whose value is already in its command-line form: a number, or a pair of them.
+    fn raw_option(mut self, name: &str, value: impl std::fmt::Display) -> Self {
+        self.options.push(format!("--{name}={value}"));
+        self
+    }
+
+    /// A positional already in its command-line form: an escaped string, a point, a number.
+    fn positional(mut self, value: impl Into<String>) -> Self {
+        self.positionals.push(value.into());
+        self
+    }
+
+    fn text(self, value: &str) -> Self {
+        self.positional(shell_escape(value))
+    }
+
+    fn render(self) -> String {
+        let mut line = format!("tauri-hasgard {}", self.command);
+        for option in &self.options {
+            line.push(' ');
+            line.push_str(option);
+        }
+        if self.positionals.iter().any(|value| value.trim_start_matches('\'').starts_with('-')) {
+            line.push_str(" --");
+        }
+        for value in &self.positionals {
+            line.push(' ');
+            line.push_str(value);
+        }
+        line
+    }
+}
+
+fn recorded_number(entry: &Value, field: &str) -> Option<f64> {
+    entry.get(field).and_then(Value::as_f64)
+}
+
+fn recorded_strings<'a>(entry: &'a Value, field: &str) -> impl Iterator<Item = &'a str> {
+    entry.get(field).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
+}
+
+/// The command for one call: `action` is the method and `entry` its parameters.
 pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
     // A ref, a selector, or a point: whatever the action was aimed at.
-    let target = resolve_export_target(Some(entry)).unwrap_or_default();
+    let target = resolve_export_target(Some(entry));
 
     // A command missing what it acts on would run and do something else; say what is missing instead.
-    if target.is_empty()
-        && matches!(action, "click" | "fill" | "type" | "select" | "check" | "hover" | "focus" | "blur" | "dblclick")
-    {
+    let Some(aimed) = target.clone().or_else(|| {
+        (!matches!(action, "click" | "fill" | "type" | "select" | "check" | "hover" | "focus" | "blur" | "dblclick"))
+            .then(String::new)
+    }) else {
         return missing_field(action, "ref, selector or point");
-    }
+    };
     match action {
         "click" => {
-            let mut cmd = format!("tauri-hasgard click {target}");
-            for modifier in
-                entry.get("modifiers").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
-            {
-                let _ = write!(cmd, " --modifier {}", shell_escape(modifier));
+            let mut line = Line::new("click");
+            for modifier in recorded_strings(entry, "modifiers") {
+                line = line.option("modifier", modifier);
             }
             if let Some(button) = recorded_text(entry, "button") {
-                let _ = write!(cmd, " --button {}", shell_escape(button));
+                line = line.option("button", button);
             }
             if let Some(count) = entry.get("clickCount").and_then(Value::as_u64) {
-                let _ = write!(cmd, " --click-count {count}");
+                line = line.raw_option("click-count", count);
             }
             let offset = |axis: &str| entry.get("position").and_then(|p| p.get(axis)).and_then(Value::as_f64);
             if let (Some(x), Some(y)) = (offset("x"), offset("y")) {
-                let _ = write!(cmd, " --position {x},{y}");
+                line = line.raw_option("position", format!("{x},{y}"));
             }
-            cmd
+            line.positional(aimed).render()
         }
         "fill" => match recorded_text(entry, "value") {
-            Some(value) => format!("tauri-hasgard fill {target} {}", shell_escape(value)),
+            Some(value) => Line::new("fill").positional(aimed).text(value).render(),
             None => missing_field(action, "value"),
         },
         "type" => match recorded_text(entry, "text") {
-            Some(text) => format!("tauri-hasgard type {target} {}", shell_escape(text)),
+            Some(text) => Line::new("type").positional(aimed).text(text).render(),
             None => missing_field(action, "text"),
         },
         "press" => match recorded_text(entry, "key") {
-            Some(key) => format!("tauri-hasgard press {}", shell_escape(key)),
+            Some(key) => Line::new("press").text(key).render(),
             None => missing_field(action, "key"),
         },
         "select" => {
-            let several = entry.get("values").and_then(Value::as_array);
-            let chosen: Vec<&str> = match (recorded_text(entry, "value"), several) {
-                (Some(value), _) => vec![value],
-                (None, Some(values)) => values.iter().filter_map(Value::as_str).collect(),
-                (None, None) => Vec::new(),
+            let chosen: Vec<&str> = match recorded_text(entry, "value") {
+                Some(value) => vec![value],
+                None => recorded_strings(entry, "values").collect(),
             };
             if chosen.is_empty() {
                 return missing_field(action, "value");
             }
-            let mut cmd = format!("tauri-hasgard select {target}");
-            for value in chosen {
-                let _ = write!(cmd, " {}", shell_escape(value));
-            }
-            cmd
+            chosen.into_iter().fold(Line::new("select").positional(aimed), Line::text).render()
         }
         // Without a recorded state the action was a toggle, and exports as one.
         "check" => match entry.get("checked").and_then(Value::as_bool) {
-            Some(checked) => format!("tauri-hasgard check {target} --state {}", if checked { "on" } else { "off" }),
-            None => format!("tauri-hasgard check {target}"),
+            Some(checked) => {
+                Line::new("check").raw_option("state", if checked { "on" } else { "off" }).positional(aimed).render()
+            }
+            None => Line::new("check").positional(aimed).render(),
         },
-        "hover" | "focus" | "blur" | "dblclick" => format!("tauri-hasgard {action} {target}"),
+        "hover" | "focus" | "blur" | "dblclick" => Line::new(action).positional(aimed).render(),
         "scroll" => {
             // The protocol's own default direction.
-            let dir = recorded_text(entry, "direction").unwrap_or("down");
-            let mut cmd = format!("tauri-hasgard scroll {}", shell_escape(dir));
-            if let Some(amt) = entry.get("amount").and_then(serde_json::Value::as_i64) {
-                let _ = write!(cmd, " {amt}");
+            let mut line = Line::new("scroll").text(recorded_text(entry, "direction").unwrap_or("down"));
+            if let Some(amount) = recorded_number(entry, "amount") {
+                line = line.positional(amount.to_string());
             }
             // A scroll of an element names it; without one the document scrolls.
-            if !target.is_empty() {
-                let _ = write!(cmd, " --target {target}");
+            match target {
+                Some(target) => line.raw_option("target", target).render(),
+                None => line.render(),
             }
-            cmd
         }
         "drag" => {
-            let src = resolve_export_target(entry.get("source"));
-            let dst = resolve_export_target(entry.get("target"));
-            // Offsets may be stored as floats (browser getBoundingClientRect
-            // returns fractional pixels). The CLI --offset parser accepts
-            // f64 values, so pass them through without truncation.
-            let offset = entry.get("offset").and_then(|o| {
-                let x = o.get("x").and_then(serde_json::Value::as_f64)?;
-                let y = o.get("y").and_then(serde_json::Value::as_f64)?;
-                Some(format!("{x},{y}"))
-            });
-            match (src, dst, offset) {
-                (Some(s), Some(d), _) => format!("tauri-hasgard drag {s} {d}"),
-                (Some(s), None, Some(off)) => format!("tauri-hasgard drag {s} --offset {off}"),
-                (Some(s), None, None) => format!("tauri-hasgard drag {s}"),
-                _ => "# drag: missing source ref/selector".to_string(),
+            let Some(source) = resolve_export_target(entry.get("source")) else {
+                return missing_field(action, "source");
+            };
+            let line = Line::new("drag").positional(source);
+            // Offsets may be fractions of a pixel; the CLI takes them as they are.
+            let offset = |axis: &str| entry.get("offset").and_then(|o| o.get(axis)).and_then(Value::as_f64);
+            match (resolve_export_target(entry.get("target")), offset("x"), offset("y")) {
+                (Some(destination), ..) => line.positional(destination).render(),
+                (None, Some(x), Some(y)) => line.raw_option("offset", format!("{x},{y}")).render(),
+                (None, ..) => line.render(),
             }
         }
-        "drop" => {
-            // drop requires --file with file data; cannot be fully exported
-            // as a shell command since recordings store base64 file contents.
-            format!("# drop {target} (requires --file; not exportable)")
-        }
+        // A drop carries file contents, which a command line cannot.
+        "drop" => format!("# drop {aimed} (requires --file; not exportable)"),
         "navigate" => match recorded_text(entry, "url") {
-            Some(url) => format!("tauri-hasgard navigate {}", shell_escape(url)),
+            Some(url) => Line::new("navigate").text(url).render(),
             None => missing_field(action, "url"),
         },
-        _ => later_action_command(action, entry, &target),
+        _ => later_action_command(action, entry, target),
     }
+}
+
+/// The rule a recorded `route.add` installed.
+fn route_command(action: &str, entry: &Value) -> String {
+    let Some(pattern) = recorded_text(entry, "pattern") else {
+        return missing_field(action, "pattern");
+    };
+    let abort = recorded_text(entry, "action") == Some("abort");
+    let mut line = Line::new(if abort { "route abort" } else { "route fulfill" });
+    if !abort {
+        if let Some(status) = entry.get("status").and_then(Value::as_u64) {
+            line = line.raw_option("status", status);
+        }
+        if let Some(body) = recorded_text(entry, "body") {
+            line = line.option("body", body);
+        }
+        if let Some(content_type) = recorded_text(entry, "contentType") {
+            line = line.option("content-type", content_type);
+        }
+    }
+    // Which requests the rule answers is part of the rule.
+    if let Some(method) = recorded_text(entry, "method") {
+        line = line.option("method", method);
+    }
+    if let Some(times) = entry.get("times").and_then(Value::as_u64) {
+        line = line.raw_option("times", times);
+    }
+    line.text(pattern).render()
 }
 
 /// The commands for the actions recorded since the first set: input the page cannot
 /// tell from a user's, and the standing state a flow depends on.
-fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
+fn later_action_command(action: &str, entry: &Value, target: Option<String>) -> String {
     match action {
         "wheel" => {
             // An axis left out is one that did not move.
-            let delta = |axis: &str| entry.get(axis).and_then(Value::as_f64).unwrap_or(0.0);
-            let mut cmd = format!("tauri-hasgard wheel --delta-x {} --delta-y {}", delta("deltaX"), delta("deltaY"));
-            if !target.is_empty() {
-                let _ = write!(cmd, " {target}");
+            let delta = |axis: &str| recorded_number(entry, axis).unwrap_or(0.0);
+            let line = Line::new("wheel").raw_option("delta-x", delta("deltaX")).raw_option("delta-y", delta("deltaY"));
+            match target {
+                Some(target) => line.positional(target).render(),
+                None => line.render(),
             }
-            cmd
         }
         "dialog.handle" | "nativeDialog.handle" => {
-            let command = if action == "dialog.handle" { "dialog" } else { "native-dialog" };
             let Some(policy) = recorded_text(entry, "action") else {
                 return missing_field(action, "action");
             };
-            let mut cmd = format!("tauri-hasgard {command} {}", shell_escape(policy));
-            if let Some(text) = entry.get("promptText").and_then(Value::as_str) {
-                let _ = write!(cmd, " --prompt-text {}", shell_escape(text));
+            let command = if action == "dialog.handle" { "dialog" } else { "native-dialog" };
+            let mut line = Line::new(&format!("{command} {policy}"));
+            if !matches!(policy, "accept" | "dismiss" | "manual") {
+                return format!("# {action}: the recording has an unknown policy");
             }
-            for path in entry.get("paths").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-                let _ = write!(cmd, " --path {}", shell_escape(path));
+            if let Some(text) = recorded_text(entry, "promptText") {
+                line = line.option("prompt-text", text);
             }
-            if let Some(button) = entry.get("button").and_then(Value::as_str) {
-                let _ = write!(cmd, " --button {}", shell_escape(button));
+            for path in recorded_strings(entry, "paths") {
+                line = line.option("path", path);
             }
-            cmd
+            if let Some(button) = recorded_text(entry, "button") {
+                line = line.option("button", button);
+            }
+            line.render()
         }
-        "route.clear" => "tauri-hasgard route clear".to_owned(),
-        "route.add" => {
-            let Some(pattern) = recorded_text(entry, "pattern") else {
-                return missing_field(action, "pattern");
-            };
-            let abort = entry.get("action").and_then(Value::as_str) == Some("abort");
-            let mut cmd =
-                format!("tauri-hasgard route {} {}", if abort { "abort" } else { "fulfill" }, shell_escape(pattern));
-            if !abort {
-                if let Some(status) = entry.get("status").and_then(Value::as_u64) {
-                    let _ = write!(cmd, " --status {status}");
-                }
-                if let Some(body) = entry.get("body").and_then(Value::as_str) {
-                    let _ = write!(cmd, " --body {}", shell_escape(body));
-                }
-                if let Some(content_type) = entry.get("contentType").and_then(Value::as_str) {
-                    let _ = write!(cmd, " --content-type {}", shell_escape(content_type));
-                }
-            }
-            // Which requests the rule answers is part of the rule.
-            if let Some(method) = entry.get("method").and_then(Value::as_str) {
-                let _ = write!(cmd, " --method {}", shell_escape(method));
-            }
-            if let Some(times) = entry.get("times").and_then(Value::as_u64) {
-                let _ = write!(cmd, " --times {times}");
-            }
-            cmd
-        }
+        "route.clear" => Line::new("route clear").render(),
+        "route.add" => route_command(action, entry),
         "window.resize" | "window.move" => {
             let (verb, first, second) =
                 if action == "window.resize" { ("resize", "width", "height") } else { ("move", "x", "y") };
-            let number = |field: &str| entry.get(field).and_then(Value::as_f64);
-            match (number(first), number(second)) {
-                (Some(a), Some(b)) => format!("tauri-hasgard window {verb} {a} {b}"),
+            match (recorded_number(entry, first), recorded_number(entry, second)) {
+                (Some(a), Some(b)) => {
+                    Line::new(&format!("window {verb}")).positional(a.to_string()).positional(b.to_string()).render()
+                }
                 _ => missing_field(action, &format!("{first} and {second}")),
             }
         }
@@ -644,29 +712,29 @@ fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
                 return missing_field(action, "event");
             };
             let payload = entry.get("payload").map_or_else(|| "null".to_owned(), Value::to_string);
-            format!("tauri-hasgard event emit {} --payload {}", shell_escape(event), shell_escape(&payload))
+            Line::new("event emit").option("payload", &payload).text(event).render()
         }
         "storage.set" | "storage.clear" => {
-            let session = if entry.get("session").and_then(Value::as_bool) == Some(true) { " --session" } else { "" };
+            let storage = if entry.get("session").and_then(Value::as_bool) == Some(true) {
+                "storage --session"
+            } else {
+                "storage"
+            };
             if action == "storage.clear" {
-                return format!("tauri-hasgard storage{session} clear");
+                return Line::new(&format!("{storage} clear")).render();
             }
             match (recorded_text(entry, "key"), recorded_text(entry, "value")) {
-                (Some(key), Some(value)) => {
-                    format!("tauri-hasgard storage{session} set {} {}", shell_escape(key), shell_escape(value))
-                }
+                (Some(key), Some(value)) => Line::new(&format!("{storage} set")).text(key).text(value).render(),
                 _ => missing_field(action, "key and value"),
             }
         }
-        "cookies.clear" => {
-            let mut cmd = "tauri-hasgard cookies clear".to_owned();
-            for filter in ["url", "name", "domain"] {
-                if let Some(value) = recorded_text(entry, filter) {
-                    let _ = write!(cmd, " --{filter} {}", shell_escape(value));
-                }
-            }
-            cmd
-        }
+        "cookies.clear" => ["url", "name", "domain"]
+            .into_iter()
+            .fold(Line::new("cookies clear"), |line, filter| match recorded_text(entry, filter) {
+                Some(value) => line.option(filter, value),
+                None => line,
+            })
+            .render(),
         // These carry data a one-line command cannot: file contents, or a cookie's many fields.
         "setInputFiles" | "cookies.set" => {
             format!("# {action}: replayed from the recording; not exportable as one command")
@@ -907,7 +975,7 @@ mod tests {
         });
         let command = entry_to_cli_command("route.add", &route);
         for part in
-            ["route fulfill", "--status 201", "--content-type", "application/json", "--method", "POST", "--times 1"]
+            ["route fulfill", "--status=201", "--content-type='application/json'", "--method='POST'", "--times=1"]
         {
             assert!(command.contains(part), "{command} lacks {part}");
         }
@@ -940,19 +1008,19 @@ mod tests {
             "modifiers": ["Shift", "Meta"], "position": {"x": 3, "y": 4}});
         assert_eq!(
             entry_to_cli_command("click", &point),
-            "tauri-hasgard click 100,200.5 --modifier 'Shift' --modifier 'Meta' --button 'right' --click-count 2 --position 3,4"
+            "tauri-hasgard click --modifier='Shift' --modifier='Meta' --button='right' --click-count=2 --position=3,4 100,200.5"
         );
         let scroll = entry_to_cli_command("scroll", &serde_json::json!({"direction": "down", "x": 10, "y": 20}));
-        assert_eq!(scroll, "tauri-hasgard scroll 'down' --target 10,20");
+        assert_eq!(scroll, "tauri-hasgard scroll --target=10,20 'down'");
         let check = entry_to_cli_command("check", &serde_json::json!({"selector": "#a", "checked": false}));
-        assert_eq!(check, "tauri-hasgard check '#a' --state off");
+        assert_eq!(check, "tauri-hasgard check --state=off '#a'");
         assert_eq!(entry_to_cli_command("check", &serde_json::json!({"selector": "#a"})), "tauri-hasgard check '#a'");
     }
 
     #[test]
     fn storage_and_cookie_clears_export_as_commands() {
         let set = serde_json::json!({"session": true, "key": "token", "value": "-abc"});
-        assert_eq!(entry_to_cli_command("storage.set", &set), "tauri-hasgard storage --session set 'token' '-abc'");
+        assert_eq!(entry_to_cli_command("storage.set", &set), "tauri-hasgard storage --session set -- 'token' '-abc'");
         assert_eq!(entry_to_cli_command("storage.clear", &serde_json::json!({})), "tauri-hasgard storage clear");
         assert_eq!(
             entry_to_cli_command("storage.set", &serde_json::json!({"key": "k"})),
@@ -961,8 +1029,23 @@ mod tests {
         let clear = serde_json::json!({"name": "session", "domain": "app.test"});
         assert_eq!(
             entry_to_cli_command("cookies.clear", &clear),
-            "tauri-hasgard cookies clear --name 'session' --domain 'app.test'"
+            "tauri-hasgard cookies clear --name='session' --domain='app.test'"
         );
+    }
+
+    #[test]
+    fn replay_sends_a_recorded_call_as_it_was_made() {
+        let entry = serde_json::json!({
+            "action": "dialog.handle", "timestamp": 12, "window": "main",
+            "promptText": "x", "arguments": {"action": "accept"}
+        });
+        assert_eq!(
+            Value::Object(replay_params(&entry)),
+            serde_json::json!({"window": "main", "promptText": "x", "action": "accept"})
+        );
+        // An entry with nothing displaced is its own parameters, less the entry's fields.
+        let click = serde_json::json!({"action": "click", "timestamp": 1, "selector": "#a"});
+        assert_eq!(Value::Object(replay_params(&click)), serde_json::json!({"selector": "#a"}));
     }
 
     #[test]
@@ -1004,22 +1087,22 @@ mod tests {
             (
                 "wheel",
                 json!({"deltaX": 0.0, "deltaY": 120.0, "selector": "#list"}),
-                "tauri-hasgard wheel --delta-x 0 --delta-y 120 '#list'",
+                "tauri-hasgard wheel --delta-x=0 --delta-y=120 '#list'",
             ),
             (
                 "dialog.handle",
                 json!({"action": "accept", "promptText": "ok go"}),
-                "tauri-hasgard dialog 'accept' --prompt-text 'ok go'",
+                "tauri-hasgard dialog accept --prompt-text='ok go'",
             ),
             (
                 "nativeDialog.handle",
                 json!({"action": "accept", "paths": ["/tmp/a b.csv"], "button": "Save"}),
-                "tauri-hasgard native-dialog 'accept' --path '/tmp/a b.csv' --button 'Save'",
+                "tauri-hasgard native-dialog accept --path='/tmp/a b.csv' --button='Save'",
             ),
             (
                 "route.add",
                 json!({"pattern": "**/api/user", "action": "fulfill", "status": 503, "body": "down"}),
-                "tauri-hasgard route fulfill '**/api/user' --status 503 --body 'down'",
+                "tauri-hasgard route fulfill --status=503 --body='down' '**/api/user'",
             ),
             ("route.add", json!({"pattern": "**/x", "action": "abort"}), "tauri-hasgard route abort '**/x'"),
             ("route.clear", json!({}), "tauri-hasgard route clear"),
@@ -1027,7 +1110,7 @@ mod tests {
             (
                 "event.emit",
                 json!({"event": "sync:done", "payload": {"n": 1}}),
-                "tauri-hasgard event emit 'sync:done' --payload '{\"n\":1}'",
+                "tauri-hasgard event emit --payload='{\"n\":1}' 'sync:done'",
             ),
         ] {
             assert!(is_replayable(action), "{action} must replay");

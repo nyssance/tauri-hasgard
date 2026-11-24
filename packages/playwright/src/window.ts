@@ -251,6 +251,7 @@ function parseDownload(value: unknown): Download {
     window: expectString(download.window, "download.window"),
     url: expectString(download.url, "download.url"),
     path: expectNullableString(download.path, "download.path"),
+    ended: download.ended === null ? null : expectNumber(download.ended, "download.ended"),
     state
   }
 }
@@ -502,17 +503,38 @@ export class HasgardApplication {
     }
   }
 
+  /** The last download `waitForDownload` resolved with: its place among those that ended, and the run it ended in. */
+  private downloadCursor: { session: number; ended: number } | null = null
+
   /**
-   * Wait for a download to finish and resolve with it: the first to end after
-   * this call began. Call it before the action that starts the download and
-   * await it afterwards. `sinceId` waits for one started after that id instead.
+   * Wait for a download to finish and resolve with it. Each finished download
+   * answers one call, in the order they finished, whether the download ends
+   * before or after the call: start it before the action or after, as suits the
+   * test. `sinceId` waits for one started after that id instead.
    */
   async waitForDownload(options: { timeoutMs?: number; sinceId?: number; window?: string } = {}): Promise<Download> {
     const params: Record<string, JsonValue> = {}
     if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
-    if (options.sinceId !== undefined) params.sinceId = options.sinceId
     if (options.window !== undefined) params.window = options.window
-    return parseDownload(await this.rpc.call("downloads.wait", params))
+    if (options.sinceId !== undefined) {
+      params.sinceId = options.sinceId
+    } else {
+      // Nothing given yet counts as place 0 of the application's current run.
+      const { session } = expectRecord(await this.rpc.call("downloads.list", {}), "downloads.list")
+      const current = expectNumber(session, "downloads.list.session")
+      params.session = current
+      params.afterEnded = this.downloadCursor?.session === current ? this.downloadCursor.ended : 0
+    }
+    const result = expectRecord(await this.rpc.call("downloads.wait", params), "downloads.wait")
+    const download = parseDownload(result)
+    if (options.sinceId === undefined && download.ended !== null) {
+      const session = expectNumber(result.session, "downloads.wait.session")
+      // Two calls may be waiting at once; the later place stands.
+      if (this.downloadCursor?.session !== session || this.downloadCursor.ended < download.ended) {
+        this.downloadCursor = { session, ended: download.ended }
+      }
+    }
+    return download
   }
 
   /** The system clipboard's text, or null when it holds none. */

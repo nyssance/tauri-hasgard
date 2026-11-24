@@ -87,9 +87,9 @@ impl Log {
         }
     }
 
-    /// The first download to have ended that a wait should answer with: one that ended after
-    /// the wait began (`after`), or with `since` one that started after that id. A wait keeps no
-    /// state here, so one that is abandoned takes nothing from the wait that follows it.
+    /// The first download to have ended that a wait should answer with: one that ended later
+    /// than `after`, or with `since` one that started after that id. A wait keeps no state
+    /// here, so one that is abandoned takes nothing from the wait that follows it.
     fn first_ended(&self, window: Option<&str>, after: u64, since: Option<u64>) -> Option<Value> {
         self.downloads
             .iter()
@@ -110,6 +110,13 @@ static LOG: Mutex<Log> = Mutex::new(Log { downloads: VecDeque::new(), sequence: 
 
 fn log() -> std::sync::MutexGuard<'static, Log> {
     LOG.lock().expect("download log")
+}
+
+/// Names this run of the application, so a place among its downloads is not mistaken for
+/// one in another run's.
+fn session_id() -> u64 {
+    static SESSION: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *SESSION.get_or_init(now_ms)
 }
 
 fn now_ms() -> u64 {
@@ -167,6 +174,8 @@ fn describe(download: &Download) -> Value {
         "window": download.window,
         "url": download.url,
         "path": download.path,
+        // Its place among the downloads that have ended, for `afterEnded`; null while in flight.
+        "ended": (download.ended > 0).then_some(download.ended),
         "state": match download.succeeded {
             None => "started",
             Some(true) => "finished",
@@ -197,6 +206,7 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
             "downloads.list" => Ok(json!({
                 "downloads": log().downloads.iter().filter(seen).map(describe).collect::<Vec<_>>(),
                 "directory": log().directory,
+                "session": session_id(),
             })),
             "downloads.clear" => {
                 log().clear(label);
@@ -235,9 +245,23 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
                     )));
                 }
                 let deadline = Instant::now() + Duration::from_millis(timeout);
-                let began = log().ended;
+                // A caller that remembers the last download it was given waits for the next one
+                // to end, whether or not that happens before this call. Its place only means
+                // something in the run of the application that issued it; from another run
+                // nothing has been given yet. Without a place, the wait is for what ends from now.
+                let began = match optional_u64(params, "afterEnded", method)? {
+                    Some(place) => match optional_u64(params, "session", method)? {
+                        Some(session) if session == session_id() => place,
+                        Some(_) => 0,
+                        None => {
+                            return Err(invalid("downloads.wait: 'afterEnded' requires the 'session' it came from"));
+                        }
+                    },
+                    None => log().ended,
+                };
                 loop {
-                    if let Some(download) = log().first_ended(label, began, since) {
+                    if let Some(mut download) = log().first_ended(label, began, since) {
+                        download["session"] = json!(session_id());
                         return Ok(download);
                     }
                     if Instant::now() >= deadline {
