@@ -202,18 +202,12 @@ try {
   assert.ok(frame.width > 100 && frame.height > 100 && frame.scaleFactor >= 1)
   // A child webview has no window of its own; its label names the window that holds it.
   assert.equal((await rpc("window.state", {}, "guest")).width, (await rpc("window.state", {}, "main")).width)
-  // Resizing is exercised on macOS only. On Windows, two of five runs that resized a CEF
-  // window ended with the fixture exiting 5 instead of 0 at shutdown, after every check had
-  // passed and with Chromium logging a rejected blink.mojom.WidgetHost message. Until that
-  // is traced, the Windows run reads the window's state and leaves its size alone.
-  if (mac) {
-    await rpc("window.resize", { width: frame.width - 40, height: frame.height - 20 }, "second")
-    await until(
-      async () => Math.abs((await rpc("window.state", {}, "second")).width - (frame.width - 40)) < 1,
-      "Resized window"
-    )
-    await rpc("window.resize", { width: frame.width, height: frame.height }, "second")
-  }
+  await rpc("window.resize", { width: frame.width - 40, height: frame.height - 20 }, "second")
+  await until(
+    async () => Math.abs((await rpc("window.state", {}, "second")).width - (frame.width - 40)) < 1,
+    "Resized window"
+  )
+  await rpc("window.resize", { width: frame.width, height: frame.height }, "second")
   // CEF sets a cookie against the document's own URL, so it must belong to this page's host.
   await rpc("cookies.clear", { name: "session" }, "guest")
   await rpc("cookies.set", { name: "session", value: "s3cret", url: guestUrl, httpOnly: true }, "guest")
