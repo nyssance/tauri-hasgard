@@ -34,7 +34,7 @@ tauri-runtime-cef = { version = "3.0.0-alpha.7", features = ["unstable"], option
 base64 = "0.23"
 enigo = "0.6"
 arboard = { version = "3", default-features = false }
-tauri-hasgard-mcp = { version = "0.8.0", path = "../tauri-hasgard-mcp", optional = true }
+tauri-hasgard-mcp = { version = "0.8.1", path = "../tauri-hasgard-mcp", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

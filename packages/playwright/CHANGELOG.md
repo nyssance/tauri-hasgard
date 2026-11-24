@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1 — 2026-11-24
+
+- Add `window.nativeDialogs`: `accept({ paths, button })`, `dismiss()`, `manual()`, `list()` and `clear()` answer the dialog plugin's open, save and message dialogs in advance. Needs plugin 0.8.1; Wry only.
+
 ## 0.8.0 — 2026-11-24
 
 - Add `window.waitForURL` and `window.waitForLoadState`; both hold across the navigation that reaches them.

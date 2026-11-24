@@ -1,4 +1,4 @@
-# Unreleased
+# 0.8.1 (2026-11-24)
 
 - Add answers for native dialogs: `nativeDialog.handle`, `nativeDialog.list` and `nativeDialog.clear` answer the dialog plugin's open, save and message commands in advance and record them; nothing else in the application's IPC is intercepted. The default, `manual`, leaves the system dialog on screen. CLI `native-dialog`, the MCP `native_dialog` tool, and Playwright `window.nativeDialogs`. Wry only.
 

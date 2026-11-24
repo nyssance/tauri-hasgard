@@ -23,7 +23,7 @@ Check that it works, with your app running:
 
 ```console
 $ npx -y tauri-hasgard ping
-✓ Connected. Plugin and CLI both 0.8.0.
+✓ Connected. Plugin and CLI both 0.8.1.
 $ claude mcp list        # or: codex mcp list
 ```
 
