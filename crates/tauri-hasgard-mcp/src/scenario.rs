@@ -579,7 +579,9 @@ async fn take_failure_screenshot(client: &mut Client, step_name: &str, window: O
 
 fn save_screenshot_result(result: &Value, path: &Path) -> Result<()> {
     let data_url = result.as_str().ok_or_else(|| anyhow::anyhow!("screenshot result is not a string"))?;
-    let base64_data = data_url.strip_prefix("data:image/png;base64,").unwrap_or(data_url);
+    let base64_data = data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| anyhow::anyhow!("screenshot result is not a PNG data URL"))?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data)
         .map_err(|e| anyhow::anyhow!("Failed to decode base64 screenshot: {e}"))?;

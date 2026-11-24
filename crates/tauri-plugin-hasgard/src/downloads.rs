@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tauri::webview::DownloadEvent;
 
-use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RPC_METHOD_NOT_FOUND, RpcError};
+use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RPC_METHOD_NOT_FOUND, RpcError, optional_u64};
 
 pub(crate) const METHODS: &[&str] = &["downloads.list", "downloads.wait", "downloads.setDirectory", "downloads.clear"];
 
@@ -190,8 +190,8 @@ pub(crate) fn make_download_fn() -> crate::eval::NativeFn {
                 Ok(json!({"directory": directory}))
             }
             "downloads.wait" => {
-                let since = params.get("sinceId").and_then(Value::as_u64).unwrap_or(0);
-                let timeout = Duration::from_millis(params.get("timeout").and_then(Value::as_u64).unwrap_or(10_000));
+                let since = optional_u64(params, "sinceId", method)?.unwrap_or(0);
+                let timeout = Duration::from_millis(optional_u64(params, "timeout", method)?.unwrap_or(10_000));
                 let deadline = Instant::now() + timeout;
                 loop {
                     {

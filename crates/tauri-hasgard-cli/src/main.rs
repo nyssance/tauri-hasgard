@@ -1092,7 +1092,9 @@ pub(crate) fn click_params(
 fn save_screenshot(result: &serde_json::Value, path: &std::path::Path) -> Result<()> {
     let data_url = result.as_str().ok_or_else(|| anyhow::anyhow!("Screenshot result is not a string"))?;
 
-    let base64_data = data_url.strip_prefix("data:image/png;base64,").unwrap_or(data_url);
+    let base64_data = data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| anyhow::anyhow!("Screenshot result is not a PNG data URL"))?;
 
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data)
