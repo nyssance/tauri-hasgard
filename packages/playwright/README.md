@@ -96,6 +96,7 @@ await window.press("Tab", {
 })
 ```
 
+- To check a copy button, click it and read `await hasgard.clipboardText()`.
 - To start a test signed in, `await window.setCookie({ name, value, url })`; `window.cookies()` reads the store, `HttpOnly` cookies included.
 - To test a layout at another size, `await window.setSize(480, 800)`, then assert once `window.nativeState()` reports it.
 - After an action that navigates, `await window.waitForURL("**/home")` or `waitForLoadState()`; both hold across the navigation.

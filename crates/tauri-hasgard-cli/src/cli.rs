@@ -155,6 +155,9 @@ pub(crate) enum Command {
     /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
     #[command(subcommand)]
     Dialog(DialogCommand),
+    /// Read or write the system clipboard's text.
+    #[command(subcommand)]
+    Clipboard(ClipboardCommand),
     /// Read, set or delete cookies in the webview's store, `HttpOnly` ones included.
     #[command(subcommand)]
     Cookies(CookiesCommand),
@@ -458,6 +461,14 @@ pub(crate) enum DialogCommand {
     List,
     /// Forget the recorded dialogs, leaving the policy alone.
     Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum ClipboardCommand {
+    /// Print the clipboard's text; nothing when it holds no text.
+    Read,
+    /// Replace the clipboard's content with this text.
+    Write { text: String },
 }
 
 #[derive(Subcommand, Debug)]

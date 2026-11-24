@@ -779,3 +779,14 @@ test("the cookie store takes, lists and deletes a cookie the page cannot read", 
   expect(await window.cookies({ url, name: "session" })).toEqual([])
   await expect(window.setCookie({ name: "orphan", value: "x" })).rejects.toThrow(/domain.*url/)
 })
+
+test("the system clipboard's text is read and written from the application", async ({ hasgard }) => {
+  const before = await hasgard.clipboardText()
+  try {
+    await hasgard.setClipboardText("hasgard clipboard 剪贴板")
+    expect(await hasgard.clipboardText()).toBe("hasgard clipboard 剪贴板")
+  } finally {
+    // The clipboard belongs to whoever is using the machine.
+    if (before !== null) await hasgard.setClipboardText(before)
+  }
+})

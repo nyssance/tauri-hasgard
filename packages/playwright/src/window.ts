@@ -372,6 +372,17 @@ export class HasgardApplication {
     }
   }
 
+  /** The system clipboard's text, or null when it holds none. */
+  async clipboardText(): Promise<string | null> {
+    const value = expectRecord(await this.rpc.call("clipboard.read"), "clipboard.read result")
+    return expectNullableString(value.text, "clipboard.text")
+  }
+
+  /** Replace the system clipboard's content. It is shared with whoever uses the machine: restore what you found. */
+  async setClipboardText(text: string): Promise<void> {
+    await this.rpc.call("clipboard.write", { text })
+  }
+
   async windows(): Promise<WindowInfo[]> {
     const value = expectRecord(await this.rpc.call("windows.list"), "windows.list result")
     if (!Array.isArray(value.windows)) throw new Error("windows.list.windows must be an array")

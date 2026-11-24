@@ -476,6 +476,22 @@ test("waitForFunction returns the predicate's own value and forwards the poll in
   })
 })
 
+test("clipboard methods read and write the system clipboard's text", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const application = new HasgardApplication(rpc)
+
+  call.mockResolvedValueOnce({ written: true })
+  await application.setClipboardText("copied")
+  call.mockResolvedValueOnce({ text: "copied" })
+  expect(await application.clipboardText()).toBe("copied")
+  call.mockResolvedValueOnce({ text: null })
+  expect(await application.clipboardText()).toBeNull()
+
+  expect(call).toHaveBeenNthCalledWith(1, "clipboard.write", { text: "copied" })
+  expect(call).toHaveBeenNthCalledWith(2, "clipboard.read")
+})
+
 test("cookie methods use the cookie store and parse what it holds", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const stored = {

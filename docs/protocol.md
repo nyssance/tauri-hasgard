@@ -74,9 +74,12 @@ An element target takes one of three forms:
 | Dialogs   | `dialog.list`, `dialog.handle`, `dialog.clear`                                                       |
 | Storage   | `storage.get`, `storage.set`, `storage.list`, `storage.clear`                                        |
 | Cookies   | `cookies.get`, `cookies.set`, `cookies.clear` |
+| Clipboard | `clipboard.read`, `clipboard.write` |
 | Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
+
+`clipboard.read` answers `{ text }` with the system clipboard's text, or `null` when it holds none; `clipboard.write` takes `text`. The clipboard is shared with whoever uses the machine.
 
 `cookies.*` use the webview's own cookie store, so `HttpOnly` cookies are included. `cookies.get` takes an optional `url` (the cookies a request to it would carry) and `name`. `cookies.set` takes `name`, `value` and either `domain` or `url` (which supplies the domain, the path `/` and `secure` for https), plus optional `path`, `expires` (seconds since the Unix epoch), `httpOnly`, `secure` and `sameSite` (`Strict`, `Lax`, `None`). `cookies.clear` deletes the cookies matching every one of `url`, `name` and `domain` given, or all of them, and answers `{ removed }`.
 

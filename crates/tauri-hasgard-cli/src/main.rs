@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cli::{
-    AssertKind, Cli, Command, CookiesCommand, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction,
-    StorageArgs, WindowCommand,
+    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, FormsArgs, RecordAction, RouteCommand,
+    StorageAction, StorageArgs, WindowCommand,
 };
 #[cfg(test)]
 use tauri_hasgard_mcp::support::{export_shell_script, mime_from_ext};
@@ -623,6 +623,10 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
                 DialogCommand::Clear => ("dialog.clear", None),
             };
             client.call(method, with_scope(params, scope)).await
+        }
+        Command::Clipboard(ClipboardCommand::Read) => client.call("clipboard.read", None).await,
+        Command::Clipboard(ClipboardCommand::Write { text }) => {
+            client.call("clipboard.write", Some(json!({"text": text}))).await
         }
         Command::Cookies(action) => {
             // Absent options are omitted, so the plugin applies its own defaults.

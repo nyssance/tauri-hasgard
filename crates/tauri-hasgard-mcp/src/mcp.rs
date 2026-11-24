@@ -326,6 +326,14 @@ impl HasgardMcpServer {
                 self.call_app_tool("wheel", Some(params), window).await
             }
             "dialog" => self.call_dialog_tool(args, window).await,
+            "clipboard" => match required_string(&args, "action")?.as_str() {
+                "read" => self.call_app_tool("clipboard.read", None, None).await,
+                "write" => {
+                    let text = required_string(&args, "text")?;
+                    self.call_app_tool("clipboard.write", Some(json!({"text": text})), None).await
+                }
+                other => Err(invalid_params(format!("unknown clipboard action: {other}; expected read or write"))),
+            },
             "cookies" => {
                 let method = match required_string(&args, "action")?.as_str() {
                     "get" => "cookies.get",
@@ -995,6 +1003,15 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "set_input_files",
             description: "Attach local files to an <input type=\"file\">. An empty list clears the selection.",
             schema: set_input_files_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "clipboard",
+            description: "Read or write the system clipboard's text, to check a copy action or prepare a paste. \
+                          The clipboard is shared with the user of the machine.",
+            schema: clipboard_schema,
             read_only: false,
             destructive: false,
             idempotent: true,
@@ -1966,6 +1983,19 @@ fn dialog_schema() -> Arc<JsonObject> {
     )
 }
 
+fn clipboard_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            (
+                "action",
+                enum_prop("read returns the text, or null when there is none; write replaces it.", &["read", "write"]),
+            ),
+            ("text", string_prop("Text to place on the clipboard, for write.")),
+        ]),
+        &["action"],
+    )
+}
+
 fn cookies_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2353,6 +2383,7 @@ mod tests {
             "check",
             "clear",
             "click",
+            "clipboard",
             "cookies",
             "dblclick",
             "dialog",

@@ -146,7 +146,9 @@ pub(crate) async fn dispatch(
                 .and_then(std::convert::identity)
                 .map_err(|message| RpcError { code: -32603, message, data: None })
         }
-        method if method.starts_with("window.") || method.starts_with("cookies.") => {
+        method
+            if method.starts_with("window.") || method.starts_with("cookies.") || method.starts_with("clipboard.") =>
+        {
             let control = engine
                 .native
                 .lock()

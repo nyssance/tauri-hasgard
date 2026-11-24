@@ -19,6 +19,7 @@ mod handler;
 #[cfg(feature = "cef")]
 pub mod playwright;
 // JavaScript heap snapshots for `heap.snapshot`: WebKit's inspector on macOS, CDP on WebView2.
+mod clipboard;
 mod cookies;
 #[cfg(any(target_os = "macos", windows))]
 pub(crate) mod heap;
@@ -92,6 +93,7 @@ fn build_plugin<R: tauri::Runtime>(
                 *engine.native.lock().expect("native hooks") = vec![
                     (window_control::METHODS, window_control::make_window_fn(app.app_handle())),
                     (cookies::METHODS, cookies::make_cookie_fn(app.app_handle())),
+                    (clipboard::METHODS, clipboard::make_clipboard_fn()),
                 ];
 
                 let recorder = Recorder::new();
