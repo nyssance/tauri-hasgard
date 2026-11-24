@@ -1,5 +1,8 @@
 # Unreleased
 
+- CLI text output: `attrs` shows the element's attributes as they are, and a result's `status` is read as a verdict only when it is one (`video start` no longer prints as a failure).
+- CLI: `--frame` on a command that has no document to scope is refused instead of dropped.
+- A scenario's `route` step with `abort = true` rejects the response fields it does not use.
 - An expression `wait` with `frame` is evaluated in the frame's own window; it used to answer for the page. `press`, `dialog.*` and `route.*` reject `frame`.
 - `replay` keeps each entry's recorded window unless a window is named with the replay; a default window no longer moves the whole recording.
 - CLI text output shows a window's whole state, and `ipc` and `eval` results as the application returned them, instead of reading their fields as this tool's own status.

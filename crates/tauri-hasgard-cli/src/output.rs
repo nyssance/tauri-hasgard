@@ -92,13 +92,18 @@ pub(crate) fn format_text(value: &serde_json::Value) {
         return;
     }
     // {status: "ok"} → "✓ ok", {status: "error"} → "✗ error"
-    if let Some(status) = value.get("status").and_then(serde_json::Value::as_str) {
-        if status == "ok" || status == "success" {
+    // Only the two outcomes are a verdict. Any other status is a state the result reports
+    // (a recording that is "recording"), and is shown with the rest of what it says.
+    match value.get("status").and_then(serde_json::Value::as_str) {
+        Some(status @ ("ok" | "success")) => {
             println!("{}", crate::style::success(status));
-        } else {
-            println!("{}", crate::style::error(status));
+            return;
         }
-        return;
+        Some(status @ ("error" | "failed")) => {
+            println!("{}", crate::style::error(status));
+            return;
+        }
+        _ => {}
     }
     match value {
         serde_json::Value::String(s) => println!("{s}"),

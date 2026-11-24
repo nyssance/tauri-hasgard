@@ -181,6 +181,38 @@ where
         on_command_line |= given(current);
         level = current.subcommand().map(|(_, inner)| inner);
     }
+    // `--frame` scopes what acts in a document. Given to a command that has none, it would
+    // be dropped and the command would run as if it had been honoured.
+    if !args.frame.is_empty()
+        && matches!(
+            args.command,
+            Command::Mcp
+                | Command::Windows
+                | Command::Ping
+                | Command::NativeMove { .. }
+                | Command::NativeDialog(_)
+                | Command::Event(_)
+                | Command::Downloads(_)
+                | Command::Clipboard(_)
+                | Command::Cookies(_)
+                | Command::Window(_)
+                | Command::Ipc { .. }
+                | Command::ScreenshotNative { .. }
+                | Command::HeapSnapshot { .. }
+                | Command::Logs { .. }
+                | Command::Network { .. }
+                | Command::Storage(_)
+                | Command::Video { .. }
+                | Command::Record { .. }
+                | Command::Replay { .. }
+                | Command::Run { .. }
+        )
+    {
+        return Err(<Cli as clap::CommandFactory>::command().error(
+            clap::error::ErrorKind::ArgumentConflict,
+            "--frame scopes commands that act in a document; this one does not take it",
+        ));
+    }
     args.window_given = on_command_line;
     if matches!(args.command, Command::Event(_) | Command::Downloads(_)) && !on_command_line {
         args.window = None;
@@ -218,7 +250,8 @@ impl From<&Command> for OutputKind {
             Command::Windows => OutputKind::Windows,
             Command::Record { .. } => OutputKind::Record,
             Command::Replay { .. } => OutputKind::Replay,
-            Command::Ipc { .. } | Command::Eval { .. } => OutputKind::Raw,
+            // What the application or the page holds: an attribute may well be named `status`.
+            Command::Ipc { .. } | Command::Eval { .. } | Command::Attrs { .. } => OutputKind::Raw,
             _ => OutputKind::Text,
         }
     }
@@ -1230,9 +1263,33 @@ mod tests {
     use serial_test::serial;
 
     #[test]
+    fn a_frame_is_refused_by_commands_that_have_no_document() {
+        for line in [
+            &["tauri-hasgard", "--frame", "#p", "ipc", "x"][..],
+            &["tauri-hasgard", "cookies", "get", "--frame", "#p"][..],
+            &["tauri-hasgard", "--frame", "#p", "ping"][..],
+            &["tauri-hasgard", "--frame", "#p", "storage", "list"][..],
+        ] {
+            let refused = parse_cli(line.iter().copied()).map(|_| ()).expect_err("no document to scope");
+            assert_eq!(refused.kind(), clap::error::ErrorKind::ArgumentConflict, "{line:?}");
+        }
+        for line in [
+            &["tauri-hasgard", "--frame", "#p", "click", "#a"][..],
+            &["tauri-hasgard", "--frame", "#p", "forms"][..],
+            &["tauri-hasgard", "--frame", "#p", "wait", "--expression", "true"][..],
+        ] {
+            assert_eq!(parse_cli(line.iter().copied()).expect("acts in a document").frame, ["#p"]);
+        }
+    }
+
+    #[test]
     fn an_application_s_own_value_is_not_read_as_this_tool_s_status() {
         // `ipc get_status` answering {"status":"running"} used to print as a failure.
-        for line in [&["tauri-hasgard", "ipc", "get_status"][..], &["tauri-hasgard", "eval", "1"][..]] {
+        for line in [
+            &["tauri-hasgard", "ipc", "get_status"][..],
+            &["tauri-hasgard", "eval", "1"][..],
+            &["tauri-hasgard", "attrs", "#x"][..],
+        ] {
             let command = parse_cli(line.iter().copied()).expect("parses").command;
             assert!(matches!(OutputKind::from(&command), OutputKind::Raw), "{line:?}");
         }

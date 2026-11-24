@@ -49,7 +49,7 @@ A request to a closed label fails. Recreating a view under the same label starts
 
 | Operation                                  | Behavior on CEF                                                                                                              |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| snapshot, query, text, html, attrs, `eval` | Run in an isolated world: same DOM, none of the page's JavaScript globals or Tauri objects.                                  |
+| snapshot, query, text, html, attrs, `eval`, `wait --expression`, `press --wait-for` | Run in an isolated world: same DOM, none of the page's JavaScript globals or Tauri objects.                                  |
 | click, hover, fill, type, check, select    | Real browser input through Playwright with actionability checks. A covered element fails where Wry's DOM event would pass.   |
 | press                                      | Native keyboard input to the selected webview. `TAURI_HASGARD_PRESS=window` is rejected.                                     |
 | navigate                                   | Supported. An evaluation already submitted is never redirected into the new document.                                        |

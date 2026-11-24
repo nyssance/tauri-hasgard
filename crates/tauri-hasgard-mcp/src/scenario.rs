@@ -267,9 +267,12 @@ fn validate_step(step: &Step) -> Result<()> {
     }
     // A field the action never reads is a mistake that would otherwise pass in silence:
     // `expected` on an `eval` step asserts nothing.
-    // `clear = true` removes every rule and reads nothing else.
-    let used: &[&str] =
-        if step.action == "route" && step.clear == Some(true) { &["clear"] } else { fields_read_by(&step.action) };
+    // `clear = true` removes every rule and reads nothing else; an aborted request has no answer.
+    let used: &[&str] = match (step.action.as_str(), step.clear, step.abort) {
+        ("route", Some(true), _) => &["clear"],
+        ("route", _, Some(true)) => &["pattern", "abort", "method"],
+        _ => fields_read_by(&step.action),
+    };
     if let Some(unused) = step.set_fields().into_iter().find(|field| !used.contains(field)) {
         anyhow::bail!("{} does not use '{unused}'", step.action);
     }
@@ -824,6 +827,8 @@ mod tests {
         assert!(super::parse_scenario("[[step]]\naction='ipc'\ncommand='ping'\nexpected='pong'").is_ok());
         assert!(super::parse_scenario("[[step]]\naction='route'\nclear=true").is_ok());
         assert!(super::parse_scenario("[[step]]\naction='route'\nclear=true\npattern='**/x'").is_err());
+        assert!(super::parse_scenario("[[step]]\naction='route'\npattern='**/x'\nabort=true\nmethod='GET'").is_ok());
+        assert!(super::parse_scenario("[[step]]\naction='route'\npattern='**/x'\nabort=true\nstatus=500").is_err());
         assert!(super::parse_scenario("[[step]]\naction='click'\ntarget='#a'\ntimeout_ms=500\nname='go'").is_ok());
     }
 

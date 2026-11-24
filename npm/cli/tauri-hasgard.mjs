@@ -35,5 +35,10 @@ child.on("exit", (code, signal) => {
   // End the way the binary did. The forwarding handlers would swallow the signal and
   // leave this process to exit 0, so they are removed first.
   for (const name of forwarded) process.removeAllListeners(name)
-  process.kill(process.pid, signal)
+  try {
+    process.kill(process.pid, signal)
+  } catch {
+    // Windows cannot raise every signal; the binary was still ended by one.
+    process.exit(1)
+  }
 })

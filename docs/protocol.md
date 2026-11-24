@@ -92,7 +92,7 @@ Routes and dialog policies are standing state. On CEF they belong to the webview
 
 `select` takes `value`, or `values` for a `<select multiple>`.
 
-`frame` applies to the methods that act in a document: element actions and reads, `snapshot`, `diff`, `screenshot`, `wait` for an element or expression, `watch` and `forms.dump`. An expression wait in a frame is evaluated in the frame's own window. `url`, `title`, `state`, `eval`, `navigate`, `press`, `storage.*`, `dialog.*` and `route.*` act on the window as a whole and reject it, as does a `wait` for `url` or `load`.
+`frame` applies to the methods that act in a document: element actions and reads, `snapshot`, `diff`, `screenshot`, `wait` for an element or expression, `watch` and `forms.dump`. An expression wait in a frame is evaluated in the frame's own window. `url`, `title`, `state`, `eval`, `navigate`, `press`, `storage.*`, `dialog.*` and `route.*` act on the window as a whole and reject it, as does a `wait` for `url` or `load`. The CLI refuses `--frame` on commands that have no document to scope, such as `ipc`, `cookies` and `storage`.
 
 The endpoint and an in-process `Automation` each have a recorder of their own: a recording started through one does not capture calls made through the other. Replay sends each entry to the window it was recorded in. A window named with the replay (`--window` on the command line, `window` in the MCP call) moves every entry there; a default window (`TAURI_HASGARD_WINDOW`, the MCP server's) only places entries recorded without one. A replay in which a step fails answers `status: "failed"` with the failing steps under `errors`; the CLI exits 1 and the MCP tool reports an error.
 
