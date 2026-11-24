@@ -74,18 +74,20 @@ function makeDocument(elements = {}, all = {}) {
 
 // `frames` maps an iframe selector to the document it hosts, or to null for a
 // cross-origin frame, or to a non-frame element to test the wrong-tag path.
-function loadBridge({ main = makeDocument(), frames = {} } = {}) {
+function loadBridge({ main = makeDocument(), frames = {}, boxes = {} } = {}) {
   Object.assign(console, REAL_CONSOLE)
 
   const hosts = {}
   for (const [selector, contentDocument] of Object.entries(frames)) {
-    hosts[selector] = contentDocument?.notAFrame ? { tagName: "DIV" } : { tagName: "IFRAME", contentDocument }
+    hosts[selector] = contentDocument?.notAFrame
+      ? { tagName: "DIV" }
+      : { tagName: "IFRAME", contentDocument, ...boxes[selector] }
   }
 
   const rootQuerySelector = main.querySelector.bind(main)
   main.querySelector = (selector) => hosts[selector] ?? rootQuerySelector(selector)
 
-  globalThis.window = { fetch() {} }
+  globalThis.window = { fetch() {}, scrollX: 0, scrollY: 0 }
   globalThis.document = main
   function XMLHttpRequestStub() {}
   XMLHttpRequestStub.prototype.open = function () {}
@@ -351,4 +353,37 @@ test("a drag resolves its source and target inside the frame", () => {
   assert.ok(inner.lane.dispatched.includes("drop"))
   assert.deepEqual(outer.card.dispatched, [])
   assert.deepEqual(outer.lane.dispatched, [])
+})
+
+test("a frame's screenshot area is the frame's box, and an element's is placed inside it", () => {
+  const pay = makeElement("pay", {
+    getBoundingClientRect() {
+      return { x: 12, y: 30, width: 80, height: 24 }
+    }
+  })
+  const hasgard = loadBridge({
+    frames: { "#pane": makeDocument({ "#pay": pay }) },
+    boxes: {
+      "#pane": {
+        clientLeft: 2,
+        clientTop: 2,
+        clientWidth: 300,
+        clientHeight: 150,
+        getBoundingClientRect() {
+          return { x: 40, y: 500, width: 304, height: 154 }
+        }
+      }
+    }
+  })
+  globalThis.window.scrollY = 100
+
+  assert.deepEqual(hasgard.screenshotArea({ frame: ["#pane"] }), { x: 42, y: 602, width: 300, height: 150 })
+  assert.deepEqual(hasgard.screenshotArea({ frame: ["#pane"], selector: "#pay" }), {
+    x: 54,
+    y: 632,
+    width: 80,
+    height: 24
+  })
+  assert.throws(() => hasgard.screenshotArea({ frame: ["#pane"], selector: "#absent" }), /Element not found/)
+  assert.throws(() => hasgard.screenshotArea({ frame: ["#nowhere"] }), /No frame matches/)
 })

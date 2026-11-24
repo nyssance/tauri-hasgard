@@ -2259,7 +2259,8 @@
 
   async function screenshot(options) {
     const selector = options?.selector
-    const el = selector ? document.querySelector(selector) : document.documentElement
+    const doc = frameDocument(options?.frame)
+    const el = selector ? doc.querySelector(selector) : doc.documentElement
     if (!el) throw new Error(`Element not found: ${selector}`)
     if (typeof htmlToImage === "undefined" || !htmlToImage.toPng) {
       throw new Error("html-to-image library not loaded. Bundle it into bridge.js for screenshot support.")
@@ -2272,7 +2273,7 @@
       // for documentElement is the viewport — the render always starts at the
       // document origin, so anything below the fold is silently cropped
       // (#129). Pass the full scroll dimensions to capture the whole page.
-      const body = document.body
+      const body = doc.body
       renderOptions.width = Math.max(el.scrollWidth || 0, body ? body.scrollWidth || 0 : 0)
       renderOptions.height = Math.max(el.scrollHeight || 0, body ? body.scrollHeight || 0 : 0)
     }
@@ -2284,6 +2285,29 @@
   // origin: a backend that takes the pixels itself asks only for this.
   function screenshotArea(options) {
     const selector = options?.selector
+    if (options?.frame != null) {
+      // Composited pixels exist only for what the frame shows, so the area is the
+      // frame's own box, or the element's box inside it, placed in the top document.
+      const chain = Array.isArray(options.frame) ? options.frame : [options.frame]
+      let doc = document
+      let x = window.scrollX
+      let y = window.scrollY
+      let box = null
+      for (let depth = 0; depth < chain.length; depth++) {
+        const inner = frameDocument(chain.slice(0, depth + 1))
+        const host = doc.querySelector(chain[depth])
+        const rect = host.getBoundingClientRect()
+        x += rect.x + host.clientLeft
+        y += rect.y + host.clientTop
+        box = { x, y, width: host.clientWidth, height: host.clientHeight }
+        doc = inner
+      }
+      if (!selector) return box
+      const el = doc.querySelector(selector)
+      if (!el) throw new Error(`Element not found: ${selector}`)
+      const rect = el.getBoundingClientRect()
+      return { x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height }
+    }
     if (!selector) {
       const el = document.documentElement
       const body = document.body

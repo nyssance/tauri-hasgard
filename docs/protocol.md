@@ -113,6 +113,8 @@ This table is for Wry. On CEF, `screenshot` is composited and `heap.snapshot` is
 
 A redrawn document cannot show cross-origin images, frames or native controls; composited pixels do. CEF takes composited pixels on every platform.
 
+With `frame` (one CSS selector per nesting level, outermost first), `screenshot` captures that same-origin frame's document or one element in it, and `snapshot` and `diff` keep a baseline for the frame apart from its page's. Composited pixels cover what the frame shows.
+
 ## Snapshot
 
 ```ts

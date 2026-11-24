@@ -910,8 +910,10 @@ export class HasgardWindow {
     return this.rpc.call<T>("ipc", withWindow(this.label, { command, args }))
   }
 
-  async screenshot(selector?: string): Promise<Buffer> {
-    const params = selector ? { selector } : undefined
+  async screenshot(selector?: string, options: { frame?: string[] } = {}): Promise<Buffer> {
+    const params: Record<string, JsonValue> = {}
+    if (selector) params.selector = selector
+    if (options.frame) params.frame = options.frame
     const dataUrl = await this.rpc.call<string>("screenshot", withWindow(this.label, params))
     const prefix = "data:image/png;base64,"
     if (!dataUrl.startsWith(prefix)) throw new Error("screenshot result is not a PNG data URL")
@@ -1192,6 +1194,16 @@ export class HasgardFrameLocator {
   /** Descend into a frame nested inside this one. */
   frameLocator(selector: string): HasgardFrameLocator {
     return new HasgardFrameLocator(this.windowRef, [...this.frame, selector])
+  }
+
+  /** A PNG of this frame's document, or of one element in it. */
+  screenshot(selector?: string): Promise<Buffer> {
+    return this.windowRef.screenshot(selector, { frame: [...this.frame] })
+  }
+
+  /** What changed in this frame since its last snapshot or diff. */
+  diff(options: Omit<DiffOptions, "frame"> = {}): Promise<SnapshotDiff> {
+    return this.windowRef.diff({ ...options, frame: [...this.frame] })
   }
 
   locator(selector: string): HasgardLocator {

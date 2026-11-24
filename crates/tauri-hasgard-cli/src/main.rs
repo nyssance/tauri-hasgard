@@ -345,7 +345,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
             run_snapshot_command(client, interactive, selector, depth, save, scope).await
         }
         Command::Diff { r#ref: ref_path, interactive, selector, depth } => {
-            run_diff_command(client, ref_path, interactive, selector, depth, scope.window).await
+            run_diff_command(client, ref_path, interactive, selector, depth, scope).await
         }
         Command::Ipc { command, args } => run_ipc_command(client, &command, args.as_deref(), scope.window).await,
         Command::Screenshot { path, selector } => {
@@ -491,7 +491,7 @@ async fn run_watch_command(
 
 async fn run_diff_command(
     client: &mut Client, ref_path: Option<std::path::PathBuf>, interactive: bool, selector: Option<String>,
-    depth: Option<u8>, window: Option<&str>,
+    depth: Option<u8>, scope: Scope<'_>,
 ) -> Result<serde_json::Value> {
     let mut params = json!({
         "interactive": interactive,
@@ -511,7 +511,7 @@ async fn run_diff_command(
         );
         params["reference"] = reference;
     }
-    client.call("diff", with_scope(Some(params), Scope { window, ..Scope::default() })).await
+    client.call("diff", with_scope(Some(params), scope)).await
 }
 
 fn read_script(reader: &mut impl std::io::Read) -> Result<String> {

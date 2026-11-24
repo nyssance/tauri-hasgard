@@ -944,3 +944,34 @@ test("a download is reported with the file it saved", async ({ hasgard }) => {
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test("a frame has its own screenshot and its own diff baseline", async ({ window }) => {
+  const frame = window.frameLocator("#pane")
+
+  const png = await frame.screenshot("#pay")
+  const box = await frame.locator("#pay").boundingBox()
+  expect(png.subarray(1, 4).toString("latin1")).toBe("PNG")
+  const scale = png.readUInt32BE(16) / box.width
+  expect(scale).toBeGreaterThanOrEqual(0.99)
+  expect(Math.abs(png.readUInt32BE(20) - box.height * scale)).toBeLessThanOrEqual(2)
+  expect((await frame.screenshot()).byteLength).toBeGreaterThan(500)
+
+  // The page's baseline is stored last: the frame's diff must not be measured against it.
+  await frame.snapshot()
+  await window.snapshot()
+  expect(await frame.diff()).toEqual({ added: [], removed: [], changed: [] })
+  await window.evaluate(`(() => {
+    const button = document.querySelector("#pane").contentDocument.querySelector("#pay")
+    button.textContent = "Pay now"
+    return null
+  })()`)
+  try {
+    const after = await frame.diff()
+    expect(after.added.length + after.removed.length + after.changed.length).toBeGreaterThan(0)
+  } finally {
+    await window.evaluate(`(() => {
+      document.querySelector("#pane").contentDocument.querySelector("#pay").textContent = "Pay"
+      return null
+    })()`)
+  }
+})

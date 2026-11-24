@@ -224,7 +224,7 @@ pub(crate) async fn dispatch(
         }
         "snapshot" => {
             let result = handle_eval_method("snapshot", params, engine, eval_fn, win, DEFAULT_TIMEOUT).await?;
-            engine.store_snapshot(win, &result);
+            engine.store_frame_snapshot(win, params.and_then(|p| p.get("frame")), &result);
             Ok(result)
         }
         "query" | "filter" => handle_eval_method(method, params, engine, eval_fn, win, DEFAULT_TIMEOUT).await,
@@ -425,11 +425,12 @@ async fn handle_diff(
         data: None,
     })?;
 
+    let frame = params.and_then(|p| p.get("frame"));
     // Determine reference snapshot: from params["reference"] or last stored snapshot
     let reference = if let Some(ref_val) = params.and_then(|p| p.get("reference")) {
         ref_val.clone()
     } else {
-        engine.get_last_snapshot(window).ok_or_else(|| RpcError {
+        engine.get_last_frame_snapshot(window, frame).ok_or_else(|| RpcError {
             code: -32602,
             message: "No previous snapshot available. Run `snapshot` first or use `diff --ref <file>`".to_owned(),
             data: None,
@@ -499,7 +500,7 @@ async fn handle_diff(
     let diff_result = diff::compute_diff(&old_elements, &new_elements);
 
     // Store the new snapshot for subsequent diffs
-    engine.store_snapshot(window, &result);
+    engine.store_frame_snapshot(window, frame, &result);
 
     serde_json::to_value(&diff_result).map_err(|e| RpcError {
         code: -32603,

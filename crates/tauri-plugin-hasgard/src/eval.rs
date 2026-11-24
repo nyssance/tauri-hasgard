@@ -100,18 +100,32 @@ impl EvalEngine {
         }
     }
 
-    /// Keep each window's baseline separate. An omitted label denotes main,
-    /// exactly as it does in the host's eval routing.
-    pub fn store_snapshot(&self, window: Option<&str>, value: &serde_json::Value) {
+    /// Keep each window's baseline separate; an omitted label denotes main, exactly
+    /// as it does in the host's eval routing. A frame is a document of its own, so it
+    /// keeps a baseline of its own: comparing it with the page around it would report
+    /// every element as changed.
+    pub fn store_frame_snapshot(
+        &self, window: Option<&str>, frame: Option<&serde_json::Value>, value: &serde_json::Value,
+    ) {
         self.last_snapshot
             .lock()
             .expect("last_snapshot lock poisoned")
-            .insert(window.unwrap_or("main").to_owned(), value.clone());
+            .insert(Self::snapshot_key(window, frame), value.clone());
     }
 
-    /// Retrieve the last stored snapshot, if any.
-    pub fn get_last_snapshot(&self, window: Option<&str>) -> Option<serde_json::Value> {
-        self.last_snapshot.lock().expect("last_snapshot lock poisoned").get(window.unwrap_or("main")).cloned()
+    pub fn get_last_frame_snapshot(
+        &self, window: Option<&str>, frame: Option<&serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        self.last_snapshot.lock().expect("last_snapshot lock poisoned").get(&Self::snapshot_key(window, frame)).cloned()
+    }
+
+    fn snapshot_key(window: Option<&str>, frame: Option<&serde_json::Value>) -> String {
+        let window = window.unwrap_or("main");
+        match frame.filter(|frame| !frame.is_null()) {
+            // A line break cannot occur in a window label, so it keeps the two parts apart.
+            Some(frame) => format!("{window}\n{frame}"),
+            None => window.to_owned(),
+        }
     }
 
     /// Register a pending eval request. Returns the ID and a receiver.
@@ -239,7 +253,11 @@ impl EvalEngine {
     pub fn forget_window(&self, window: &str) {
         self.handshakes.lock().expect("handshake lock poisoned").remove(window);
         self.allowed.lock().expect("allowed lock poisoned").remove(window);
-        self.last_snapshot.lock().expect("snapshot lock poisoned").remove(window);
+        let frames = format!("{window}\n");
+        self.last_snapshot
+            .lock()
+            .expect("snapshot lock poisoned")
+            .retain(|key, _| key != window && !key.starts_with(&frames));
         let mut pending = self.pending.lock().expect("pending lock poisoned");
         let ids: Vec<u64> = pending
             .iter()
@@ -474,20 +492,33 @@ mod tests {
     }
 
     #[test]
-    fn test_get_last_snapshot_none_initially() {
+    fn test_last_snapshot_none_initially() {
         let engine = EvalEngine::new();
-        assert!(engine.get_last_snapshot(None).is_none());
+        assert!(engine.get_last_frame_snapshot(None, None).is_none());
     }
 
     #[test]
     fn test_store_and_retrieve_snapshot() {
         let engine = EvalEngine::new();
         let value = json!({"elements": [{"ref": "e1", "role": "button", "depth": 1}]});
-        engine.store_snapshot(None, &value);
-        let retrieved = engine.get_last_snapshot(Some("main"));
+        engine.store_frame_snapshot(None, None, &value);
+        let retrieved = engine.get_last_frame_snapshot(Some("main"), None);
         assert_eq!(retrieved, Some(value));
-        assert!(engine.get_last_snapshot(Some("settings")).is_none());
-        engine.store_snapshot(Some("settings"), &json!({"elements": []}));
-        assert_ne!(engine.get_last_snapshot(None), engine.get_last_snapshot(Some("settings")));
+        assert!(engine.get_last_frame_snapshot(Some("settings"), None).is_none());
+        engine.store_frame_snapshot(Some("settings"), None, &json!({"elements": []}));
+        assert_ne!(engine.get_last_frame_snapshot(None, None), engine.get_last_frame_snapshot(Some("settings"), None));
+    }
+
+    #[test]
+    fn a_frame_keeps_a_baseline_apart_from_its_page() {
+        let engine = EvalEngine::new();
+        let frame = json!(["#pane"]);
+        let inner = json!({"elements": [{"ref": "e1", "role": "button", "depth": 1}]});
+        engine.store_frame_snapshot(None, Some(&frame), &inner);
+        assert!(engine.get_last_frame_snapshot(None, None).is_none());
+        // A null frame is the page itself, as an omitted one is.
+        assert!(engine.get_last_frame_snapshot(None, Some(&serde_json::Value::Null)).is_none());
+        assert_eq!(engine.get_last_frame_snapshot(Some("main"), Some(&frame)), Some(inner));
+        assert!(engine.get_last_frame_snapshot(None, Some(&json!(["#other"]))).is_none());
     }
 }

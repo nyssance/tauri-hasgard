@@ -205,6 +205,7 @@ impl HasgardMcpServer {
                 if let Some(reference) = args.get("reference") {
                     params["reference"] = reference.clone();
                 }
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("diff", Some(params), window).await
             }
             "query" => {
@@ -503,11 +504,18 @@ impl HasgardMcpServer {
                 .await
             }
             "screenshot" => {
-                let params = Some(json!({"selector": optional_string(&args, "selector")?}));
-                Ok(match self.call_app("screenshot", params, window).await.and_then(|result| image_content(&result)) {
-                    Ok(image) => CallToolResult::success(vec![image]),
-                    Err(err) => tool_error(&err),
-                })
+                let mut params = json!({"selector": optional_string(&args, "selector")?});
+                insert_optional_frame(&mut params, &args)?;
+                Ok(
+                    match self
+                        .call_app("screenshot", Some(params), window)
+                        .await
+                        .and_then(|result| image_content(&result))
+                    {
+                        Ok(image) => CallToolResult::success(vec![image]),
+                        Err(err) => tool_error(&err),
+                    },
+                )
             }
             "screenshot_native" => {
                 // Without an id the plugin renders the routed webview through
@@ -1602,6 +1610,8 @@ fn tool_specs() -> Vec<ToolSpec> {
 /// ignored the chain would answer from the top document without saying so.
 const FRAME_SCOPED_TOOLS: &[&str] = &[
     "snapshot",
+    "diff",
+    "screenshot",
     "query",
     "fill",
     "type",

@@ -10,6 +10,7 @@
 - TOML scenarios gain `hover`, `dblclick`, `focus`, `blur`, `drag`, `set-input-files`, `wheel`, `dialog`, `native-dialog`, `route` and `ipc`, and `select` with `values`.
 - Native dialog answers work on CEF as well as Wry. The answering code is one self-contained script that runs in the page's own world on both backends; on CEF it is injected into the main world and registered for later documents. The native dialog policy holds across navigation on both.
 - Wry: routes, the dialog policy and the native dialog policy hold across a navigation to another document of the same origin, as they already did on CEF. A counted route stays spent. They are handed over through the tab's session storage, in one entry that exists only while a rule or a non-default policy does and that Hasgard's own `storage.*` operations do not show.
+- `screenshot` and `diff` take `frame`: a frame's document, or one element in it, is captured on its own, and a frame keeps a diff baseline apart from its page. CLI `--frame`, the MCP `screenshot` and `diff` tools, and Playwright `frameLocator(...).screenshot()` and `.diff()`.
 - The frame scope reaches the operations that ignored it. In the bridge, an untargeted `scroll` or `wheel`, `html` without a target, and both ends of a `drag` (and its drop point for an offset) now use the frame's document. The MCP tools `text`, `html`, `value`, `attrs`, `focus`, `blur`, `disabled`, `bounding_box`, `scroll`, `wheel`, `drag`, `wait` and the `assert_*` tools accept and advertise `frame`.
 
 # 0.8.1 (2026-11-24)
