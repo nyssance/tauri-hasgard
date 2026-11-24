@@ -850,6 +850,32 @@ test("setInputFiles reads a path into a base64 payload and passes objects throug
   ])
 })
 
+test("setInputFiles names a large file by path so the application reads it", async () => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const { tmpdir } = await import("node:os")
+  const dir = await mkdtemp(join(tmpdir(), "hasgard-unit-"))
+  const large = join(dir, "large.bin")
+  const small = join(dir, "small.txt")
+  await writeFile(large, Buffer.alloc(2 * 1024 * 1024, 1))
+  await writeFile(small, "hi")
+
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call").mockResolvedValue({ ok: true, count: 2 })
+
+  await new HasgardWindow(rpc, "main").locator("#uploads").setInputFiles([large, small])
+
+  // Past the inline budget every path travels as a path: one request cannot hold the data.
+  expect(call).toHaveBeenCalledWith("setInputFiles", {
+    selector: "#uploads",
+    files: [
+      { name: "large.bin", path: large },
+      { name: "small.txt", path: small }
+    ],
+    window: "main"
+  })
+})
+
 // --- dialogs --------------------------------------------------------------
 
 test("dialogs.accept sends promptText only when one is supplied", async () => {

@@ -16,6 +16,7 @@ export type {
   DiffOptions,
   DragOffset,
   DropFile,
+  DropFilePath,
   ElementPosition,
   FileInput,
   FilterOptions,

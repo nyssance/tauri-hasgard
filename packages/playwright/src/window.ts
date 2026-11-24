@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises"
-import { basename } from "node:path"
+import { readFile, stat } from "node:fs/promises"
+import { basename, resolve } from "node:path"
 
 import { pollDelay, sleep } from "./poll.js"
+import { MAX_REQUEST_BYTES } from "./protocol-limits.js"
 import type { HasgardRpcClient } from "./rpc-client.js"
 import { HasgardRpcError } from "./rpc-client.js"
 import type {
@@ -19,6 +20,7 @@ import type {
   DiffOptions,
   DragOffset,
   DropFile,
+  DropFilePath,
   FileInput,
   FilterOptions,
   FormEntry,
@@ -91,18 +93,25 @@ function withWindow(window: string, params?: Record<string, JsonValue>): Record<
 }
 
 /**
- * Normalise file arguments into the base64 payloads the bridge understands.
+ * Normalise file arguments into the `files` entries the plugin takes.
  *
- * Paths are read here, in the test process, rather than in the app: the app may
- * be sandboxed, and the path the test means is the one on the test machine.
+ * Small files are read here, in the test process, and travel inline: that works
+ * even when the app is sandboxed away from the test's files. Once the encoded
+ * total would crowd the request limit, every path is sent as a path and the
+ * application reads the files itself, which has no such limit.
  */
-async function readFileInputs(files: FileInput | FileInput[]): Promise<DropFile[]> {
+async function readFileInputs(files: FileInput | FileInput[]): Promise<(DropFile | DropFilePath)[]> {
   const list = Array.isArray(files) ? files : [files]
+  let encoded = 0
+  for (const entry of list) {
+    encoded += typeof entry === "string" ? Math.ceil((await stat(entry)).size / 3) * 4 : entry.data.length
+  }
+  const inline = encoded <= MAX_REQUEST_BYTES / 2
   return Promise.all(
     list.map(async (entry) => {
       if (typeof entry !== "string") return entry
-      const contents = await readFile(entry)
-      return { name: basename(entry), data: contents.toString("base64") }
+      if (!inline) return { name: basename(entry), path: resolve(entry) }
+      return { name: basename(entry), data: (await readFile(entry)).toString("base64") }
     })
   )
 }

@@ -2,6 +2,7 @@
 
 - Fix a ref that could not be used: once the ref table passed 1,024 entries, a node swept as detached and later re-attached was handed its old ref, which the table no longer knew.
 - Fix request ordering for a request that names no window. It targets `main` and now waits in `main`'s lane; before, it could run alongside a request sent to `main` explicitly.
+- File uploads are no longer bound by the request limit. `drop` and `setInputFiles` accept a file as `{ name, path }`, which the application reads itself (up to 64 MiB per call); the CLI, the MCP server and the Playwright client send small files inline as before and switch to paths when the data would not fit in one request.
 - Add system clipboard text: `clipboard.read` and `clipboard.write`. CLI `clipboard`, the MCP `clipboard` tool, and Playwright `hasgard.clipboardText()` and `setClipboardText()`.
 - Add cookie store access: `cookies.get`, `cookies.set` and `cookies.clear`, `HttpOnly` cookies included, on Wry and CEF. CLI `cookies`, the MCP `cookies` tool, and Playwright `cookies`, `setCookie` and `clearCookies`.
 - Add native window control: `window.state`, `window.resize`, `window.move`, `window.minimize`, `window.maximize`, `window.restore` and `window.close`, on Wry and CEF. CLI `window`, the MCP `window` tool, and Playwright `nativeState`, `setSize`, `setPosition`, `minimize`, `maximize`, `restore` and `close`.

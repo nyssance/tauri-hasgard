@@ -359,6 +359,23 @@ test("setInputFiles reads a path from the test machine's disk", async ({ window 
   )
 })
 
+test("setInputFiles carries a file larger than one request can hold", async ({ window }) => {
+  const { rm, writeFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const { tmpdir } = await import("node:os")
+  const path = join(tmpdir(), `hasgard-fixture-large-${process.pid}.bin`)
+  const size = 3 * 1024 * 1024
+  await writeFile(path, Buffer.alloc(size, 7))
+  try {
+    await window.locator("#upload").setInputFiles(path)
+    await expect(window.locator("#upload-log").textContent()).resolves.toBe(
+      `hasgard-fixture-large-${process.pid}.bin:${size}`
+    )
+  } finally {
+    await rm(path, { force: true })
+  }
+})
+
 test("setInputFiles clears a selection and rejects overfilling a single-file input", async ({ window }) => {
   await window.locator("#uploads").setInputFiles([
     { name: "a.txt", data: btoa("aa") },

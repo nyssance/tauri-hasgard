@@ -68,45 +68,49 @@ pub fn with_scope(params: Option<Value>, scope: Scope<'_>) -> Option<Value> {
     Some(Value::Object(map))
 }
 
-/// Files travel base64-encoded inside one request, so the request limit is
-/// the upload limit: about 750 KB of file data across all files of one call.
-pub const MAX_FILE_PAYLOAD_BYTES: usize = crate::protocol::MAX_REQUEST_BYTES;
+/// Inline file data must fit in one request beside the rest of its params. Past
+/// this the files are named by path and the application reads them itself.
+pub const MAX_INLINE_FILE_BYTES: usize = crate::protocol::MAX_REQUEST_BYTES / 2;
 
-fn file_payload_too_large(encoded: usize) -> anyhow::Error {
-    anyhow::anyhow!(
-        "Files encode to at least {encoded} bytes, but one request carries at most {MAX_FILE_PAYLOAD_BYTES} bytes \
-         (about 750 KB of file data in total)"
-    )
-}
-
-/// Read local paths into the `{name, type, data}` payloads the bridge turns
-/// back into `File` objects.
+/// Turn local paths into the `files` entries of `drop` and `setInputFiles`.
 ///
-/// Shared by `drop` and `set-input-files` so the two cannot diverge on size
-/// limits, MIME guessing, or what counts as a readable file — a divergence that
-/// would show up as one command accepting a file the other rejects.
+/// Small files travel inline as `{name, type, data}`, read here, so they work
+/// even when the application cannot read the caller's files. Once the encoded
+/// total would crowd the request limit, every file is sent as `{name, type,
+/// path}` and read by the application, which has no such limit.
+///
+/// Shared by `drop` and `set-input-files` so the two cannot diverge on MIME
+/// guessing or on what counts as a readable file.
 pub fn encode_files(paths: &[std::path::PathBuf]) -> Result<Vec<serde_json::Value>> {
-    let mut files = Vec::with_capacity(paths.len());
+    let mut entries = Vec::with_capacity(paths.len());
     let mut total_encoded = 0usize;
     for path in paths {
         let meta = std::fs::metadata(path).with_context(|| format!("Failed to stat file: {}", path.display()))?;
         anyhow::ensure!(meta.is_file(), "Not a regular file: {}", path.display());
-        // Reject from the size alone, before reading a file that cannot be sent.
         let encoded_len = usize::try_from(meta.len().div_ceil(3).saturating_mul(4)).unwrap_or(usize::MAX);
         total_encoded = total_encoded.saturating_add(encoded_len);
-        if total_encoded > MAX_FILE_PAYLOAD_BYTES {
-            return Err(file_payload_too_large(total_encoded));
-        }
-        let data = std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
         let name = path
             .file_name()
             .with_context(|| format!("File path has no file name: {}", path.display()))?
             .to_string_lossy()
             .into_owned();
-        files.push(json!({"name": name, "type": mime_from_ext(path), "data": encoded}));
+        entries.push((path, name));
     }
-    Ok(files)
+    let inline = total_encoded <= MAX_INLINE_FILE_BYTES;
+    entries
+        .into_iter()
+        .map(|(path, name)| {
+            if inline {
+                let data = std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+                Ok(json!({"name": name, "type": mime_from_ext(path), "data": encoded}))
+            } else {
+                let absolute = std::path::absolute(path)
+                    .with_context(|| format!("Failed to resolve file path: {}", path.display()))?;
+                Ok(json!({"name": name, "type": mime_from_ext(path), "path": absolute}))
+            }
+        })
+        .collect()
 }
 
 pub async fn run_drop_command(
@@ -683,4 +687,34 @@ pub fn strip_ansi(input: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_files_travel_inline_and_large_ones_by_path() {
+        let directory = std::env::temp_dir().join(format!("hasgard-encode-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("temp directory");
+        let small = directory.join("note.txt");
+        let large = directory.join("large.bin");
+        std::fs::write(&small, b"hello").expect("write small");
+        std::fs::write(&large, vec![1_u8; MAX_INLINE_FILE_BYTES]).expect("write large");
+
+        assert_eq!(
+            encode_files(std::slice::from_ref(&small)).expect("inline"),
+            [json!({"name": "note.txt", "type": "text/plain", "data": "aGVsbG8="})]
+        );
+        // One large file moves the whole call to paths, the small file included.
+        assert_eq!(
+            encode_files(&[large.clone(), small.clone()]).expect("by path"),
+            [
+                json!({"name": "large.bin", "type": "application/octet-stream", "path": large}),
+                json!({"name": "note.txt", "type": "text/plain", "path": small}),
+            ]
+        );
+        assert!(encode_files(std::slice::from_ref(&directory)).is_err());
+        std::fs::remove_dir_all(&directory).expect("remove temp directory");
+    }
 }

@@ -132,6 +132,19 @@ pub(crate) async fn dispatch(
     let params = owned_params.as_ref().or(params);
     let win = window.as_deref();
 
+    // A file named by path is read here, in the application's process, so its size
+    // is not bound by the request limit the way inline data is.
+    let uploaded;
+    let params = if matches!(method, "drop" | "setInputFiles") && names_file_paths(params) {
+        let request = params.cloned().expect("file paths were found in params");
+        uploaded = tokio::task::spawn_blocking(move || read_file_paths(request))
+            .await
+            .map_err(|error| RpcError { code: -32603, message: error.to_string(), data: None })??;
+        Some(&uploaded)
+    } else {
+        params
+    };
+
     let action = engine.action.lock().expect("action hook").clone();
     let observe = engine.observe.lock().expect("observation hook").clone();
     let result = match method {
@@ -690,6 +703,65 @@ fn injection_error(error: &crate::server::InjectionError) -> RpcError {
 }
 
 /// Handle a method that requires JS evaluation via the bridge.
+/// Files read from disk for one upload are held in memory and sent to the page as
+/// one script, so the total is bounded.
+const MAX_UPLOAD_BYTES: u64 = 64 * 1024 * 1024;
+
+fn names_file_paths(params: Option<&serde_json::Value>) -> bool {
+    params
+        .and_then(|params| params.get("files"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|files| files.iter().any(|file| file.get("path").is_some()))
+}
+
+/// Replace each `{ path }` entry of `files` with the `{ name, data }` the bridge takes.
+fn read_file_paths(mut params: serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    use base64::Engine;
+    let invalid = |message: String| RpcError { code: -32602, message, data: None };
+    let files = params.get_mut("files").and_then(serde_json::Value::as_array_mut).expect("checked by the caller");
+    let mut total = 0_u64;
+    for file in files {
+        let Some(path) = file.get("path") else { continue };
+        if file.get("data").is_some() {
+            return Err(invalid("a file takes 'path' or 'data', not both".to_owned()));
+        }
+        let path = std::path::PathBuf::from(
+            path.as_str().ok_or_else(|| invalid("a file 'path' must be a string".to_owned()))?,
+        );
+        if !path.is_absolute() {
+            return Err(invalid(format!("a file 'path' must be absolute: {}", path.display())));
+        }
+        let metadata = std::fs::metadata(&path)
+            .map_err(|error| invalid(format!("cannot read file {}: {error}", path.display())))?;
+        if !metadata.is_file() {
+            return Err(invalid(format!("not a regular file: {}", path.display())));
+        }
+        total = total.saturating_add(metadata.len());
+        if total > MAX_UPLOAD_BYTES {
+            return Err(invalid(format!(
+                "files total more than {MAX_UPLOAD_BYTES} bytes, the most one upload carries"
+            )));
+        }
+        let data =
+            std::fs::read(&path).map_err(|error| invalid(format!("cannot read file {}: {error}", path.display())))?;
+        let entry = file.as_object_mut().ok_or_else(|| invalid("a file must be an object".to_owned()))?;
+        if !entry.contains_key("name") {
+            let name = path
+                .file_name()
+                .ok_or_else(|| invalid(format!("file path has no name: {}", path.display())))?
+                .to_string_lossy()
+                .into_owned();
+            entry.insert("name".to_owned(), serde_json::Value::String(name));
+        }
+        entry.remove("path");
+        entry.insert(
+            "data".to_owned(),
+            serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(data)),
+        );
+    }
+    Ok(params)
+}
+
 /// How often a location wait asks the current document where it is.
 const LOCATION_POLL: Duration = Duration::from_millis(50);
 
@@ -1862,5 +1934,39 @@ mod tests {
             .await
             .expect("the hook answers");
         assert_eq!(result, json!({"label": "settings", "method": "window.resize", "width": 640, "hasWindow": null}));
+    }
+    #[test]
+    fn a_file_named_by_path_is_read_into_the_payload_the_bridge_takes() {
+        let directory = std::env::temp_dir().join(format!("hasgard-upload-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("temp directory");
+        let path = directory.join("note.txt");
+        std::fs::write(&path, b"hello").expect("write file");
+
+        let params = json!({"selector": "#upload", "files": [
+            {"path": path, "type": "text/plain"},
+            {"name": "inline.txt", "data": "aGk="},
+        ]});
+        assert!(names_file_paths(Some(&params)));
+        let read = read_file_paths(params).expect("read files");
+        assert_eq!(
+            read["files"],
+            json!([
+                {"name": "note.txt", "type": "text/plain", "data": "aGVsbG8="},
+                {"name": "inline.txt", "data": "aGk="},
+            ])
+        );
+
+        for files in [
+            json!([{"path": "relative.txt"}]),
+            json!([{"path": directory}]),
+            json!([{"path": directory.join("missing.txt")}]),
+            json!([{"path": path, "data": "aGk="}]),
+            json!([{"path": 5}]),
+        ] {
+            let error = read_file_paths(json!({"files": files})).expect_err("invalid file entry");
+            assert_eq!(error.code, -32602);
+        }
+        assert!(!names_file_paths(Some(&json!({"files": [{"name": "a", "data": "aGk="}]}))));
+        std::fs::remove_dir_all(&directory).expect("remove temp directory");
     }
 }

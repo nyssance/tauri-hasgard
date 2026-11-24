@@ -118,6 +118,14 @@ export interface DropFile {
   type?: string
 }
 
+/** A file the application reads from disk itself; how a large file is sent. */
+export interface DropFilePath {
+  name: string
+  /** Absolute path on the machine running the application. */
+  path: string
+  type?: string
+}
+
 /**
  * A file to hand to the page: either a path on the test machine, which is read
  * and encoded for you, or an in-memory payload for content that never existed

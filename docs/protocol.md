@@ -14,7 +14,7 @@ Every Hasgard client speaks the same JSON-RPC 2.0 to the plugin. Use this page t
 - A connection is pipelined: send the next request without waiting for the previous response. Requests for the same `window` run one at a time in arrival order. Requests for different windows, and the observers `wait` and `watch`, run alongside them, so a pending `watch` sees the action sent after it. At most 64 requests are in flight per connection; the plugin stops reading past that.
 - A response has exactly one of `result` or `error`. `result: null` is success; a missing result is a protocol error.
 - A `null` ID marks an error that could not be tied to a request. Clients surface it and fail their pending calls.
-- A request is at most **1,048,576 bytes** including the newline, base64 payloads included. Clients check the size before sending and fail locally, leaving the connection usable. `setInputFiles` and `drop` carry their files in the request, so one call holds about 750 KB of file data in total.
+- A request is at most **1,048,576 bytes** including the newline, base64 payloads included. Clients check the size before sending and fail locally, leaving the connection usable. Files for `setInputFiles` and `drop` can be named by path instead, which this limit does not bound.
 
 Error codes:
 
@@ -78,6 +78,8 @@ An element target takes one of three forms:
 | Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
+
+`drop` and `setInputFiles` take `files`, each either `{ name, type?, data }` with base64 contents or `{ name?, type?, path }` with an absolute path the application reads itself. Inline data counts toward the request limit; paths do not, and one call reads at most 64 MiB.
 
 `clipboard.read` answers `{ text }` with the system clipboard's text, or `null` when it holds none; `clipboard.write` takes `text`. The clipboard is shared with whoever uses the machine.
 
