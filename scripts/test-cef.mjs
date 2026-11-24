@@ -144,12 +144,16 @@ try {
   assert.equal(await evaluate("guest", "document.body.scrollHeight > 1500"), true)
   assert.equal(await evaluate("second", "document.body.scrollHeight < 1500"), true)
   pass("remote guest requires no Tauri IPC; unequal document heights")
-  // Written while the page loaded, before any automation request reached this webview.
-  // CDP replays such messages without object previews, so the object is its description.
+  // Written while the page loaded. If that was before the first automation request reached
+  // this webview, CDP replays the message without object previews and the object is its
+  // description; if the request won the race, the object arrives with its preview.
   const loaded = await rpc("console.getLogs", {}, "guest")
-  assert.deepEqual(
-    loaded.map(({ level, args }) => ({ level, args })),
-    [{ level: "warn", args: ["guest loaded", "Object"] }]
+  assert.equal(loaded.length, 1, JSON.stringify(loaded))
+  assert.equal(loaded[0].level, "warn")
+  assert.equal(loaded[0].args[0], "guest loaded")
+  assert.ok(
+    loaded[0].args[1] === "Object" || JSON.stringify(loaded[0].args[1]) === '{"remote":true}',
+    JSON.stringify(loaded[0].args)
   )
   assert.match(loaded[0].source, /guest\.html:\d+:\d+$/)
   assert.deepEqual(await rpc("console.getLogs", {}, "second"), [])
