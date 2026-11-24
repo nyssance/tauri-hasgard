@@ -87,7 +87,8 @@ fn inject_plugin_version(result: &mut serde_json::Value) {
     }
 }
 fn is_page_level(method: &str) -> bool {
-    matches!(method, "url" | "title" | "state" | "eval" | "navigate") || method.starts_with("storage.")
+    matches!(method, "url" | "title" | "state" | "eval" | "navigate" | "press")
+        || ["storage.", "dialog.", "route."].iter().any(|family| method.starts_with(family))
 }
 
 /// Dispatch a JSON-RPC method call to the appropriate handler.
@@ -1934,8 +1935,19 @@ mod tests {
     async fn a_frame_is_refused_by_what_answers_for_the_page() {
         let engine = EvalEngine::new();
         let eval_fn = scripted_eval(&engine, Vec::new());
-        for method in ["url", "title", "state", "eval", "navigate", "storage.list", "storage.clear"] {
-            let params = json!({"frame": ["#pane"], "script": "1", "url": "https://x/"});
+        for method in [
+            "url",
+            "title",
+            "state",
+            "eval",
+            "navigate",
+            "storage.list",
+            "storage.clear",
+            "press",
+            "dialog.list",
+            "route.add",
+        ] {
+            let params = json!({"frame": ["#pane"], "script": "1", "url": "https://x/", "key": "a", "pattern": "**"});
             let error = dispatch(method, Some(&params), &engine, Some(&eval_fn), None, None, &Recorder::new())
                 .await
                 .expect_err("a frame given to a page-level method");

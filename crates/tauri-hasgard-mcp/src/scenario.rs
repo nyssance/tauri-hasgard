@@ -267,7 +267,9 @@ fn validate_step(step: &Step) -> Result<()> {
     }
     // A field the action never reads is a mistake that would otherwise pass in silence:
     // `expected` on an `eval` step asserts nothing.
-    let used = fields_read_by(&step.action);
+    // `clear = true` removes every rule and reads nothing else.
+    let used: &[&str] =
+        if step.action == "route" && step.clear == Some(true) { &["clear"] } else { fields_read_by(&step.action) };
     if let Some(unused) = step.set_fields().into_iter().find(|field| !used.contains(field)) {
         anyhow::bail!("{} does not use '{unused}'", step.action);
     }
@@ -820,6 +822,8 @@ mod tests {
         assert!(format!("{:#}", unread.expect_err("eval does not compare")).contains("does not use 'expected'"));
         assert!(super::parse_scenario("[[step]]\naction='click'\ntarget='#a'\nvalue='x'").is_err());
         assert!(super::parse_scenario("[[step]]\naction='ipc'\ncommand='ping'\nexpected='pong'").is_ok());
+        assert!(super::parse_scenario("[[step]]\naction='route'\nclear=true").is_ok());
+        assert!(super::parse_scenario("[[step]]\naction='route'\nclear=true\npattern='**/x'").is_err());
         assert!(super::parse_scenario("[[step]]\naction='click'\ntarget='#a'\ntimeout_ms=500\nname='go'").is_ok());
     }
 

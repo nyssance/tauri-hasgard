@@ -24,6 +24,16 @@ fn render_scalar(value: &serde_json::Value) -> String {
     value.as_str().map_or_else(|| value.to_string(), ToOwned::to_owned)
 }
 
+/// A value the application or the page produced: an `ipc` or `eval` result. It is shown as
+/// it is, since its fields are the application's and mean nothing to this tool.
+pub(crate) fn format_raw(value: &serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => println!("{text}"),
+        serde_json::Value::Null => {}
+        other => println!("{other}"),
+    }
+}
+
 pub(crate) fn format_text(value: &serde_json::Value) {
     // {error: {message: "...", code: N}} → "✗ <message>"
     if let Some(err) = value.get("error") {
@@ -68,13 +78,16 @@ pub(crate) fn format_text(value: &serde_json::Value) {
         println!("{}", crate::style::success(if disabled { "disabled" } else { "enabled" }));
         return;
     }
-    // A bounding box is four numbers that belong on one line, not pretty JSON.
-    if let (Some(x), Some(y), Some(width), Some(height)) = (
-        value.get("x").and_then(serde_json::Value::as_f64),
-        value.get("y").and_then(serde_json::Value::as_f64),
-        value.get("width").and_then(serde_json::Value::as_f64),
-        value.get("height").and_then(serde_json::Value::as_f64),
-    ) {
+    // A bounding box is four numbers that belong on one line, not pretty JSON. Anything
+    // that says more than that (a window's state does) is shown whole.
+    if value.as_object().is_some_and(|fields| fields.len() == 4)
+        && let (Some(x), Some(y), Some(width), Some(height)) = (
+            value.get("x").and_then(serde_json::Value::as_f64),
+            value.get("y").and_then(serde_json::Value::as_f64),
+            value.get("width").and_then(serde_json::Value::as_f64),
+            value.get("height").and_then(serde_json::Value::as_f64),
+        )
+    {
         println!("{width}×{height} at ({x}, {y})");
         return;
     }

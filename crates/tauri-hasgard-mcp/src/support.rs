@@ -254,8 +254,37 @@ pub fn replay_params(entry: &Value) -> serde_json::Map<String, Value> {
     params
 }
 
+/// Which window a replayed entry goes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplayWindow<'a> {
+    /// The one each entry was recorded in.
+    Recorded,
+    /// The one each entry was recorded in, and this one for an entry recorded without any.
+    Default(&'a str),
+    /// This one, whatever was recorded: the caller asked for it by name.
+    Override(&'a str),
+}
+
+impl ReplayWindow<'_> {
+    /// Put the window on a recorded call's parameters.
+    pub fn apply(self, action: &str, params: &mut serde_json::Map<String, Value>) {
+        let recorded = params.contains_key("window");
+        // An event recorded without a window was sent to every listener; naming one on
+        // replay would narrow it to that window's.
+        if action == "event.emit" && !recorded {
+            return;
+        }
+        let window = match self {
+            Self::Override(window) => window,
+            Self::Default(window) if !recorded => window,
+            Self::Default(_) | Self::Recorded => return,
+        };
+        params.insert("window".to_owned(), Value::String(window.to_owned()));
+    }
+}
+
 pub async fn run_replay_command(
-    client: &mut Client, path: &std::path::Path, export: Option<&str>, window: Option<&str>,
+    client: &mut Client, path: &std::path::Path, export: Option<&str>, window: ReplayWindow<'_>,
 ) -> Result<Value> {
     let entries = read_replay_entries(path)?;
 
@@ -286,14 +315,7 @@ pub async fn run_replay_command(
 
         let mut params = replay_params(entry);
 
-        // An event recorded without a window was sent to every listener; naming one on replay
-        // would narrow it to that window's.
-        let broadcast = action == "event.emit" && !params.contains_key("window");
-        if let Some(w) = window
-            && !broadcast
-        {
-            params.insert("window".to_string(), Value::String(w.to_string()));
-        }
+        window.apply(action, &mut params);
 
         match client.call(action, Some(Value::Object(params))).await {
             Ok(_) => {
@@ -1087,6 +1109,27 @@ mod tests {
         // An entry with nothing displaced is its own parameters, less the entry's fields.
         let click = serde_json::json!({"action": "click", "timestamp": 1, "selector": "#a"});
         assert_eq!(Value::Object(replay_params(&click)), serde_json::json!({"selector": "#a"}));
+    }
+
+    #[test]
+    fn replay_keeps_a_recorded_window_unless_one_is_asked_for_by_name() {
+        let aimed = |window: ReplayWindow<'_>, action: &str, entry: Value| {
+            let mut params = replay_params(&entry);
+            window.apply(action, &mut params);
+            params.get("window").cloned()
+        };
+        let in_settings = serde_json::json!({"selector": "#save", "window": "settings"});
+        let unscoped = serde_json::json!({"selector": "#save"});
+        // A default says where unscoped entries go; it does not move the ones that were recorded somewhere.
+        assert_eq!(aimed(ReplayWindow::Default("main"), "click", in_settings.clone()), Some("settings".into()));
+        assert_eq!(aimed(ReplayWindow::Default("main"), "click", unscoped.clone()), Some("main".into()));
+        assert_eq!(aimed(ReplayWindow::Override("main"), "click", in_settings.clone()), Some("main".into()));
+        assert_eq!(aimed(ReplayWindow::Recorded, "click", in_settings), Some("settings".into()));
+        assert_eq!(aimed(ReplayWindow::Recorded, "click", unscoped), None);
+        // A broadcast stays one, whatever the window.
+        let broadcast = serde_json::json!({"event": "sync:done"});
+        assert_eq!(aimed(ReplayWindow::Override("main"), "event.emit", broadcast.clone()), None);
+        assert_eq!(aimed(ReplayWindow::Default("main"), "event.emit", broadcast), None);
     }
 
     #[test]

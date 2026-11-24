@@ -91,6 +91,23 @@ async fn run_cli() -> Result<()> {
         follow_network(&mut client, args.json, filter.as_deref(), *last, failed, args.window.as_deref()).await?;
     }
 
+    if let Command::Replay { ref path, .. } = args.command {
+        // A window named with the command moves the whole recording there; the default from
+        // the environment only places the entries that were recorded without one.
+        let target = match (args.window.as_deref(), args.window_given) {
+            (Some(named), true) => tauri_hasgard_mcp::support::ReplayWindow::Override(named),
+            (Some(default), false) => tauri_hasgard_mcp::support::ReplayWindow::Default(default),
+            (None, _) => tauri_hasgard_mcp::support::ReplayWindow::Recorded,
+        };
+        let result = run_replay_command(&mut client, path, None, target).await?;
+        format_result(OutputKind::Replay, &result, args.json)?;
+        // A replay in which a step failed has failed, and a script gating on it has to see that.
+        if result["status"] == "failed" {
+            anyhow::bail!("{} of {} replayed steps failed", result["failed"], result["total"]);
+        }
+        return Ok(());
+    }
+
     let screenshot_path = if let Command::Screenshot { ref path, .. } = args.command { path.clone() } else { None };
     let is_screenshot = matches!(args.command, Command::Screenshot { .. });
     let is_ping = matches!(args.command, Command::Ping);
@@ -140,10 +157,6 @@ async fn run_cli() -> Result<()> {
     }
 
     format_result(output_kind, &result, args.json)?;
-    // A replay in which a step failed has failed, and a script gating on it has to see that.
-    if matches!(output_kind, OutputKind::Replay) && result["status"] == "failed" {
-        anyhow::bail!("{} of {} replayed steps failed", result["failed"], result["total"]);
-    }
     Ok(())
 }
 
@@ -168,6 +181,7 @@ where
         on_command_line |= given(current);
         level = current.subcommand().map(|(_, inner)| inner);
     }
+    args.window_given = on_command_line;
     if matches!(args.command, Command::Event(_) | Command::Downloads(_)) && !on_command_line {
         args.window = None;
     }
@@ -176,6 +190,8 @@ where
 
 #[derive(Copy, Clone)]
 enum OutputKind {
+    /// The application's own value, shown as it is.
+    Raw,
     Snapshot,
     Diff,
     Logs,
@@ -202,6 +218,7 @@ impl From<&Command> for OutputKind {
             Command::Windows => OutputKind::Windows,
             Command::Record { .. } => OutputKind::Record,
             Command::Replay { .. } => OutputKind::Replay,
+            Command::Ipc { .. } | Command::Eval { .. } => OutputKind::Raw,
             _ => OutputKind::Text,
         }
     }
@@ -248,6 +265,7 @@ fn format_result(kind: OutputKind, result: &serde_json::Value, emit_json: bool) 
                 println!("{formatted}");
             }
         }
+        OutputKind::Raw => output::format_raw(result),
         OutputKind::Replay | OutputKind::Text => output::format_text(result),
     }
     Ok(())
@@ -448,7 +466,7 @@ async fn run_command(client: &mut Client, command: Command, scope: Scope<'_>) ->
             client.call(method, with_scope(params, scope)).await
         }
         Command::Record { action } => run_record_command(client, action, scope).await,
-        Command::Replay { path, export } => run_replay_command(client, &path, export.as_deref(), scope.window).await,
+        Command::Replay { .. } => anyhow::bail!("replay must be handled before run_command"),
         cmd => run_dom_command(client, cmd, scope).await,
     }
 }
@@ -1210,6 +1228,17 @@ mod tests {
 
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn an_application_s_own_value_is_not_read_as_this_tool_s_status() {
+        // `ipc get_status` answering {"status":"running"} used to print as a failure.
+        for line in [&["tauri-hasgard", "ipc", "get_status"][..], &["tauri-hasgard", "eval", "1"][..]] {
+            let command = parse_cli(line.iter().copied()).expect("parses").command;
+            assert!(matches!(OutputKind::from(&command), OutputKind::Raw), "{line:?}");
+        }
+        let click = parse_cli(["tauri-hasgard", "click", "#a"]).expect("parses").command;
+        assert!(matches!(OutputKind::from(&click), OutputKind::Text));
+    }
 
     #[test]
     #[serial]

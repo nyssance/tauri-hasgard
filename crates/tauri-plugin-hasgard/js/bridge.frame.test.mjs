@@ -417,3 +417,16 @@ test("forms and watch look in the frame's document, not the page's", () => {
   assert.throws(() => hasgard.watch({ frame: ["#pane"], selector: "#list" }), /no element matches selector: #list/)
   assert.throws(() => hasgard.formDump({ frame: ["#absent"] }), /No frame matches/)
 })
+
+test("an expression wait in a frame is evaluated in the frame's own window", async () => {
+  const frame = makeDocument()
+  frame.defaultView = { eval: (expression) => `frame saw ${expression}` }
+  const hasgard = loadBridge({ frames: { "#pane": frame } })
+
+  assert.deepEqual(await hasgard.wait({ expression: "document.title", frame: ["#pane"], timeout: 50 }), {
+    found: true,
+    value: "frame saw document.title"
+  })
+  // A frame that is not there is an error, not an answer for the page.
+  await assert.rejects(async () => hasgard.wait({ expression: "true", frame: ["#nowhere"] }), /No frame matches/)
+})

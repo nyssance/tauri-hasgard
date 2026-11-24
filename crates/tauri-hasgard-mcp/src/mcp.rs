@@ -896,7 +896,15 @@ impl HasgardMcpServer {
             Ok(client) => client,
             Err(err) => return Ok(tool_error(&err)),
         };
-        Ok(match run_replay_command(&mut client, &path, None, window.as_deref()).await {
+        // A window named in this call moves the whole recording there; the server's default
+        // only places the entries that were recorded without one.
+        let asked = optional_string(&args, "window")?;
+        let target = match (asked.as_deref(), window.as_deref()) {
+            (Some(named), _) => crate::support::ReplayWindow::Override(named),
+            (None, Some(default)) => crate::support::ReplayWindow::Default(default),
+            (None, None) => crate::support::ReplayWindow::Recorded,
+        };
+        Ok(match run_replay_command(&mut client, &path, None, target).await {
             // A replay in which a step failed is a failed replay, as a scenario is.
             Ok(result) if result["status"] == "failed" => CallToolResult::structured_error(json!({"result": result})),
             Ok(result) => tool_success(result),

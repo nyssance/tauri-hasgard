@@ -2042,7 +2042,8 @@
   // MutationObserver, which would hang on exactly those cases. A throwing
   // predicate rejects rather than being retried: swallowing the error would
   // turn a genuine bug into a timeout with no clue what happened.
-  function waitForExpression(expression, timeout, poll) {
+  // `view` is the window the expression is evaluated in: the page's, or a frame's own.
+  function waitForExpression(expression, timeout, poll, view) {
     return new Promise((res, rej) => {
       let settled = false
       let poller = null
@@ -2074,7 +2075,7 @@
       function attempt() {
         let value
         try {
-          value = (0, eval)(expression)
+          value = view ? view.eval(expression) : (0, eval)(expression)
         } catch (e) {
           fail(e)
           return
@@ -2113,7 +2114,9 @@
 
     if (expression) {
       const poll = optionalNumber(options?.poll, "poll", 50)
-      return waitForExpression(expression, timeout, poll)
+      // In a frame the expression sees the frame's own `document` and globals.
+      const view = options?.frame == null ? null : frameDocument(options.frame).defaultView
+      return waitForExpression(expression, timeout, poll, view)
     }
 
     return new Promise((res, rej) => {

@@ -16,6 +16,10 @@ pub(crate) struct Cli {
     #[arg(long, env = "TAURI_HASGARD_WINDOW", global = true)]
     pub window: Option<String>,
 
+    /// Whether `--window` was given with the command rather than taken from the environment.
+    #[arg(skip)]
+    pub window_given: bool,
+
     /// Scope element operations to a same-origin iframe, by CSS selector.
     ///
     /// Repeat to descend into nested frames, outermost first. Cross-origin

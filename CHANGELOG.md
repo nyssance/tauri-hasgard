@@ -1,5 +1,10 @@
 # Unreleased
 
+- An expression `wait` with `frame` is evaluated in the frame's own window; it used to answer for the page. `press`, `dialog.*` and `route.*` reject `frame`.
+- `replay` keeps each entry's recorded window unless a window is named with the replay; a default window no longer moves the whole recording.
+- CLI text output shows a window's whole state, and `ipc` and `eval` results as the application returned them, instead of reading their fields as this tool's own status.
+- The npm launcher ends with the signal that ended the CLI instead of exiting 0.
+- A scenario's `route` step with `clear = true` rejects the fields it does not read.
 - Fix `replay` reporting success when replayed steps failed: the CLI exits 1, the MCP tool reports an error, and the failing steps and their errors are in the result.
 - Fix a scenario step that hit `timeout_ms` leaving the connection one answer behind, so every later step failed with a response id mismatch. The client now skips the answer to a call it gave up on.
 - CLI: the default window from `TAURI_HASGARD_WINDOW` no longer narrows `event emit` to that window or `downloads` to its files; only a `--window` on the command line does.

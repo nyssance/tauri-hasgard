@@ -24,12 +24,16 @@ try {
   process.exit(1)
 }
 const child = spawn(binary, process.argv.slice(2), { stdio: "inherit" })
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => child.kill(signal))
+const forwarded = ["SIGINT", "SIGTERM", "SIGHUP"]
+for (const signal of forwarded) process.on(signal, () => child.kill(signal))
 child.on("error", (error) => {
   console.error(`tauri-hasgard: cannot start ${binary}: ${error.message}`)
   process.exit(1)
 })
 child.on("exit", (code, signal) => {
-  if (signal) process.kill(process.pid, signal)
-  else process.exit(code ?? 1)
+  if (!signal) process.exit(code ?? 1)
+  // End the way the binary did. The forwarding handlers would swallow the signal and
+  // leave this process to exit 0, so they are removed first.
+  for (const name of forwarded) process.removeAllListeners(name)
+  process.kill(process.pid, signal)
 })
