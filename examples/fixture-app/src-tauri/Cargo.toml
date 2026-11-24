@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-[lints]
-workspace = true
+# Not the workspace's pedantic set: Tauri commands must take their arguments by value.
+[lints.clippy]
+unwrap_used = "deny"
 
 [lib]
 name = "tauri_hasgard_fixture_app"

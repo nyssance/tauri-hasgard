@@ -14,7 +14,18 @@ function run(args) {
 const executor = spawnSync(process.execPath, ["run", "--cwd", "packages/executor", "build"], { stdio: "inherit" })
 if (executor.error) throw executor.error
 if (executor.status !== 0) process.exit(executor.status ?? 1)
-run(["test", "-p", "tauri-hasgard-mcp", "-p", "tauri-plugin-hasgard", "-p", "tauri-hasgard-cli", "--all-features", "--locked", "--no-run"])
+run([
+  "test",
+  "-p",
+  "tauri-hasgard-mcp",
+  "-p",
+  "tauri-plugin-hasgard",
+  "-p",
+  "tauri-hasgard-cli",
+  "--all-features",
+  "--locked",
+  "--no-run"
+])
 if (process.platform === "darwin") {
   const frameworks = []
   function visit(path) {
@@ -38,4 +49,14 @@ if (process.platform === "darwin") {
   // cef-dll-sys copies runtime DLLs beside target/debug, not test executables in deps.
   env.PATH = resolve(process.env.CARGO_TARGET_DIR ?? "target", "debug") + delimiter + process.env.PATH
 }
-run(["test", "-p", "tauri-hasgard-mcp", "-p", "tauri-plugin-hasgard", "-p", "tauri-hasgard-cli", "--all-features", "--locked"])
+run([
+  "test",
+  "-p",
+  "tauri-hasgard-mcp",
+  "-p",
+  "tauri-plugin-hasgard",
+  "-p",
+  "tauri-hasgard-cli",
+  "--all-features",
+  "--locked"
+])

@@ -367,7 +367,7 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// multiple captures race on the same final path.
 #[cfg(target_os = "macos")]
 fn tmp_path_for(final_path: &Path) -> std::path::PathBuf {
-    let mut name = final_path.file_name().map(std::ffi::OsString::from).unwrap_or_default();
+    let mut name = final_path.file_name().map_or_else(std::ffi::OsString::new, std::ffi::OsString::from);
     let counter = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     name.push(format!(".tmp.{}.{counter}.png", std::process::id()));
     final_path.with_file_name(name)

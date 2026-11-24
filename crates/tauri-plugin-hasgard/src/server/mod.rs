@@ -169,12 +169,12 @@ where
 
     let serve = async {
         // `lane` is the window a request occupies, or `None` for an observer.
-        let run = |req: Request, lane: Option<Option<String>>| async move {
+        let run = |req: Request, lane: Option<String>| async move {
             (lane, dispatch_request(&req, engine, eval_fn, list_fn, press_hooks, recorder).await)
         };
         // A key is present exactly while a request for that window is running;
         // its queue holds the requests waiting behind it.
-        let mut lanes: HashMap<Option<String>, VecDeque<Request>> = HashMap::new();
+        let mut lanes: HashMap<String, VecDeque<Request>> = HashMap::new();
         let mut queued = 0_usize;
         let mut running = FuturesUnordered::new();
         let mut open = true;
@@ -204,12 +204,15 @@ where
                     }
                     Some(Incoming::Request(req)) if is_observer(&req.method) => running.push(run(req, None)),
                     Some(Incoming::Request(req)) => {
+                        // A request that names no window targets `main`, so it shares that
+                        // lane; a lane of its own would let it overtake `main`'s requests.
                         let lane = req
                             .params
                             .as_ref()
                             .and_then(|params| params.get("window"))
                             .and_then(serde_json::Value::as_str)
-                            .map(str::to_owned);
+                            .unwrap_or("main")
+                            .to_owned();
                         match lanes.entry(lane.clone()) {
                             Entry::Occupied(mut waiting) => {
                                 waiting.get_mut().push_back(req);
@@ -374,6 +377,27 @@ mod contract_tests {
         assert_eq!(next_response_id(&mut lines).await, 1);
         let (second_window, second) = calls.recv().await.expect("second main request starts after the first");
         assert_eq!(second_window.as_deref(), Some("main"));
+        engine.resolve(second, Ok(serde_json::json!("two")));
+        assert_eq!(next_response_id(&mut lines).await, 2);
+    }
+
+    #[tokio::test]
+    async fn a_request_without_a_window_waits_behind_main_which_it_targets() {
+        let (engine, mut calls, mut writer, mut lines) = pipelined_connection();
+
+        send(&mut writer, 1, "text", "main").await;
+        let unlabelled = serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "text", "params": {"selector": "#x"}});
+        writer.write_all(format!("{unlabelled}\n").as_bytes()).await.expect("write request");
+        send(&mut writer, 3, "text", "settings").await;
+        let (_, first) = calls.recv().await.expect("first request");
+        let (other_window, other) = calls.recv().await.expect("another window runs alongside");
+        assert_eq!(other_window.as_deref(), Some("settings"), "the unlabelled request must not overtake main");
+
+        engine.resolve(other, Ok(serde_json::json!("settings")));
+        assert_eq!(next_response_id(&mut lines).await, 3);
+        engine.resolve(first, Ok(serde_json::json!("one")));
+        assert_eq!(next_response_id(&mut lines).await, 1);
+        let (_, second) = calls.recv().await.expect("the unlabelled request starts after main's first");
         engine.resolve(second, Ok(serde_json::json!("two")));
         assert_eq!(next_response_id(&mut lines).await, 2);
     }

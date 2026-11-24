@@ -1080,7 +1080,11 @@
   function pruneDetachedRefs() {
     if (idMap.size < pruneAt) return
     for (const [ref, el] of idMap) {
-      if (isDetached(el)) idMap.delete(ref)
+      // Forget the node too: if it returns to the document it must get a ref `idMap` knows.
+      if (isDetached(el)) {
+        idMap.delete(ref)
+        refOf.delete(el)
+      }
     }
     pruneAt = Math.max(PRUNE_FLOOR, idMap.size * 2)
   }

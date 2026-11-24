@@ -31,6 +31,11 @@ Keep these three versions identical:
 The root `package.json` is `private: true` and is not published, so its version
 is deliberately not part of this set.
 
+`bun scripts/sync-release-version.mjs <version>` writes the npm and `server.json` versions; set the
+Cargo workspace version by hand. The release workflow only checks that the tag matches what is
+committed, then runs the unit suites. Native E2E is not part of it: run the suite locally, and use
+the manual **Native Tauri E2E** workflow in the Actions tab for a platform you did not run.
+
 Add the release's entry to `CHANGELOG.md` before tagging.
 
 After CI passes, create and push the tag:

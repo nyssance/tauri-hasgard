@@ -4,17 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing version tag to release
-        required: true
-        type: string
-      skip_native_e2e:
-        description: Skip native macOS, Windows, and CEF E2E for dependency-only changes
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: write
@@ -33,10 +22,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: bun install --frozen-lockfile
       - run: bun run protocol:check
-      - run: bun scripts/sync-release-version.mjs "${GITHUB_REF_NAME#v}"
+      # The tag must match the versions committed; run scripts/sync-release-version.mjs before tagging.
       - run: bun scripts/check-release-version.mjs "${GITHUB_REF_NAME}"
       - run: bun run build
       - run: bun run typecheck
+      # Unit suites only, without the CEF build: a few minutes, and they catch protocol and bridge regressions.
+      - run: bun run test
+      - run: bun test crates/tauri-plugin-hasgard/js/*.test.mjs
+      - run: cargo test --locked -p tauri-hasgard-mcp -p tauri-hasgard-cli -p tauri-plugin-hasgard
   cli:
     needs: validate
     strategy:

@@ -376,7 +376,7 @@ impl ConsoleLog {
             return;
         }
         let args: Vec<Value> =
-            event["args"].as_array().map(|args| args.iter().map(console_argument).collect()).unwrap_or_default();
+            event["args"].as_array().map_or_else(Vec::new, |args| args.iter().map(console_argument).collect());
         let source = event["stackTrace"]["callFrames"].get(0).map(|frame| {
             format!(
                 "{}:{}:{}",

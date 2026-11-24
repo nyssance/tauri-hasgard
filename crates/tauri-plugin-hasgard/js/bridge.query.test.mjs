@@ -269,3 +269,24 @@ test("a missing value is rejected rather than matching everything", () => {
 
   assert.throws(() => hasgard.query({ by: "text" }), /requires a 'value'/)
 })
+
+test("a node swept as detached gets a working ref when it returns to the document", () => {
+  const node = el("button", { text: "Returning" })
+  const others = Array.from({ length: 1100 }, (_, i) => el("button", { text: `b${i}` }))
+  const body = el("body", {}, [node, ...others])
+  const hasgard = loadBridge(body)
+  hasgard.query({ by: "role", value: "button" })
+
+  // The node leaves the document; the next query sweeps it from the ref table.
+  body.children.splice(body.children.indexOf(node), 1)
+  node.isConnected = false
+  hasgard.query({ by: "role", value: "button" })
+
+  // A framework re-attaches the same node, as tab panels and portals do.
+  body.children.unshift(node)
+  node.isConnected = true
+  const again = hasgard.query({ by: "role", value: "button", name: "Returning" }).elements
+
+  assert.equal(again.length, 1)
+  assert.equal(hasgard.resolve(again[0].ref), node, "the ref handed out must resolve to the node")
+})

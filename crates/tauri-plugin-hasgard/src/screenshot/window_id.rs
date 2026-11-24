@@ -106,9 +106,9 @@ pub(crate) fn enumerate_layer_zero_windows(target: u32) -> Result<EnumeratedLaye
             continue;
         }
         let owner =
-            dict.find(&owner_key).and_then(|v| v.downcast::<CFString>()).map(|v| v.to_string()).unwrap_or_default();
+            dict.find(&owner_key).and_then(|v| v.downcast::<CFString>()).map_or_else(String::new, |v| v.to_string());
         let title =
-            dict.find(&title_key).and_then(|v| v.downcast::<CFString>()).map(|v| v.to_string()).unwrap_or_default();
+            dict.find(&title_key).and_then(|v| v.downcast::<CFString>()).map_or_else(String::new, |v| v.to_string());
 
         if window_id == target && target_bounds.is_none() {
             // CGWindowList stores the bounds rect as a `{Width,Height,X,Y}`

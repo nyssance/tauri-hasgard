@@ -1,3 +1,9 @@
+# Unreleased
+
+- Fix a ref that could not be used: once the ref table passed 1,024 entries, a node swept as detached and later re-attached was handed its old ref, which the table no longer knew.
+- Fix request ordering for a request that names no window. It targets `main` and now waits in `main`'s lane; before, it could run alongside a request sent to `main` explicitly.
+- Release validation checks the committed versions against the tag instead of rewriting them, and runs the unit suites. Native E2E is a manual workflow.
+
 # 0.7.3 (2026-11-23)
 
 - Requests on one connection are pipelined: a response is written when its request finishes, matched by `id`. Requests for the same window keep their arrival order; other windows and the observers `wait` and `watch` run alongside. A pending `watch` no longer holds later requests until it times out.

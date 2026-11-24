@@ -41,4 +41,3 @@ jobs:
       - run: bun scripts/test-rust.mjs
         env:
           CEF_PATH: ${{ runner.temp }}/cef-cache
-
