@@ -163,7 +163,8 @@ pub(crate) async fn dispatch(
             if method.starts_with("window.")
                 || method.starts_with("cookies.")
                 || method.starts_with("clipboard.")
-                || method.starts_with("event.") =>
+                || method.starts_with("event.")
+                || method.starts_with("downloads.") =>
         {
             let control = engine
                 .native

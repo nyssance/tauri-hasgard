@@ -540,6 +540,27 @@ test("events are emitted to the application and read back from what it emitted",
   await expect(application.waitForEvent("never", { timeoutMs: 30 })).rejects.toThrow(/did not emit "never"/)
 })
 
+test("downloads are waited for and listed as the application reported them", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const call = vi.spyOn(rpc, "call")
+  const application = new HasgardApplication(rpc)
+  const download = { id: 4, timestamp: 9, window: "main", url: "blob:x", path: "/tmp/a.txt", state: "finished" }
+
+  call.mockResolvedValueOnce(download)
+  expect(await application.waitForDownload({ timeoutMs: 3_000, sinceId: 3, window: "main" })).toEqual(download)
+  call.mockResolvedValueOnce({ downloads: [download], directory: null })
+  expect(await application.downloads.list()).toEqual([download])
+  call.mockResolvedValueOnce({ directory: "/tmp/out" })
+  await application.downloads.setDirectory("/tmp/out")
+
+  expect(call).toHaveBeenNthCalledWith(1, "downloads.wait", { timeout: 3_000, sinceId: 3, window: "main" })
+  expect(call).toHaveBeenNthCalledWith(2, "downloads.list", {})
+  expect(call).toHaveBeenNthCalledWith(3, "downloads.setDirectory", { path: "/tmp/out" })
+
+  call.mockResolvedValueOnce({ ...download, state: "paused" })
+  await expect(application.waitForDownload()).rejects.toThrow(/download\.state/)
+})
+
 test("clipboard methods read and write the system clipboard's text", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call")

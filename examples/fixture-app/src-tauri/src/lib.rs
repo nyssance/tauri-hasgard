@@ -70,6 +70,15 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .runtime(tauri_runtime_wry::Wry::default())
         .setup(|app| {
+            // A webview reports downloads only to the handler it was built with, so the
+            // window that tests them is built here rather than declared in the config.
+            #[cfg(feature = "hasgard-testing")]
+            tauri::WebviewWindowBuilder::new(app, "downloads", tauri::WebviewUrl::App("embedded.html".into()))
+                .title("Downloads")
+                .visible(false)
+                .inner_size(480.0, 360.0)
+                .on_download(tauri_plugin_hasgard::downloads::observer())
+                .build()?;
             // Keep fixture windows hidden until they are on the chosen display.
             // Local debugging defaults to a secondary display; CI opts into 0.
             let wanted = match std::env::var("TAURI_HASGARD_DISPLAY") {

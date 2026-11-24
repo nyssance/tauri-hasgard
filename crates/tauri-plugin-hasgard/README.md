@@ -31,5 +31,6 @@ Enable the `cef` feature and register `init_cef()` on a builder using `tauri_run
 - The plugin is active in every build that registers it, release builds included. Registration is the only switch.
 - `init_with_options(Options { listen: false })` registers the Wry executor without opening the local endpoint. The managed `Automation` handle then accepts calls from the host through `call`, with an explicit webview label.
 - `init_cef_with_executor(options, factory)` lets a CEF host that already ships a JavaScript runtime and Playwright supply its own executor. `playwright::worker_source()` returns the worker script; pass the packaged Playwright module URL as its argument.
+- To let tests see downloads, pass `tauri_plugin_hasgard::downloads::observer()` to `on_download` when building a webview, or wrap your own handler with `downloads::observe`.
 - The `mcp` feature adds `Automation::mcp_server`, the Hasgard tools as an in-process MCP server for an app that hosts its own agent, including over ACP. See the [MCP guide](https://github.com/nyssance/tauri-hasgard/blob/main/docs/mcp.md).
 - `TAURI_HASGARD_SOCKET` sets the endpoint path before the app starts.

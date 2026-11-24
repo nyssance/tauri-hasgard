@@ -167,6 +167,9 @@ pub(crate) enum Command {
     /// Emit a Tauri event to the application, or record the events it emits.
     #[command(subcommand)]
     Event(EventCommand),
+    /// The files a webview downloads, where the application reports them.
+    #[command(subcommand)]
+    Downloads(DownloadsCommand),
     /// Read or write the system clipboard's text.
     #[command(subcommand)]
     Clipboard(ClipboardCommand),
@@ -527,6 +530,29 @@ pub(crate) enum EventCommand {
         since_id: Option<u64>,
     },
     /// Forget the recorded events, leaving the listeners in place.
+    Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum DownloadsCommand {
+    /// Show the downloads seen so far: every window's, or one window's with --window.
+    List,
+    /// Wait for a download to finish and print it, with the path it was saved to.
+    Wait {
+        /// Only a download started after this one.
+        #[arg(long)]
+        since_id: Option<u64>,
+        #[arg(long, default_value = "10000")]
+        timeout: u64,
+    },
+    /// Send later downloads to this directory, or back to their own destination with --reset.
+    SetDirectory {
+        #[arg(required_unless_present = "reset", conflicts_with = "reset")]
+        path: Option<std::path::PathBuf>,
+        #[arg(long)]
+        reset: bool,
+    },
+    /// Forget the downloads seen so far.
     Clear,
 }
 

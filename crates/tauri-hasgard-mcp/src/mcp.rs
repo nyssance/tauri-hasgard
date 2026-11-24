@@ -398,6 +398,33 @@ impl HasgardMcpServer {
                 let target = if method == "event.emit" { optional_string(&args, "window")? } else { None };
                 self.call_app_tool(method, Some(params), target).await
             }
+            "downloads" => {
+                let mut params = json!({});
+                let method = match required_string(&args, "action")?.as_str() {
+                    "list" => "downloads.list",
+                    "wait" => {
+                        if let Some(timeout) = optional_u64(&args, "timeout")? {
+                            params["timeout"] = json!(timeout);
+                        }
+                        if let Some(since) = optional_u64(&args, "since_id")? {
+                            params["sinceId"] = json!(since);
+                        }
+                        "downloads.wait"
+                    }
+                    "set_directory" => {
+                        params["path"] = json!(optional_string(&args, "path")?);
+                        "downloads.setDirectory"
+                    }
+                    "clear" => "downloads.clear",
+                    other => {
+                        return Err(invalid_params(format!(
+                            "unknown downloads action: {other}; expected list, wait, set_directory or clear"
+                        )));
+                    }
+                };
+                // A window narrows the view to its own downloads, and only when the caller names one.
+                self.call_app_tool(method, Some(params), optional_string(&args, "window")?).await
+            }
             "clipboard" => match required_string(&args, "action")?.as_str() {
                 "read" => self.call_app_tool("clipboard.read", None, None).await,
                 "write" => {
@@ -1127,6 +1154,15 @@ fn tool_specs() -> Vec<ToolSpec> {
             read_only: false,
             destructive: false,
             idempotent: false,
+        },
+        ToolSpec {
+            name: "downloads",
+            description: "The files a webview downloads. wait resolves when one finishes, with the path it was saved \
+                          to. Available where the application passes Hasgard's observer to its download hook.",
+            schema: downloads_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
         },
         ToolSpec {
             name: "clipboard",
@@ -2201,6 +2237,18 @@ fn event_schema() -> Arc<JsonObject> {
     )
 }
 
+fn downloads_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            ("action", enum_prop("What to do.", &["list", "wait", "set_directory", "clear"])),
+            ("timeout", integer_prop("For wait: how long, in milliseconds. Defaults to 10000.")),
+            ("since_id", integer_prop("For wait: only a download started after this id.")),
+            ("path", string_prop("For set_directory: an absolute directory for later downloads. Omit to reset.")),
+        ]),
+        &["action"],
+    )
+}
+
 fn clipboard_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2653,6 +2701,7 @@ mod tests {
             "dialog",
             "diff",
             "disabled",
+            "downloads",
             "drag",
             "drop",
             "eval",

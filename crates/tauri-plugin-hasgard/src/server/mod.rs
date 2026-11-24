@@ -79,11 +79,11 @@ enum Incoming {
 /// held back by its own socket buffer instead of growing server memory.
 const MAX_IN_FLIGHT: usize = 64;
 
-/// `wait` and `watch` only observe: they hold their response open until the
-/// page changes, which is usually caused by a later request on the same
-/// connection. They therefore never occupy a window's lane.
+/// `wait`, `watch` and `downloads.wait` only observe: they hold their response
+/// open until something happens, which is usually caused by a later request on
+/// the same connection. They therefore never occupy a window's lane.
 fn is_observer(method: &str) -> bool {
-    matches!(method, "wait" | "watch")
+    matches!(method, "wait" | "watch" | "downloads.wait")
 }
 
 async fn write_response<W>(writer: &mut W, response: &Response) -> Result<(), Error>

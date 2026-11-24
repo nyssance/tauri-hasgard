@@ -60,6 +60,7 @@ export type {
   CookieFilter,
   CookieInit,
   CookieSameSite,
+  Download,
   LoadState,
   NativeDialogAnswer,
   NativeDialogListing,

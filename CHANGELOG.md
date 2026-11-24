@@ -1,5 +1,6 @@
 # Unreleased
 
+- Add downloads: `downloads.wait`, `downloads.list`, `downloads.setDirectory` and `downloads.clear`. The application passes `tauri_plugin_hasgard::downloads::observer()` to `on_download`, or wraps its own handler with `downloads::observe`. CLI `downloads`, the MCP `downloads` tool, and Playwright `hasgard.waitForDownload` and `hasgard.downloads`.
 - Wry: console and network logs follow a flow to the next document of the same origin, as they do on CEF. They are written to session storage as a document is left and taken out by the one that replaces it.
 - Recording now includes `wheel`, `setInputFiles`, the dialog and native dialog policies, routes, `storage.set` and `storage.clear`, cookies, window size and position, and emitted events, and replay runs them. Shell export covers those a single command can express.
 - Add Tauri events: `event.emit` delivers an event to the application as its backend would, and `event.listen`, `event.list`, `event.unlisten` and `event.clear` record the events it emits. CLI `event`, the MCP `event` tool, and Playwright `hasgard.emit`, `hasgard.events` and `hasgard.waitForEvent`.

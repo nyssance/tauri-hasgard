@@ -346,6 +346,18 @@ export interface WaitForFunctionOptions {
   pollMs?: number
 }
 
+/** A file a webview downloaded, as the application's download hook reported it. */
+export interface Download {
+  id: number
+  timestamp: number
+  /** The webview that started it. */
+  window: string
+  url: string
+  /** Where the file is, or was to be, saved. */
+  path: string | null
+  state: "started" | "finished" | "failed"
+}
+
 /** A Tauri event the application emitted while it was being recorded. */
 export interface RecordedEvent {
   id: number

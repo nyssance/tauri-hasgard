@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cli::{
-    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, EventCommand, FormsArgs,
-    NativeDialogCommand, RecordAction, RouteCommand, StorageAction, StorageArgs, WindowCommand,
+    AssertKind, Cli, ClipboardCommand, Command, CookiesCommand, DialogCommand, DownloadsCommand, EventCommand,
+    FormsArgs, NativeDialogCommand, RecordAction, RouteCommand, StorageAction, StorageArgs, WindowCommand,
 };
 #[cfg(test)]
 use tauri_hasgard_mcp::support::{export_shell_script, mime_from_ext};
@@ -666,6 +666,24 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
             // Only `emit` is scoped by a window: it then reaches that window alone.
             let window = if method == "event.emit" { scope.window } else { None };
             client.call(method, with_scope(Some(params), Scope { window, ..Scope::default() })).await
+        }
+        Command::Downloads(action) => {
+            let (method, params) = match action {
+                DownloadsCommand::List => ("downloads.list", json!({})),
+                DownloadsCommand::Wait { since_id, timeout } => {
+                    let mut params = json!({"timeout": timeout});
+                    if let Some(since_id) = since_id {
+                        params["sinceId"] = json!(since_id);
+                    }
+                    ("downloads.wait", params)
+                }
+                DownloadsCommand::SetDirectory { path, .. } => {
+                    let absolute = path.map(std::path::absolute).transpose().context("cannot resolve the directory")?;
+                    ("downloads.setDirectory", json!({"path": absolute}))
+                }
+                DownloadsCommand::Clear => ("downloads.clear", json!({})),
+            };
+            client.call(method, with_scope(Some(params), Scope { window: scope.window, ..Scope::default() })).await
         }
         Command::Clipboard(ClipboardCommand::Read) => client.call("clipboard.read", None).await,
         Command::Clipboard(ClipboardCommand::Write { text }) => {

@@ -911,3 +911,36 @@ test("Tauri events reach the application and its own are recorded", async ({ has
   expect(await hasgard.events.list()).toEqual([])
   await expect(hasgard.emit("not a name")).rejects.toThrow(/event names may contain only/)
 })
+
+test("a download is reported with the file it saved", async ({ hasgard }) => {
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises")
+  const { basename, join } = await import("node:path")
+  const { tmpdir } = await import("node:os")
+  const pane = await hasgard.waitForWindow("downloads", 5_000)
+  const directory = await mkdtemp(join(tmpdir(), "hasgard-downloads-"))
+  await hasgard.downloads.clear()
+  await hasgard.downloads.setDirectory(directory)
+  try {
+    // Waiting first: it holds its answer open while the click that starts the download goes through.
+    const finished = hasgard.waitForDownload({ timeoutMs: 20_000, window: "downloads" })
+    await pane.evaluate(`(() => {
+      const link = document.createElement("a")
+      link.href = URL.createObjectURL(new Blob(["hello hasgard"], { type: "text/plain" }))
+      link.download = "hasgard-report.txt"
+      document.body.append(link)
+      link.click()
+      link.remove()
+      return null
+    })()`)
+    const download = await finished
+    expect(download).toMatchObject({ window: "downloads", state: "finished" })
+    expect(basename(download.path ?? "")).toBe("hasgard-report.txt")
+    expect(await readFile(download.path ?? "", "utf8")).toBe("hello hasgard")
+    expect((await hasgard.downloads.list("downloads")).map((entry) => entry.id)).toEqual([download.id])
+    // The other windows were not built with the observer and have no downloads of their own.
+    expect(await hasgard.downloads.list("main")).toEqual([])
+  } finally {
+    await hasgard.downloads.setDirectory(null)
+    await rm(directory, { recursive: true, force: true })
+  }
+})

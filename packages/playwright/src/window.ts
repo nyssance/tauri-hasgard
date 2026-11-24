@@ -18,6 +18,7 @@ import type {
   DialogRecord,
   DiffChange,
   DiffOptions,
+  Download,
   DragOffset,
   DropFile,
   DropFilePath,
@@ -238,6 +239,22 @@ function parseNativeDialogPolicy(value: unknown): NativeDialogPolicy {
   }
 }
 
+function parseDownload(value: unknown): Download {
+  const download = expectRecord(value, "download")
+  const state = expectString(download.state, "download.state")
+  if (state !== "started" && state !== "finished" && state !== "failed") {
+    throw new Error(`Invalid Hasgard response: download.state is ${state}`)
+  }
+  return {
+    id: expectNumber(download.id, "download.id"),
+    timestamp: expectNumber(download.timestamp, "download.timestamp"),
+    window: expectString(download.window, "download.window"),
+    url: expectString(download.url, "download.url"),
+    path: expectNullableString(download.path, "download.path"),
+    state
+  }
+}
+
 function parseCookie(value: unknown): Cookie {
   const cookie = expectRecord(value, "cookie")
   const sameSite = expectNullableString(cookie.sameSite, "cookie.sameSite")
@@ -453,6 +470,38 @@ export class HasgardApplication {
       await sleep(pollDelay(attempt, deadline) || 1)
     }
     throw new Error(`The application did not emit "${event}" within ${timeoutMs}ms`)
+  }
+
+  /**
+   * The files webviews download. The application reports them through its own
+   * download hook, so this works where it passes Hasgard's observer to
+   * `on_download`; elsewhere each call rejects and says so.
+   */
+  readonly downloads = {
+    /** Every download seen so far, or one window's. */
+    list: async (window?: string): Promise<Download[]> => {
+      const value = expectRecord(await this.rpc.call("downloads.list", window ? { window } : {}), "downloads.list")
+      return expectArray(value.downloads, "downloads.list.downloads").map(parseDownload)
+    },
+    /** Send later downloads to `directory`, or back to their own destination with `null`. */
+    setDirectory: async (directory: string | null): Promise<void> => {
+      await this.rpc.call("downloads.setDirectory", { path: directory })
+    },
+    clear: async (): Promise<void> => {
+      await this.rpc.call("downloads.clear")
+    }
+  }
+
+  /**
+   * Wait for a download to finish and resolve with it. Pass the id of the last
+   * download already seen as `sinceId` to wait for a new one.
+   */
+  async waitForDownload(options: { timeoutMs?: number; sinceId?: number; window?: string } = {}): Promise<Download> {
+    const params: Record<string, JsonValue> = {}
+    if (options.timeoutMs !== undefined) params.timeout = options.timeoutMs
+    if (options.sinceId !== undefined) params.sinceId = options.sinceId
+    if (options.window !== undefined) params.window = options.window
+    return parseDownload(await this.rpc.call("downloads.wait", params))
   }
 
   /** The system clipboard's text, or null when it holds none. */
