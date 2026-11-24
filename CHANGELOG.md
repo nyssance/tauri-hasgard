@@ -1,4 +1,4 @@
-# Unreleased
+# 0.8.2 (2026-11-24)
 
 - Add downloads: `downloads.wait`, `downloads.list`, `downloads.setDirectory` and `downloads.clear`. The application passes `tauri_plugin_hasgard::downloads::observer()` to `on_download`, or wraps its own handler with `downloads::observe`. CLI `downloads`, the MCP `downloads` tool, and Playwright `hasgard.waitForDownload` and `hasgard.downloads`.
 - Wry: console and network logs follow a flow to the next document of the same origin, as they do on CEF. They are written to session storage as a document is left and taken out by the one that replaces it.

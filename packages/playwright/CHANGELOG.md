@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2 — 2026-11-24
+
+- Add `hasgard.waitForDownload` and `hasgard.downloads` (`list`, `setDirectory`, `clear`). The app passes Hasgard's observer to `on_download`.
+- Add `hasgard.emit`, `hasgard.events` and `hasgard.waitForEvent` for Tauri events.
+- `window.nativeDialogs` works on CEF as well as Wry.
+- `frameLocator(...).screenshot()` and `.diff()`; `window.screenshot(selector, { frame })`.
+- `selectOption` accepts an array for a `<select multiple>`; `locator.waitFor` accepts `visible` and `hidden`.
+- Needs plugin 0.8.2.
+
 ## 0.8.1 — 2026-11-24
 
 - Add `window.nativeDialogs`: `accept({ paths, button })`, `dismiss()`, `manual()`, `list()` and `clear()` answer the dialog plugin's open, save and message dialogs in advance. Needs plugin 0.8.1; Wry only.
