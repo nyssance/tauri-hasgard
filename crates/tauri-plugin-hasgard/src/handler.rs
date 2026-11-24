@@ -116,7 +116,7 @@ pub(crate) async fn dispatch(
     // Isolated CEF worlds cannot observe or monkey-patch the page's main-world
     // console/fetch/dialog APIs. Fail explicitly instead of returning empty data.
     if engine.cef.load(std::sync::atomic::Ordering::Relaxed)
-        && matches!(method, "heap.snapshot" | "dialog.list" | "dialog.clear" | "dialog.handle")
+        && matches!(method, "dialog.list" | "dialog.clear" | "dialog.handle")
     {
         return Err(RpcError {
             code: -32601,
@@ -190,6 +190,7 @@ pub(crate) async fn dispatch(
         | "route.add"
         | "route.list"
         | "route.clear"
+        | "heap.snapshot"
             if observe.is_some() =>
         {
             let console = observe.expect("observation was checked");

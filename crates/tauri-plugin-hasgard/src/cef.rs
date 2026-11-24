@@ -42,6 +42,8 @@ struct Client {
     console: Mutex<ConsoleLog>,
     network: Mutex<NetworkLog>,
     routes: Mutex<Routes>,
+    /// Chunks of the heap snapshot being taken, when one is.
+    heap: Mutex<Option<Vec<u8>>>,
 }
 
 /// Declarative request routing through the CDP Fetch domain; the rules mirror the Wry bridge.
@@ -512,6 +514,44 @@ impl Client {
         result
     }
 
+    /// `heap.snapshot`: V8's own `.heapsnapshot`, streamed by the `DevTools` protocol
+    /// and written next to the target, then renamed, so a reader never sees a partial file.
+    fn heap_snapshot(&self, view: &View, params: &Value) -> Result<Value, String> {
+        let raw = params["output_path"].as_str().ok_or("output_path is required")?;
+        let path = std::path::Path::new(raw);
+        if !path.is_absolute() {
+            return Err(format!("output_path must be absolute: {raw}"));
+        }
+        if !path.parent().is_some_and(std::path::Path::is_dir) {
+            return Err(format!("output_path parent directory does not exist: {raw}"));
+        }
+        {
+            let mut heap = self.heap.lock().expect("CEF heap lock");
+            if heap.is_some() {
+                return Err("a heap snapshot of this webview is already being taken".into());
+            }
+            *heap = Some(Vec::new());
+        }
+        // The protocol sends every chunk before it answers the request.
+        let taken = self.call_with_timeout(
+            view,
+            "HeapProfiler.takeHeapSnapshot",
+            &json!({"reportProgress": false}),
+            Duration::from_secs(120),
+        );
+        let snapshot = self.heap.lock().expect("CEF heap lock").take().expect("the collector was installed above");
+        taken?;
+        if snapshot.is_empty() {
+            return Err("CEF returned an empty heap snapshot".into());
+        }
+        let partial = path.with_extension("partial");
+        std::fs::write(&partial, &snapshot).and_then(|()| std::fs::rename(&partial, path)).map_err(|error| {
+            let _ = std::fs::remove_file(&partial);
+            format!("failed to write {}: {error}", path.display())
+        })?;
+        Ok(json!({"output_path": path, "byte_size": snapshot.len(), "format": "v8"}))
+    }
+
     fn receive(&self, message: DevToolsProtocol) {
         match message {
             DevToolsProtocol::MethodResult { message_id, success, result } => {
@@ -547,6 +587,13 @@ impl Client {
                         if !isolated {
                             self.console.lock().expect("CEF console lock").record(&value);
                         }
+                    }
+                } else if method == "HeapProfiler.addHeapSnapshotChunk" {
+                    if let Ok(value) = serde_json::from_slice::<Value>(&params)
+                        && let Some(chunk) = value["chunk"].as_str()
+                        && let Some(snapshot) = self.heap.lock().expect("CEF heap lock").as_mut()
+                    {
+                        snapshot.extend_from_slice(chunk.as_bytes());
                     }
                 } else if method == "Fetch.requestPaused" {
                     if let Ok(value) = serde_json::from_slice::<Value>(&params) {
@@ -876,6 +923,9 @@ fn register_console(app: &tauri::AppHandle, engine: &EvalEngine, clients: &Arc<C
     *engine.observe.lock().expect("CEF observation hook") = Some(Arc::new(move |label, method, params| {
         let view = target(&console_app, label)?;
         let client = console_clients.get(&view)?;
+        if method == "heap.snapshot" {
+            return client.heap_snapshot(&view, &params);
+        }
         if method == "route.add" {
             let added = client.routes.lock().expect("CEF routes lock").add(&params)?;
             let first = {

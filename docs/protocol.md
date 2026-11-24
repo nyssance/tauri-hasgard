@@ -98,6 +98,8 @@ Platform support for capture:
 | `heap.snapshot`     | Yes (`jsc`)            | Yes (`v8`)              | `-32601`              |
 | `video.*`           | Yes                    | `-32601`                | `-32601`              |
 
+This table is for Wry. On CEF, `screenshot` is composited and `heap.snapshot` is V8's on every platform; see the [CEF guide](cef.md#what-works).
+
 A redrawn document cannot show cross-origin images, frames or native controls; composited pixels do. CEF takes composited pixels on every platform.
 
 ## Snapshot
