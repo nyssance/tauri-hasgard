@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tauri::webview::DownloadEvent;
 
-use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RPC_METHOD_NOT_FOUND, RpcError, optional_u64};
+use crate::params::optional_u64;
+use crate::protocol::{RPC_INTERNAL_ERROR, RPC_INVALID_PARAMS, RPC_METHOD_NOT_FOUND, RpcError};
 
 pub(crate) const METHODS: &[&str] = &["downloads.list", "downloads.wait", "downloads.setDirectory", "downloads.clear"];
 

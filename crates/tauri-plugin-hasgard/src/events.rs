@@ -107,7 +107,7 @@ pub(crate) fn make_event_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> cra
                     None | Some(Value::Null) => None,
                     Some(_) => Some(event_name(params, method)?),
                 };
-                let since = crate::protocol::optional_u64(params, "sinceId", method)?.unwrap_or(0);
+                let since = crate::params::optional_u64(params, "sinceId", method)?.unwrap_or(0);
                 let state = recorded.lock().expect("recorded events");
                 let events: Vec<&Value> = state
                     .events

@@ -28,6 +28,7 @@ pub(crate) mod heap;
 pub(crate) mod key;
 #[cfg(target_os = "macos")]
 mod macos_keyboard;
+mod params;
 pub(crate) mod protocol;
 pub(crate) mod recorder;
 mod video;

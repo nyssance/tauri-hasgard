@@ -817,7 +817,7 @@ async fn handle_wait_location(
     }
     let query = serde_json::Value::Object(query);
     let timeout = Duration::from_millis(
-        crate::protocol::optional_u64(params, "timeout", "wait")?.unwrap_or(DEFAULT_BRIDGE_TIMEOUT_MS),
+        crate::params::optional_u64(params, "timeout", "wait")?.unwrap_or(DEFAULT_BRIDGE_TIMEOUT_MS),
     );
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
