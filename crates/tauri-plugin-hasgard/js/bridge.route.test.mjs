@@ -403,3 +403,40 @@ test("routes and dialog policies hold across a navigation within the tab", async
     delete globalThis.localStorage
   }
 })
+
+test("a frame reads the standing state and never writes it", async () => {
+  // WebView2 runs the bridge in frames too, and a same-origin frame shares the tab's session storage.
+  globalThis.sessionStorage = sessionStorageMock()
+  globalThis.localStorage = sessionStorageMock()
+  try {
+    loadBridge().hasgard.route({ pattern: "**/api/user", status: 201, body: "stubbed" })
+    const stored = globalThis.sessionStorage.getItem("__hasgard__")
+    globalThis.sessionStorage.setItem("__hasgard__logs", "left by the last document")
+
+    let leave
+    const frame = loadBridge({
+      parent: { top: true },
+      addEventListener(type, handler) {
+        if (type === "pagehide") leave = handler
+      }
+    })
+    assert.equal(
+      (await globalThis.window.fetch("https://app.test/api/user")).status,
+      201,
+      "the rule applies in the frame"
+    )
+    frame.hasgard.route({ pattern: "**/frame-only" })
+    frame.hasgard.clearRoutes()
+    leave?.()
+
+    assert.equal(globalThis.sessionStorage.getItem("__hasgard__"), stored, "the top document's rules are untouched")
+    assert.equal(
+      globalThis.sessionStorage.getItem("__hasgard__logs"),
+      "left by the last document",
+      "the logs wait for the document that replaced the last one"
+    )
+  } finally {
+    delete globalThis.sessionStorage
+    delete globalThis.localStorage
+  }
+})

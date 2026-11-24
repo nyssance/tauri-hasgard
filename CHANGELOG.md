@@ -1,11 +1,15 @@
 # Unreleased
 
 - The native dialog policy is now kept under a session key the bridge treats as its own, so `storage.clear` and `storage.list` leave it alone and it survives to the next document.
-- `downloads.wait` answers with each ended download once, in the order they ended; a second wait is no longer satisfied by the first one's file. A finish is matched to its download by path when two share an address. `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
+- `downloads.wait` answers with the first download to end after the wait began; a later wait is no longer satisfied by an earlier file, and an abandoned wait takes nothing from the next. A finish is matched to its download by path when two share an address, where the platform reports one (macOS does not). `downloads.clear` honours `window` and keeps downloads still in flight. `timeout` is at most 600000 ms.
 - Playwright `waitForEvent` resolves with each event once: a second call waits for the next one.
 - `event.emit` rejects a `window` that names no window or webview instead of reporting an event delivered to no one.
 - Replaying a recording with `--window` no longer narrows an event that was recorded as a broadcast.
-- Shell export of a recording keeps a route's `method`, `times` and content type, and a scroll's target.
+- Shell export of a recording keeps a route's `method`, `times` and content type, a scroll's target, the frame an action was aimed at, a point target, a click's button, count, modifiers and position, and a check's state. `storage.set`, `storage.clear` and `cookies.clear` export as commands.
+- CLI values may begin with a hyphen: `fill`, `type`, `storage set`, `--payload`, `--body` and `--prompt-text`.
+- A scenario's `scroll` honours `target`.
+- Wry on Windows: a same-origin frame no longer overwrites the standing routes, dialog policy or logs kept for the next document.
+- Playwright `downloads.clear(window)` clears one window's downloads.
 - A scenario's `set-input-files` requires `files`; leaving it out used to clear the input.
 - A frame's snapshot baseline is the same whether the frame is named as one selector or a list of one.
 - A frame capture from composited pixels uses the frame's content box, without its padding, and an element capture is clipped to what the frame shows.

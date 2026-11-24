@@ -139,7 +139,12 @@ pub(crate) enum Command {
     /// Report an element's position and size in viewport pixels.
     BoundingBox { target: String },
     /// Clear and fill an input with a value.
-    Fill { target: String, value: String },
+    Fill {
+        target: String,
+        /// May begin with a hyphen, as in `fill '#delta' -5`.
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
     /// Empty an input, firing the same events as `fill`.
     Clear { target: String },
     /// Attach files to an `<input type="file">`, by path on this machine.
@@ -183,7 +188,11 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Route(RouteCommand),
     /// Type text character by character.
-    Type { target: String, text: String },
+    Type {
+        target: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Press a keyboard key.
     Press {
         key: String,
@@ -459,7 +468,11 @@ pub(crate) enum StorageAction {
     /// Get a value by key.
     Get { key: String },
     /// Set a key-value pair.
-    Set { key: String, value: String },
+    Set {
+        key: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
     /// List all key-value pairs.
     List,
     /// Clear all storage.
@@ -476,7 +489,7 @@ pub(crate) enum DialogCommand {
     /// Answer subsequent dialogs with OK.
     Accept {
         /// Text submitted to a `prompt`. Its own default is used when omitted.
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         prompt_text: Option<String>,
     },
     /// Answer subsequent dialogs with Cancel. This is the default.
@@ -514,7 +527,7 @@ pub(crate) enum EventCommand {
     Emit {
         event: String,
         /// The payload, as JSON. Null when omitted.
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         payload: Option<String>,
     },
     /// Start recording an event the application emits.
@@ -636,7 +649,7 @@ pub(crate) enum RouteCommand {
         pattern: String,
         #[arg(long, default_value_t = 200)]
         status: u16,
-        #[arg(long, default_value = "")]
+        #[arg(long, default_value = "", allow_hyphen_values = true)]
         body: String,
         #[arg(long, default_value = "text/plain")]
         content_type: String,
@@ -1145,5 +1158,32 @@ mod position_tests {
     fn rejects_a_non_numeric_axis_rather_than_defaulting_it_to_zero() {
         assert!(parse_position("a,5").expect_err("a non-numeric x must fail").contains("x offset"));
         assert!(parse_position("10,b").expect_err("a non-numeric y must fail").contains("y offset"));
+    }
+
+    #[test]
+    fn values_that_begin_with_a_hyphen_are_values() {
+        // An exported recording carries whatever the page was given, a leading hyphen included.
+        for line in [
+            vec!["tauri-hasgard", "fill", "#delta", "-5"],
+            vec!["tauri-hasgard", "type", "#delta", "-x"],
+            vec!["tauri-hasgard", "storage", "--session", "set", "k", "-v"],
+            vec!["tauri-hasgard", "event", "emit", "a:b", "--payload", "-1"],
+            vec!["tauri-hasgard", "route", "fulfill", "**/x", "--body", "-1", "--method", "POST", "--times", "2"],
+            vec!["tauri-hasgard", "route", "abort", "**/x", "--method", "GET", "--times", "1"],
+            vec!["tauri-hasgard", "dialog", "accept", "--prompt-text", "-x"],
+            vec!["tauri-hasgard", "--frame", "#pane", "scroll", "down", "40", "--target", "#list"],
+            vec!["tauri-hasgard", "scroll", "down", "--target", "10,20"],
+            vec!["tauri-hasgard", "check", "#a", "--state", "off"],
+            vec!["tauri-hasgard", "cookies", "clear", "--name", "s", "--domain", "app.test"],
+        ] {
+            assert!(Cli::try_parse_from(&line).is_ok(), "{line:?} does not parse");
+        }
+        if let Command::Fill { value, .. } =
+            Cli::try_parse_from(["tauri-hasgard", "fill", "#d", "-5"]).expect("fill").command
+        {
+            assert_eq!(value, "-5");
+        } else {
+            panic!("expected fill");
+        }
     }
 }

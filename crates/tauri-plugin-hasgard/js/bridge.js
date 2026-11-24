@@ -312,8 +312,13 @@
   const STATE_KEY = "__hasgard__"
   // Everything Hasgard keeps in session storage, including the native dialog policy.
   const isOwnStateKey = (key) => typeof key === "string" && key.startsWith(STATE_KEY)
+  // WebView2 also runs this script in frames, and a same-origin frame shares the tab's
+  // session storage. A frame reads the standing state, so rules apply inside it, but only
+  // the top document writes it: a frame's copy is as old as the frame.
+  const inSubframe = typeof window.parent === "object" && window.parent !== null && window.parent !== window
 
   function saveState() {
+    if (inSubframe) return
     const idle = _routes.length === 0 && _dialogPolicy.action === "dismiss" && _dialogPolicy.promptText === null
     try {
       if (idle) {
@@ -354,6 +359,7 @@
   const LOGS_KEY = `${STATE_KEY}logs`
 
   function saveLogs() {
+    if (inSubframe) return
     try {
       sessionStorage.setItem(
         LOGS_KEY,
@@ -371,6 +377,8 @@
   }
 
   function restoreLogs() {
+    // The logs left by the last document belong to the one that replaced it, not to its frames.
+    if (inSubframe) return
     let raw
     try {
       raw = sessionStorage.getItem(LOGS_KEY)
@@ -2297,6 +2305,18 @@
 
   // Where `screenshot` would capture, in CSS pixels from the document's
   // origin: a backend that takes the pixels itself asks only for this.
+  // The part of `area` inside `box`; none of it there is an error, since nothing would be captured.
+  function clipTo(area, box, name) {
+    const left = Math.max(area.x, box.x)
+    const top = Math.max(area.y, box.y)
+    const right = Math.min(area.x + area.width, box.x + box.width)
+    const bottom = Math.min(area.y + area.height, box.y + box.height)
+    if (right <= left || bottom <= top) {
+      throw new Error(`${name} is scrolled out of its frame; scroll it into view first`)
+    }
+    return { x: left, y: top, width: right - left, height: bottom - top }
+  }
+
   function screenshotArea(options) {
     const selector = options?.selector
     if (options?.frame != null) {
@@ -2316,12 +2336,14 @@
         const pad = (side) => Number.parseFloat(style[`padding${side}`]) || 0
         x += rect.x + host.clientLeft + pad("Left")
         y += rect.y + host.clientTop + pad("Top")
-        box = {
+        const content = {
           x,
           y,
           width: host.clientWidth - pad("Left") - pad("Right"),
           height: host.clientHeight - pad("Top") - pad("Bottom")
         }
+        // A nested frame shows only what the frames around it show of it.
+        box = box ? clipTo(content, box, chain[depth]) : content
         doc = inner
       }
       if (!selector) return box
@@ -2329,14 +2351,7 @@
       if (!el) throw new Error(`Element not found: ${selector}`)
       const rect = el.getBoundingClientRect()
       // What lies outside the frame's box is not shown, and the pixels there belong to the page.
-      const left = Math.max(x + rect.x, box.x)
-      const top = Math.max(y + rect.y, box.y)
-      const right = Math.min(x + rect.x + rect.width, box.x + box.width)
-      const bottom = Math.min(y + rect.y + rect.height, box.y + box.height)
-      if (right <= left || bottom <= top) {
-        throw new Error(`Element is scrolled out of its frame: ${selector}; scroll it into view first`)
-      }
-      return { x: left, y: top, width: right - left, height: bottom - top }
+      return clipTo({ x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height }, box, selector)
     }
     if (!selector) {
       const el = document.documentElement

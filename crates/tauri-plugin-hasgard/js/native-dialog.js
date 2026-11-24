@@ -131,6 +131,8 @@
   }
 
   function save() {
+    // Where this script also runs in frames, only the top document owns the stored policy.
+    if (typeof window.parent === "object" && window.parent !== null && window.parent !== window) return
     try {
       if (_nativeDialogPolicy.action === "manual") sessionStorage.removeItem(STATE_KEY)
       else sessionStorage.setItem(STATE_KEY, JSON.stringify(policy()))

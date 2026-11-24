@@ -351,18 +351,34 @@ pub fn export_shell_script(entries: &[Value]) -> Result<String> {
         }
         prev_ts = timestamp;
 
-        let command = entry_to_cli_command(action, entry);
-        if let (Some(window), Some(arguments)) =
-            (entry.get("window").and_then(Value::as_str), command.strip_prefix("tauri-hasgard "))
-        {
-            let _ = write!(script, "tauri-hasgard --window {} {arguments}", shell_escape(window));
-        } else {
-            script.push_str(&command);
-        }
+        script.push_str(&scoped_cli_command(action, entry));
         script.push('\n');
     }
 
     Ok(script)
+}
+
+/// The command for one recorded entry, aimed at the window and the frame it was recorded in.
+pub fn scoped_cli_command(action: &str, entry: &Value) -> String {
+    let command = entry_to_cli_command(action, entry);
+    let Some(arguments) = command.strip_prefix("tauri-hasgard ") else {
+        // A comment: there is no command to scope.
+        return command;
+    };
+    let mut scope = String::new();
+    if let Some(window) = entry.get("window").and_then(Value::as_str) {
+        let _ = write!(scope, "--window {} ", shell_escape(window));
+    }
+    // One selector per nesting level, outermost first; a single frame may be recorded bare.
+    let frames: Vec<&str> = match entry.get("frame") {
+        Some(Value::String(frame)) => vec![frame],
+        Some(Value::Array(frames)) => frames.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    for frame in frames {
+        let _ = write!(scope, "--frame {} ", shell_escape(frame));
+    }
+    format!("tauri-hasgard {scope}{arguments}")
 }
 
 /// Wrap a string in single quotes with proper escaping for shell safety.
@@ -433,7 +449,7 @@ pub fn resolve_export_target(val: Option<&Value>) -> Option<String> {
         return Some(shell_escape(s));
     }
     if let (Some(x), Some(y)) =
-        (obj.get("x").and_then(serde_json::Value::as_i64), obj.get("y").and_then(serde_json::Value::as_i64))
+        (obj.get("x").and_then(serde_json::Value::as_f64), obj.get("y").and_then(serde_json::Value::as_f64))
     {
         return Some(format!("{x},{y}"));
     }
@@ -449,24 +465,35 @@ fn missing_field(action: &str, field: &str) -> String {
 }
 
 pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
-    let ref_id = entry.get("ref").and_then(|r| r.as_str());
-    let selector = entry.get("selector").and_then(|s| s.as_str());
-    let target = if let Some(r) = ref_id {
-        shell_escape_ref_target(r)
-    } else if let Some(s) = selector {
-        shell_escape(s)
-    } else {
-        String::new()
-    };
+    // A ref, a selector, or a point: whatever the action was aimed at.
+    let target = resolve_export_target(Some(entry)).unwrap_or_default();
 
     // A command missing what it acts on would run and do something else; say what is missing instead.
     if target.is_empty()
         && matches!(action, "click" | "fill" | "type" | "select" | "check" | "hover" | "focus" | "blur" | "dblclick")
     {
-        return missing_field(action, "ref or selector");
+        return missing_field(action, "ref, selector or point");
     }
     match action {
-        "click" => format!("tauri-hasgard click {target}"),
+        "click" => {
+            let mut cmd = format!("tauri-hasgard click {target}");
+            for modifier in
+                entry.get("modifiers").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
+            {
+                let _ = write!(cmd, " --modifier {}", shell_escape(modifier));
+            }
+            if let Some(button) = recorded_text(entry, "button") {
+                let _ = write!(cmd, " --button {}", shell_escape(button));
+            }
+            if let Some(count) = entry.get("clickCount").and_then(Value::as_u64) {
+                let _ = write!(cmd, " --click-count {count}");
+            }
+            let offset = |axis: &str| entry.get("position").and_then(|p| p.get(axis)).and_then(Value::as_f64);
+            if let (Some(x), Some(y)) = (offset("x"), offset("y")) {
+                let _ = write!(cmd, " --position {x},{y}");
+            }
+            cmd
+        }
         "fill" => match recorded_text(entry, "value") {
             Some(value) => format!("tauri-hasgard fill {target} {}", shell_escape(value)),
             None => missing_field(action, "value"),
@@ -495,7 +522,11 @@ pub fn entry_to_cli_command(action: &str, entry: &Value) -> String {
             }
             cmd
         }
-        "check" => format!("tauri-hasgard check {target}"),
+        // Without a recorded state the action was a toggle, and exports as one.
+        "check" => match entry.get("checked").and_then(Value::as_bool) {
+            Some(checked) => format!("tauri-hasgard check {target} --state {}", if checked { "on" } else { "off" }),
+            None => format!("tauri-hasgard check {target}"),
+        },
         "hover" | "focus" | "blur" | "dblclick" => format!("tauri-hasgard {action} {target}"),
         "scroll" => {
             // The protocol's own default direction.
@@ -615,8 +646,29 @@ fn later_action_command(action: &str, entry: &Value, target: &str) -> String {
             let payload = entry.get("payload").map_or_else(|| "null".to_owned(), Value::to_string);
             format!("tauri-hasgard event emit {} --payload {}", shell_escape(event), shell_escape(&payload))
         }
-        // These carry data a one-line command cannot: file contents, or several cookie fields.
-        "setInputFiles" | "storage.set" | "storage.clear" | "cookies.set" | "cookies.clear" => {
+        "storage.set" | "storage.clear" => {
+            let session = if entry.get("session").and_then(Value::as_bool) == Some(true) { " --session" } else { "" };
+            if action == "storage.clear" {
+                return format!("tauri-hasgard storage{session} clear");
+            }
+            match (recorded_text(entry, "key"), recorded_text(entry, "value")) {
+                (Some(key), Some(value)) => {
+                    format!("tauri-hasgard storage{session} set {} {}", shell_escape(key), shell_escape(value))
+                }
+                _ => missing_field(action, "key and value"),
+            }
+        }
+        "cookies.clear" => {
+            let mut cmd = "tauri-hasgard cookies clear".to_owned();
+            for filter in ["url", "name", "domain"] {
+                if let Some(value) = recorded_text(entry, filter) {
+                    let _ = write!(cmd, " --{filter} {}", shell_escape(value));
+                }
+            }
+            cmd
+        }
+        // These carry data a one-line command cannot: file contents, or a cookie's many fields.
+        "setInputFiles" | "cookies.set" => {
             format!("# {action}: replayed from the recording; not exportable as one command")
         }
         _ => {
@@ -829,7 +881,7 @@ mod tests {
         );
         assert_eq!(
             entry_to_cli_command("click", &serde_json::json!({})),
-            "# click: the recording has no ref or selector"
+            "# click: the recording has no ref, selector or point"
         );
         assert_eq!(entry_to_cli_command("navigate", &serde_json::json!({})), "# navigate: the recording has no url");
         assert_eq!(
@@ -869,6 +921,48 @@ mod tests {
         assert!(scroll.contains("--target") && scroll.contains("#list"), "{scroll}");
         let page = entry_to_cli_command("scroll", &serde_json::json!({"direction": "down", "amount": 40}));
         assert_eq!(page, "tauri-hasgard scroll 'down' 40");
+    }
+
+    #[test]
+    fn an_exported_command_keeps_its_frame_point_and_options() {
+        let json = |value: serde_json::Value| value;
+        let framed = json(serde_json::json!({"selector": "#pay", "window": "main", "frame": ["#pane", "#inner"]}));
+        assert_eq!(
+            scoped_cli_command("click", &framed),
+            "tauri-hasgard --window 'main' --frame '#pane' --frame '#inner' click '#pay'"
+        );
+        let bare = json(serde_json::json!({"selector": "#pay", "frame": "#pane"}));
+        assert_eq!(scoped_cli_command("click", &bare), "tauri-hasgard --frame '#pane' click '#pay'");
+        // A comment has nothing to scope.
+        assert!(scoped_cli_command("click", &serde_json::json!({"window": "main"})).starts_with("# click"));
+
+        let point = serde_json::json!({"x": 100, "y": 200.5, "clickCount": 2, "button": "right",
+            "modifiers": ["Shift", "Meta"], "position": {"x": 3, "y": 4}});
+        assert_eq!(
+            entry_to_cli_command("click", &point),
+            "tauri-hasgard click 100,200.5 --modifier 'Shift' --modifier 'Meta' --button 'right' --click-count 2 --position 3,4"
+        );
+        let scroll = entry_to_cli_command("scroll", &serde_json::json!({"direction": "down", "x": 10, "y": 20}));
+        assert_eq!(scroll, "tauri-hasgard scroll 'down' --target 10,20");
+        let check = entry_to_cli_command("check", &serde_json::json!({"selector": "#a", "checked": false}));
+        assert_eq!(check, "tauri-hasgard check '#a' --state off");
+        assert_eq!(entry_to_cli_command("check", &serde_json::json!({"selector": "#a"})), "tauri-hasgard check '#a'");
+    }
+
+    #[test]
+    fn storage_and_cookie_clears_export_as_commands() {
+        let set = serde_json::json!({"session": true, "key": "token", "value": "-abc"});
+        assert_eq!(entry_to_cli_command("storage.set", &set), "tauri-hasgard storage --session set 'token' '-abc'");
+        assert_eq!(entry_to_cli_command("storage.clear", &serde_json::json!({})), "tauri-hasgard storage clear");
+        assert_eq!(
+            entry_to_cli_command("storage.set", &serde_json::json!({"key": "k"})),
+            "# storage.set: the recording has no key and value"
+        );
+        let clear = serde_json::json!({"name": "session", "domain": "app.test"});
+        assert_eq!(
+            entry_to_cli_command("cookies.clear", &clear),
+            "tauri-hasgard cookies clear --name 'session' --domain 'app.test'"
+        );
     }
 
     #[test]

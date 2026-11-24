@@ -390,20 +390,16 @@ async fn dispatch_step(client: &mut Client, step: &Step, window: Option<&str>) -
             client.call("check", with_scope(Some(target_params(t)), Scope { window, ..Scope::default() })).await
         }
         "scroll" => {
+            // The protocol's own default direction.
             let direction = step.direction.as_deref().unwrap_or("down");
-            client
-                .call(
-                    "scroll",
-                    with_scope(
-                        Some(json!({
-                            "direction": direction,
-                            "amount": step.amount,
-                            "ref": step.step_ref,
-                        })),
-                        Scope { window, ..Scope::default() },
-                    ),
-                )
-                .await
+            // `target` scrolls that element, as everywhere else; `ref` is the older spelling.
+            let mut params = step.target.as_deref().map_or_else(|| json!({}), target_params);
+            params["direction"] = json!(direction);
+            params["amount"] = json!(step.amount);
+            if let Some(reference) = &step.step_ref {
+                params["ref"] = json!(reference);
+            }
+            client.call("scroll", with_scope(Some(params), Scope { window, ..Scope::default() })).await
         }
         "navigate" => {
             let url = step.url.as_deref().ok_or_else(|| anyhow::anyhow!("navigate step requires 'url'"))?;

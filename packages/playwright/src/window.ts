@@ -496,15 +496,16 @@ export class HasgardApplication {
     setDirectory: async (directory: string | null): Promise<void> => {
       await this.rpc.call("downloads.setDirectory", { path: directory })
     },
-    clear: async (): Promise<void> => {
-      await this.rpc.call("downloads.clear")
+    /** Forget the downloads that have ended: every window's, or one window's. */
+    clear: async (window?: string): Promise<void> => {
+      await this.rpc.call("downloads.clear", window ? { window } : {})
     }
   }
 
   /**
-   * Wait for a download to finish and resolve with it. Each finished download
-   * answers one wait, in the order they finished, so a second call resolves with
-   * the next file. `sinceId` waits for one started after that id instead.
+   * Wait for a download to finish and resolve with it: the first to end after
+   * this call began. Call it before the action that starts the download and
+   * await it afterwards. `sinceId` waits for one started after that id instead.
    */
   async waitForDownload(options: { timeoutMs?: number; sinceId?: number; window?: string } = {}): Promise<Download> {
     const params: Record<string, JsonValue> = {}
