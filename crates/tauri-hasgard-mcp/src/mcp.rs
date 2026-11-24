@@ -22,7 +22,7 @@ use crate::{
     protocol::RpcError,
     support::{
         Scope, build_location_wait_params, build_wait_params, export_replay_file, resolve_socket, run_drop_command,
-        run_replay_command, run_set_input_files_command, target_params, with_scope,
+        run_replay_command, run_set_input_files_command, target_params, window_request, with_scope,
     },
 };
 
@@ -326,6 +326,21 @@ impl HasgardMcpServer {
                 self.call_app_tool("wheel", Some(params), window).await
             }
             "dialog" => self.call_dialog_tool(args, window).await,
+            "window" => {
+                let pair = |first: &str, second: &str| -> Result<Option<(f64, f64)>, McpError> {
+                    let number = |name: &str| match args.get(name) {
+                        None | Some(Value::Null) => Ok(None),
+                        Some(value) => {
+                            value.as_f64().map(Some).ok_or_else(|| invalid_params(format!("'{name}' must be a number")))
+                        }
+                    };
+                    Ok(number(first)?.zip(number(second)?))
+                };
+                let action = required_string(&args, "action")?;
+                let (method, params) = window_request(&action, pair("width", "height")?, pair("x", "y")?)
+                    .map_err(|error| invalid_params(error.to_string()))?;
+                self.call_app_tool(method, params, window).await
+            }
             "route" => self.call_route_tool(args, window).await,
             "text" => self.target_call("text", &args, window).await,
             "html" => {
@@ -950,6 +965,15 @@ fn tool_specs() -> Vec<ToolSpec> {
             name: "set_input_files",
             description: "Attach local files to an <input type=\"file\">. An empty list clears the selection.",
             schema: set_input_files_schema,
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+        ToolSpec {
+            name: "window",
+            description: "Read or change the native window: state, resize, move, minimize, maximize, restore, close. \
+                          Sizes and positions are logical pixels.",
+            schema: window_schema,
             read_only: false,
             destructive: false,
             idempotent: true,
@@ -1903,6 +1927,25 @@ fn dialog_schema() -> Arc<JsonObject> {
     )
 }
 
+fn window_schema() -> Arc<JsonObject> {
+    object_schema(
+        props([
+            (
+                "action",
+                enum_prop(
+                    "state reports position, size and flags; the others change the window and report its state.",
+                    &["state", "resize", "move", "minimize", "maximize", "restore", "close"],
+                ),
+            ),
+            ("width", number_prop("Content width for resize.")),
+            ("height", number_prop("Content height for resize.")),
+            ("x", number_prop("Left edge for move, from the screen origin.")),
+            ("y", number_prop("Top edge for move, from the screen origin.")),
+        ]),
+        &["action"],
+    )
+}
+
 fn route_schema() -> Arc<JsonObject> {
     object_schema(
         props([
@@ -2292,6 +2335,7 @@ mod tests {
             "wait",
             "watch",
             "wheel",
+            "window",
             "windows",
         ];
         assert_eq!(names, expected);

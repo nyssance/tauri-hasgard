@@ -29,7 +29,7 @@ Notes:
 
 - No remote debugging port is needed or opened. The plugin observes CDP in process.
 - Remote pages need neither `hasgard:default` nor Tauri IPC access.
-- `init_cef()` works in debug and release builds and does not move application windows.
+- `init_cef()` works in debug and release builds and moves a window only on a `window.*` request.
 - A host that already ships a JavaScript runtime and Playwright can supply its own executor with `init_cef_with_executor`; see the [executor](../packages/executor/README.md).
 
 ## Targeting webviews

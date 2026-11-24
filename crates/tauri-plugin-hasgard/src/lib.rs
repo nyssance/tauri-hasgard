@@ -27,6 +27,7 @@ mod macos_keyboard;
 pub(crate) mod protocol;
 pub(crate) mod recorder;
 mod video;
+mod window_control;
 #[cfg(windows)]
 mod windows_focus;
 // Native screenshot capture for the `screenshot_native` JSON-RPC method.
@@ -87,6 +88,7 @@ fn build_plugin<R: tauri::Runtime>(
 
                 let (eval_fn, press_hooks) = hooks(app, engine.clone())?;
                 let list_fn = make_list_fn(app, !ipc_bridge);
+                *engine.window.lock().expect("window hook") = Some(window_control::make_window_fn(app.app_handle()));
 
                 let recorder = Recorder::new();
                 app.manage(Automation::new(engine.clone(), eval_fn.clone(), list_fn.clone(), press_hooks.clone()));

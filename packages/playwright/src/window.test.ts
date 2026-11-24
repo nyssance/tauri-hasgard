@@ -476,6 +476,40 @@ test("waitForFunction returns the predicate's own value and forwards the poll in
   })
 })
 
+test("native window methods call window.* and parse the reported state", async () => {
+  const rpc = new HasgardRpcClient("/unused")
+  const state = {
+    label: "main",
+    x: 10,
+    y: 20,
+    width: 800,
+    height: 600,
+    scaleFactor: 2,
+    visible: true,
+    focused: false,
+    minimized: false,
+    maximized: false,
+    fullscreen: false
+  }
+  const call = vi.spyOn(rpc, "call").mockResolvedValue(state)
+  const window = new HasgardWindow(rpc, "main")
+
+  expect(await window.nativeState()).toEqual(state)
+  expect(await window.setSize(800, 600)).toEqual(state)
+  await window.setPosition(10, 20)
+  await window.maximize()
+  await window.restore()
+
+  expect(call).toHaveBeenNthCalledWith(1, "window.state", { window: "main" })
+  expect(call).toHaveBeenNthCalledWith(2, "window.resize", { width: 800, height: 600, window: "main" })
+  expect(call).toHaveBeenNthCalledWith(3, "window.move", { x: 10, y: 20, window: "main" })
+  expect(call).toHaveBeenNthCalledWith(4, "window.maximize", { window: "main" })
+  expect(call).toHaveBeenNthCalledWith(5, "window.restore", { window: "main" })
+
+  call.mockResolvedValue({ ...state, width: "800" })
+  await expect(window.nativeState()).rejects.toThrow(/window\.width/)
+})
+
 test("waitForURL sends a glob as is and a RegExp as its source and flags", async () => {
   const rpc = new HasgardRpcClient("/unused")
   const call = vi.spyOn(rpc, "call").mockResolvedValue({ found: true, url: "app://x/home", readyState: "complete" })

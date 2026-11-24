@@ -146,6 +146,21 @@ pub(crate) async fn dispatch(
                 .and_then(std::convert::identity)
                 .map_err(|message| RpcError { code: -32603, message, data: None })
         }
+        method if crate::window_control::METHODS.contains(&method) => {
+            let control = engine.window.lock().expect("window hook").clone().ok_or_else(|| RpcError {
+                code: -32603,
+                message: "No window manager available".to_owned(),
+                data: None,
+            })?;
+            let method = method.to_owned();
+            let params = params.cloned().unwrap_or_else(|| serde_json::json!({}));
+            let label = window.clone();
+            // Window getters wait on the UI thread, so they stay off the async runtime.
+            tokio::task::spawn_blocking(move || control(label.as_deref(), &method, &params))
+                .await
+                .map_err(|error| RpcError { code: -32603, message: error.to_string(), data: None })
+                .and_then(std::convert::identity)
+        }
         "console.getLogs"
         | "console.clear"
         | "network.getRequests"
@@ -1814,5 +1829,22 @@ mod tests {
                 .expect_err("invalid parameters");
             assert_eq!(error.code, -32602, "{params}");
         }
+    }
+    #[tokio::test]
+    async fn window_methods_reach_the_runtime_hook_with_the_label_and_fail_without_one() {
+        let engine = EvalEngine::new();
+        let params = json!({"window": "settings", "width": 640, "height": 480});
+        let missing = dispatch("window.resize", Some(&params), &engine, None, None, None, &Recorder::new())
+            .await
+            .expect_err("no runtime supplied a window hook");
+        assert_eq!(missing.code, -32603);
+
+        *engine.window.lock().expect("window hook") = Some(std::sync::Arc::new(|label, method, params| {
+            Ok(json!({"label": label, "method": method, "width": params["width"], "hasWindow": params.get("window")}))
+        }));
+        let result = dispatch("window.resize", Some(&params), &engine, None, None, None, &Recorder::new())
+            .await
+            .expect("the hook answers");
+        assert_eq!(result, json!({"label": "settings", "method": "window.resize", "width": 640, "hasWindow": null}));
     }
 }

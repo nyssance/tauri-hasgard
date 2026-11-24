@@ -43,7 +43,7 @@ Environment variables:
 | `TAURI_HASGARD_PRESS`                      | app           | macOS Wry: `system` (default) or `window`. See [keyboard](#native-keyboard-completion).             |
 | `TAURI_HASGARD_PLAYWRIGHT`                 | app           | CEF: absolute path of the Playwright executor during development.                                   |
 | `TAURI_HASGARD_MCP_ENABLE_DANGEROUS_TOOLS` | MCP           | `1` exposes the `eval`, `ipc` and `drop` tools, which are hidden by default.                        |
-| `TAURI_HASGARD_DISPLAY`                    | test fixtures | `secondary`, a display index from 0, or a display name. The plugin itself never moves a window.     |
+| `TAURI_HASGARD_DISPLAY`                    | test fixtures | `secondary`, a display index from 0, or a display name. The plugin moves a window only on a `window.*` request. |
 
 ## Windows and targets
 
@@ -67,6 +67,7 @@ An element target takes one of three forms:
 | Act       | `click`, `dblclick`, `hover`, `focus`, `blur`, `fill`, `type`, `check`, `select`, `scroll`, `drag`   |
 | Input     | `press`, `wheel`, `setInputFiles`, `drop`                                                            |
 | Wait      | `wait`, `watch`                                                                                      |
+| Window    | `window.state`, `window.resize`, `window.move`, `window.minimize`, `window.maximize`, `window.restore`, `window.close` |
 | Capture   | `screenshot`, `screenshot_native`, `heap.snapshot`, `video.start`, `video.stop`, `video.status`      |
 | Console   | `console.getLogs`, `console.clear`                                                                   |
 | Network   | `network.getRequests`, `network.clear`, `route.add`, `route.list`, `route.clear`                     |
@@ -75,6 +76,8 @@ An element target takes one of three forms:
 | Recording | `record.start`, `record.add`, `record.stop`, `record.status`                                         |
 
 Parameters match the CLI options; `tauri-hasgard <command> --help` documents each. `wait` and `watch` take integer timeouts from 0 through 2,147,483,647 ms.
+
+`window.*` act on the native window that holds the labelled webview. `window.state` reports `x`, `y`, `width`, `height` (logical pixels), `scaleFactor`, and `visible`, `focused`, `minimized`, `maximized`, `fullscreen`; `window.resize` takes `width` and `height`, `window.move` takes `x` and `y`, and each change answers with the state at reply time, which the window manager may still be applying.
 
 `wait` takes an element (`selector` or `ref`, optionally `gone`), an `expression`, or a location: `url` (a glob string in which `*` stays within a path segment and `**` crosses them, or `{ source, flags }`) and `load` (`load` or `domcontentloaded`), alone or together. A location wait is held by the plugin and polls whichever document is current, so it survives the navigation that reaches the URL; it resolves with `{ found, url, readyState }`. CEF differences are listed in the [CEF guide](cef.md#what-works).
 

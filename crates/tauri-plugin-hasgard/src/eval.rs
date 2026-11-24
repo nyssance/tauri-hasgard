@@ -63,6 +63,8 @@ pub(crate) struct EvalEngine {
     #[cfg(feature = "cef")]
     pub(crate) executor: Arc<Mutex<Option<crate::playwright::ExecutorCommand>>>,
     pub(crate) cancel: Arc<Mutex<Option<CancelFn>>>,
+    /// Native window state and control, supplied by the runtime that owns the windows.
+    pub(crate) window: Arc<Mutex<Option<crate::window_control::WindowFn>>>,
     pub(crate) cleanup: Arc<Mutex<Option<CleanupFn>>>,
     allowed: Arc<Mutex<HashMap<String, String>>>,
     handshakes: Arc<Mutex<HashMap<String, (String, String)>>>,
@@ -80,6 +82,7 @@ impl EvalEngine {
             action: Arc::default(),
             observe: Arc::default(),
             cancel: Arc::default(),
+            window: Arc::default(),
             cleanup: Arc::default(),
             #[cfg(feature = "cef")]
             executor: Arc::default(),

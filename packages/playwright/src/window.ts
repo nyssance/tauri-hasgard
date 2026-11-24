@@ -28,6 +28,7 @@ import type {
   LoadState,
   NativeScreenshot,
   NativeScreenshotOptions,
+  NativeWindowState,
   NetworkRequestEntry,
   NetworkRequestOptions,
   PressOptions,
@@ -203,6 +204,23 @@ function expectBoolean(value: unknown, context: string): boolean {
 function expectNumber(value: unknown, context: string): number {
   if (typeof value !== "number") throw new Error(`${context} must be a number`)
   return value
+}
+
+function parseNativeWindowState(value: unknown): NativeWindowState {
+  const state = expectRecord(value, "window state")
+  return {
+    label: expectString(state.label, "window.label"),
+    x: expectNumber(state.x, "window.x"),
+    y: expectNumber(state.y, "window.y"),
+    width: expectNumber(state.width, "window.width"),
+    height: expectNumber(state.height, "window.height"),
+    scaleFactor: expectNumber(state.scaleFactor, "window.scaleFactor"),
+    visible: expectBoolean(state.visible, "window.visible"),
+    focused: expectBoolean(state.focused, "window.focused"),
+    minimized: expectBoolean(state.minimized, "window.minimized"),
+    maximized: expectBoolean(state.maximized, "window.maximized"),
+    fullscreen: expectBoolean(state.fullscreen, "window.fullscreen")
+  }
 }
 
 function expectArray(value: unknown, context: string): unknown[] {
@@ -510,6 +528,42 @@ export class HasgardWindow {
 
   async title(): Promise<string> {
     return expectString(await this.rpc.call("title", withWindow(this.label)), "title result")
+  }
+
+  /** The native window's position, size and flags. */
+  async nativeState(): Promise<NativeWindowState> {
+    return parseNativeWindowState(await this.rpc.call("window.state", withWindow(this.label)))
+  }
+
+  /**
+   * Set the content size in logical pixels. The window manager applies it
+   * asynchronously, so poll `nativeState` for the size a layout depends on.
+   */
+  async setSize(width: number, height: number): Promise<NativeWindowState> {
+    return parseNativeWindowState(await this.rpc.call("window.resize", withWindow(this.label, { width, height })))
+  }
+
+  /** Move the window; `x` and `y` are logical pixels from the screen origin. */
+  async setPosition(x: number, y: number): Promise<NativeWindowState> {
+    return parseNativeWindowState(await this.rpc.call("window.move", withWindow(this.label, { x, y })))
+  }
+
+  async minimize(): Promise<NativeWindowState> {
+    return parseNativeWindowState(await this.rpc.call("window.minimize", withWindow(this.label)))
+  }
+
+  async maximize(): Promise<NativeWindowState> {
+    return parseNativeWindowState(await this.rpc.call("window.maximize", withWindow(this.label)))
+  }
+
+  /** Return a minimized or maximized window to its ordinary size. */
+  async restore(): Promise<NativeWindowState> {
+    return parseNativeWindowState(await this.rpc.call("window.restore", withWindow(this.label)))
+  }
+
+  /** Ask the native window to close, as its close button would. */
+  async close(): Promise<void> {
+    await this.rpc.call("window.close", withWindow(this.label))
   }
 
   /**

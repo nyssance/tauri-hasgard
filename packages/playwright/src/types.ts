@@ -300,6 +300,21 @@ export interface WaitForFunctionOptions {
   pollMs?: number
 }
 
+/** The operating-system window: position and size in logical pixels, and its flags. */
+export interface NativeWindowState {
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
+  visible: boolean
+  focused: boolean
+  minimized: boolean
+  maximized: boolean
+  fullscreen: boolean
+}
+
 export type LoadState = "load" | "domcontentloaded"
 
 export interface WaitForURLOptions {

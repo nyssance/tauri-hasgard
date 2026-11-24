@@ -155,6 +155,9 @@ pub(crate) enum Command {
     /// Inspect or set how modal dialogs (alert/confirm/prompt) are answered.
     #[command(subcommand)]
     Dialog(DialogCommand),
+    /// Read or change the native window: size, position, minimise, maximise, close.
+    #[command(subcommand)]
+    Window(WindowCommand),
     /// Shape what the page's own fetch and XHR requests receive.
     #[command(subcommand)]
     Route(RouteCommand),
@@ -452,6 +455,29 @@ pub(crate) enum DialogCommand {
     List,
     /// Forget the recorded dialogs, leaving the policy alone.
     Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum WindowCommand {
+    /// Position, size, scale factor and visible, focused, minimized, maximized, fullscreen.
+    State,
+    /// Set the content size, in logical pixels.
+    Resize {
+        width: f64,
+        height: f64,
+    },
+    /// Set the window position, in logical pixels from the screen origin.
+    Move {
+        #[arg(allow_negative_numbers = true)]
+        x: f64,
+        #[arg(allow_negative_numbers = true)]
+        y: f64,
+    },
+    Minimize,
+    Maximize,
+    /// Return a minimized or maximized window to its ordinary size.
+    Restore,
+    Close,
 }
 
 #[derive(Subcommand, Debug)]

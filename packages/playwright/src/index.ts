@@ -56,6 +56,7 @@ export type {
   StorageOptions,
   TextQuery,
   LoadState,
+  NativeWindowState,
   WaitForFunctionOptions,
   WaitForURLOptions,
   WaitOptions,

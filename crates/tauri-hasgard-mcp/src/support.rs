@@ -172,6 +172,32 @@ pub fn build_wait_params(
     }
 }
 
+/// The protocol method and params for a native window action.
+///
+/// `size` is width and height, `position` is x and y, both in logical pixels.
+pub fn window_request(
+    action: &str, size: Option<(f64, f64)>, position: Option<(f64, f64)>,
+) -> Result<(&'static str, Option<serde_json::Value>)> {
+    Ok(match action {
+        "state" => ("window.state", None),
+        "resize" => {
+            let (width, height) = size.context("window resize requires a width and a height")?;
+            ("window.resize", Some(json!({"width": width, "height": height})))
+        }
+        "move" => {
+            let (x, y) = position.context("window move requires x and y")?;
+            ("window.move", Some(json!({"x": x, "y": y})))
+        }
+        "minimize" => ("window.minimize", None),
+        "maximize" => ("window.maximize", None),
+        "restore" => ("window.restore", None),
+        "close" => ("window.close", None),
+        other => anyhow::bail!(
+            "unknown window action: {other}; expected state, resize, move, minimize, maximize, restore or close"
+        ),
+    })
+}
+
 /// Params for a `wait` on where the window is rather than on an element.
 pub fn build_location_wait_params(url: Option<&str>, load: Option<&str>, timeout: u64) -> serde_json::Value {
     let mut params = json!({ "timeout": timeout });

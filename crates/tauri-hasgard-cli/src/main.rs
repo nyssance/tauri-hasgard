@@ -9,7 +9,10 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use cli::{AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction, StorageArgs};
+use cli::{
+    AssertKind, Cli, Command, DialogCommand, FormsArgs, RecordAction, RouteCommand, StorageAction, StorageArgs,
+    WindowCommand,
+};
 #[cfg(test)]
 use tauri_hasgard_mcp::support::{export_shell_script, mime_from_ext};
 use tauri_hasgard_mcp::{
@@ -17,7 +20,7 @@ use tauri_hasgard_mcp::{
     scenario, style,
     support::{
         Scope, build_location_wait_params, build_wait_params, resolve_socket, run_drop_command, run_replay_command,
-        run_set_input_files_command, target_params, with_scope,
+        run_set_input_files_command, target_params, window_request, with_scope,
     },
 };
 
@@ -620,6 +623,19 @@ async fn run_dom_command(client: &mut Client, command: Command, scope: Scope<'_>
                 DialogCommand::Clear => ("dialog.clear", None),
             };
             client.call(method, with_scope(params, scope)).await
+        }
+        Command::Window(action) => {
+            let (action, size, position) = match action {
+                WindowCommand::State => ("state", None, None),
+                WindowCommand::Resize { width, height } => ("resize", Some((width, height)), None),
+                WindowCommand::Move { x, y } => ("move", None, Some((x, y))),
+                WindowCommand::Minimize => ("minimize", None, None),
+                WindowCommand::Maximize => ("maximize", None, None),
+                WindowCommand::Restore => ("restore", None, None),
+                WindowCommand::Close => ("close", None, None),
+            };
+            let (method, params) = window_request(action, size, position)?;
+            client.call(method, with_scope(params, Scope { window: scope.window, ..Scope::default() })).await
         }
         Command::Route(action) => run_route_command(client, action, scope).await,
         Command::Focus { target } => client.call("focus", with_scope(Some(target_params(&target)), scope)).await,

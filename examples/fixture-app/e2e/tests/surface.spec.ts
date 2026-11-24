@@ -736,3 +736,28 @@ test("waitForURL holds across the navigation that reaches it", async ({ hasgard 
   await settings.waitForURL(/settings\.html$/, { timeoutMs: 10_000 })
   await settings.waitForLoadState("load")
 })
+
+test("the native window reports its state and takes a new size and position", async ({ window }) => {
+  const before = await window.nativeState()
+  expect(before.label).toBe("main")
+  expect(before.visible).toBe(true)
+  expect(before.minimized).toBe(false)
+  expect(before.width).toBeGreaterThan(100)
+
+  const width = Math.round(before.width) - 60
+  const height = Math.round(before.height) - 40
+  await window.setSize(width, height)
+  // The window manager applies the change after the call returns.
+  await expect.poll(async () => (await window.nativeState()).width).toBeCloseTo(width, 0)
+  expect((await window.nativeState()).height).toBeCloseTo(height, 0)
+  // The page sees the same size the native window reports.
+  expect(await window.evaluate<number>("window.innerWidth")).toBeCloseTo(width, 0)
+
+  await window.setPosition(before.x + 24, before.y + 24)
+  await expect.poll(async () => (await window.nativeState()).x).toBeCloseTo(before.x + 24, 0)
+
+  await window.setSize(before.width, before.height)
+  await window.setPosition(before.x, before.y)
+  await expect.poll(async () => (await window.nativeState()).width).toBeCloseTo(before.width, 0)
+  await expect(window.setSize(0, 10)).rejects.toThrow(/at least 1/)
+})
