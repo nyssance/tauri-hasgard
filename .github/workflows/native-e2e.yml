@@ -93,7 +93,7 @@ jobs:
         if: runner.os == 'Windows'
         env:
           CEF_PATH: ${{ runner.temp }}/cef-cache
-        run: bun scripts/probe-cef-exit.mjs 5
+        run: bun scripts/probe-cef-exit.mjs 8
       - name: Run CEF native fixture
         env:
           CEF_PATH: ${{ runner.temp }}/cef-cache

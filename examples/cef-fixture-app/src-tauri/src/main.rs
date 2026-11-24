@@ -62,9 +62,22 @@ fn main() {
         Err(std::env::VarError::NotPresent) => runtime,
         Err(error) => panic!("Invalid HASGARD_CEF_API_VERSION: {error}"),
     };
-    tauri::Builder::default()
+    // Diagnostics for shutdown: run without Hasgard, and quit unprompted, so that a
+    // crash at exit can be attributed to the runtime or to this plugin.
+    let without_hasgard = std::env::var_os("HASGARD_CEF_WITHOUT_PLUGIN").is_some();
+    let quit_after = std::env::var("HASGARD_CEF_QUIT_AFTER_MS")
+        .ok()
+        .map(|value| value.parse::<u64>().expect("Invalid HASGARD_CEF_QUIT_AFTER_MS"));
+    let builder = tauri::Builder::default()
         .runtime(runtime)
         .setup(move |app| {
+            if let Some(after) = quit_after {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(after));
+                    handle.exit(0);
+                });
+            }
             let primary = app.primary_monitor()?.ok_or("Primary monitor missing")?;
             let monitors = app.available_monitors()?;
             let monitor = if wanted == "secondary" {
@@ -82,8 +95,9 @@ fn main() {
             }
             Ok(())
         })
-        .plugin(tauri_plugin_hasgard::init_cef())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    let builder = if without_hasgard { builder } else { builder.plugin(tauri_plugin_hasgard::init_cef()) };
+    builder
         .invoke_handler(tauri::generate_handler![recreate_guest, close_guest, ipc_echo, set_floating, quit_fixture])
         .run(tauri::generate_context!())
         .expect("CEF fixture failed");

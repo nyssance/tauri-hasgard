@@ -91,8 +91,42 @@ const scenarios = [
   ]
 ]
 
+// First without a client at all: the fixture quits by itself, with and without the
+// Hasgard plugin loaded. A crash here cannot come from anything a client did.
+for (const [name, extra] of [
+  ["no Hasgard plugin, quits by itself", { HASGARD_CEF_WITHOUT_PLUGIN: "1" }],
+  ["Hasgard plugin loaded but never contacted, quits by itself", {}]
+]) {
+  const codes = []
+  for (let round = 0; round < rounds; round++) {
+    const temp = mkdtempSync(join(tmpdir(), "hg-cef-probe-"))
+    const run = spawnSync("cmd.exe", ["/d", "/v:on", "/c", `start /wait ${executable} & echo EXITCODE=!errorlevel!`], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 60_000,
+      env: {
+        ...process.env,
+        ...extra,
+        [pathKey]: `${found[0]};${process.env[pathKey]}`,
+        TAURI_HASGARD_DISPLAY: process.env.TAURI_HASGARD_DISPLAY ?? "secondary",
+        TAURI_HASGARD_SOCKET: hasgardEndpointPath(`hg-cef-self-${process.pid}-${round}-${name.length}`),
+        HASGARD_CEF_GUEST_URL: guestUrl,
+        HASGARD_CEF_PROFILE: join(temp, "cef-profile"),
+        HASGARD_CEF_QUIT_AFTER_MS: "4000"
+      }
+    })
+    codes.push(
+      run.stdout?.match(/EXITCODE=(-?\d+)/)?.[1] ??
+        `none: ${JSON.stringify(String(run.error ?? run.stdout).slice(-160))}`
+    )
+    spawnSync("taskkill", ["/IM", "tauri-hasgard-cef-fixture.exe", "/T", "/F"], { stdio: "ignore" })
+    rmSync(temp, { recursive: true, force: true })
+  }
+  console.log(`CEF fixture exit codes, ${name}: ${codes.join(", ")}`)
+}
+
 let launch = 0
-for (const [name, activity] of scenarios) {
+for (const [name, activity] of scenarios.slice(0, 1)) {
   const codes = []
   for (let round = 0; round < rounds; round++) {
     const temp = mkdtempSync(join(tmpdir(), "hg-cef-probe-"))
