@@ -270,8 +270,21 @@ try {
   assert.deepEqual((await rpc("event.listen", { event: "fixture-saved" })).listening, ["fixture-saved"])
   // The page's own subscription is asynchronous; an event sent before it settles is not heard.
   assert.equal(await until(() => evaluate("main", "document.body.dataset.listening"), "Page subscribed"), "yes")
-  await rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } })
-  assert.equal(await until(() => evaluate("main", "document.body.dataset.event"), "Event heard by the page"), '{"n":7}')
+  const heardBy = async (send) => {
+    await evaluate("main", "delete document.body.dataset.event, null")
+    await send()
+    return until(() => evaluate("main", "document.body.dataset.event"), "Event", 5000).catch(() => null)
+  }
+  // Diagnostic: the runtime's own script evaluation is what carries an event to the page.
+  await rpc("ipc", { command: "runtime_eval", args: { script: "document.body.dataset.runtimeEval = 'ran'" } }, "main")
+  const delivery = {
+    runtimeEval: await until(() => evaluate("main", "document.body.dataset.runtimeEval"), "Eval", 5000).catch(
+      () => null
+    ),
+    broadcast: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } })),
+    targeted: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } }, "main"))
+  }
+  assert.deepEqual(delivery, { runtimeEval: "ran", broadcast: '{"n":7}', targeted: '{"n":7}' })
   await rpc("fill", { selector: "#host-input", value: "saved" }, "main")
   await evaluate("main", 'document.querySelector("#host-input").dispatchEvent(new Event("change")), null')
   const heard = await until(async () => {

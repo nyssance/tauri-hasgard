@@ -38,6 +38,12 @@ fn ipc_echo(webview: tauri::Webview, value: String) -> Result<String, String> {
 fn set_floating(window: tauri::Window, enabled: bool) -> Result<(), String> {
     window.set_always_on_top(enabled).map_err(|error| error.to_string())
 }
+/// Runs a script in the calling webview through the runtime's own evaluation, the path Tauri
+/// uses to deliver an event to a page.
+#[tauri::command]
+fn runtime_eval(webview: tauri::Webview, script: String) -> Result<(), String> {
+    webview.eval(script).map_err(|error| error.to_string())
+}
 #[tauri::command]
 fn quit_fixture(app: tauri::AppHandle) {
     app.exit(0);
@@ -100,7 +106,14 @@ fn main() {
         .plugin(tauri_plugin_dialog::init());
     let builder = if without_hasgard { builder } else { builder.plugin(tauri_plugin_hasgard::init_cef()) };
     builder
-        .invoke_handler(tauri::generate_handler![recreate_guest, close_guest, ipc_echo, set_floating, quit_fixture])
+        .invoke_handler(tauri::generate_handler![
+            recreate_guest,
+            close_guest,
+            ipc_echo,
+            set_floating,
+            runtime_eval,
+            quit_fixture
+        ])
         .run(tauri::generate_context!())
         .expect("CEF fixture failed");
 }
