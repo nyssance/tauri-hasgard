@@ -51,9 +51,25 @@ for (let round = 0; round < rounds; round++) {
       endpoint
     )
     await client.connect(20_000)
-    await client.call("ipc", { command: "quit_fixture", window: "main" }).catch(() => {})
-    const { stdout } = await app.diagnostics(15_000)
-    codes.push(stdout.match(/EXITCODE=(-?\d+)/)?.[1] ?? `no code reported: ${JSON.stringify(stdout.slice(-200))}`)
+    // The quit command travels through the page, so the page has to be there first.
+    const deadline = Date.now() + 30_000
+    for (;;) {
+      const ready = await client.call("eval", { script: "document.readyState", window: "main" }).then(
+        (state) => state === "complete",
+        () => false
+      )
+      if (ready) break
+      if (Date.now() > deadline) throw new Error("the main window did not become ready")
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    // Quitting can end the document before its reply arrives; the exit code is what is measured.
+    const quit = await client.call("ipc", { command: "quit_fixture", window: "main" }).then(
+      () => "replied",
+      (error) => `no reply (${String(error).slice(0, 80)})`
+    )
+    const { stdout, stderr } = await app.diagnostics(20_000)
+    const code = stdout.match(/EXITCODE=(-?\d+)/)?.[1]
+    codes.push(code ?? `no code reported, quit ${quit}: ${JSON.stringify((stdout + stderr).slice(-200))}`)
   } catch (error) {
     codes.push(`probe failed: ${String(error).slice(0, 200)}`)
   } finally {
