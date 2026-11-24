@@ -38,12 +38,6 @@ fn ipc_echo(webview: tauri::Webview, value: String) -> Result<String, String> {
 fn set_floating(window: tauri::Window, enabled: bool) -> Result<(), String> {
     window.set_always_on_top(enabled).map_err(|error| error.to_string())
 }
-/// Runs a script in the calling webview through the runtime's own evaluation, the path Tauri
-/// uses to deliver an event to a page.
-#[tauri::command]
-fn runtime_eval(webview: tauri::Webview, script: String) -> Result<(), String> {
-    webview.eval(script).map_err(|error| error.to_string())
-}
 /// Emits an event from the application itself, with no Hasgard code involved.
 #[tauri::command]
 fn app_emit(app: tauri::AppHandle, event: String, payload: u32) -> Result<(), String> {
@@ -117,7 +111,6 @@ fn main() {
             close_guest,
             ipc_echo,
             set_floating,
-            runtime_eval,
             app_emit,
             quit_fixture
         ])

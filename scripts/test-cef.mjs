@@ -268,33 +268,25 @@ try {
   // and one the page emits is recorded.
   await rpc("event.clear")
   assert.deepEqual((await rpc("event.listen", { event: "fixture-saved" })).listening, ["fixture-saved"])
-  // The page's own subscription is asynchronous; an event sent before it settles is not heard.
+  // The page subscribes here rather than while it loads, so the subscription cannot race
+  // the runtime's own startup.
+  await rpc("click", { selector: "#subscribe" }, "main")
   assert.equal(await until(() => evaluate("main", "document.body.dataset.listening"), "Page subscribed"), "yes")
   const heardBy = async (send) => {
     await evaluate("main", "delete document.body.dataset.event, null")
     await send()
     return until(() => evaluate("main", "document.body.dataset.event"), "Event", 5000).catch(() => null)
   }
-  // Diagnostic: the runtime's own script evaluation is what carries an event to the page.
-  await rpc("ipc", { command: "runtime_eval", args: { script: "document.body.dataset.runtimeEval = 'ran'" } }, "main")
-  const delivery = {
-    runtimeEval: await until(() => evaluate("main", "document.body.dataset.runtimeEval"), "Eval", 5000).catch(
-      () => null
-    ),
-    broadcast: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } })),
-    targeted: await heardBy(() => rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } }, "main")),
-    fromApp: await heardBy(() =>
-      rpc("ipc", { command: "app_emit", args: { event: "fixture-ping", payload: 7 } }, "main")
-    )
-  }
-  if (delivery.broadcast === null)
-    console.log("main console:", JSON.stringify(await rpc("console.getLogs", {}, "main")))
-  assert.deepEqual(delivery, {
-    runtimeEval: "ran",
-    broadcast: '{"n":7}',
-    targeted: '{"n":7}',
-    fromApp: "7"
-  })
+  // The application's own emit is the reference: Hasgard's must be heard exactly where it is.
+  const emit = { event: "fixture-ping", payload: 7 }
+  assert.deepEqual(
+    {
+      fromApp: await heardBy(() => rpc("ipc", { command: "app_emit", args: emit }, "main")),
+      broadcast: await heardBy(() => rpc("event.emit", emit)),
+      targeted: await heardBy(() => rpc("event.emit", emit, "main"))
+    },
+    { fromApp: "7", broadcast: "7", targeted: "7" }
+  )
   await rpc("fill", { selector: "#host-input", value: "saved" }, "main")
   await evaluate("main", 'document.querySelector("#host-input").dispatchEvent(new Event("change")), null')
   const heard = await until(async () => {
