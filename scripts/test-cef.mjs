@@ -268,6 +268,8 @@ try {
   // and one the page emits is recorded.
   await rpc("event.clear")
   assert.deepEqual((await rpc("event.listen", { event: "fixture-saved" })).listening, ["fixture-saved"])
+  // The page's own subscription is asynchronous; an event sent before it settles is not heard.
+  assert.equal(await until(() => evaluate("main", "document.body.dataset.listening"), "Page subscribed"), "yes")
   await rpc("event.emit", { event: "fixture-ping", payload: { n: 7 } })
   assert.equal(await until(() => evaluate("main", "document.body.dataset.event"), "Event heard by the page"), '{"n":7}')
   await rpc("fill", { selector: "#host-input", value: "saved" }, "main")

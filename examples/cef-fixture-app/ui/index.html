@@ -3,7 +3,7 @@
 <header><button id="modal">Open modal</button><button id="close">Close guest</button><button id="recreate">Recreate guest</button><button id="native-save">Export</button><button id="native-ask">Discard</button><button id="native-probe">Probe</button><input id="host-input" aria-label="Host input"></header>
 <dialog id="dialog"><h2>HOST MODAL</h2><input aria-label="Modal input"><button id="dismiss">Dismiss</button></dialog>
 <script>
-window.__TAURI__.event.listen('fixture-ping',e=>{document.body.dataset.event=JSON.stringify(e.payload)});
+window.__TAURI__.event.listen('fixture-ping',e=>{document.body.dataset.event=JSON.stringify(e.payload)}).then(()=>{document.body.dataset.listening='yes'},e=>{document.body.dataset.listening='error: '+e});
 document.querySelector('#host-input').addEventListener('change',e=>window.__TAURI__.event.emit('fixture-saved',{value:e.target.value}));
 document.querySelector('#modal').onclick=()=>document.querySelector('#dialog').showModal();
 document.querySelector('#dismiss').onclick=()=>document.querySelector('#dialog').close();
