@@ -317,3 +317,64 @@ test("the IPC exclusion does not swallow a host that merely starts with ipc", as
   assert.equal((await fetch("https://ipc.localhost.evil.test/x")).status, 500)
   assert.deepEqual(reachedNetwork, [])
 })
+
+// A tab's session storage: the one thing a new document shares with the last.
+function sessionStorageMock() {
+  const entries = new Map()
+  return {
+    get length() {
+      return entries.size
+    },
+    key: (index) => [...entries.keys()][index] ?? null,
+    getItem: (key) => (entries.has(key) ? entries.get(key) : null),
+    setItem: (key, value) => void entries.set(key, String(value)),
+    removeItem: (key) => void entries.delete(key),
+    clear: () => entries.clear()
+  }
+}
+
+test("routes and dialog policies hold across a navigation within the tab", async () => {
+  globalThis.sessionStorage = sessionStorageMock()
+  globalThis.localStorage = sessionStorageMock()
+  try {
+    const first = loadBridge()
+    globalThis.sessionStorage.setItem("app-key", "app-value")
+    first.hasgard.route({ pattern: "**/api/user", status: 201, body: "stubbed" })
+    first.hasgard.route({ pattern: "**/once", times: 1, body: "one" })
+    first.hasgard.handleDialogs({ action: "accept", promptText: "typed" })
+    await globalThis.window.fetch("https://app.test/once")
+
+    // The next document: a new window and a new bridge, the same tab.
+    const second = loadBridge()
+    const response = await globalThis.window.fetch("https://app.test/api/user")
+    assert.equal(response.status, 201)
+    assert.equal(await response.text(), "stubbed")
+    assert.deepEqual(
+      second.hasgard.routes().routes.map(({ id, pattern, used }) => ({ id, pattern, used })),
+      [
+        { id: 1, pattern: "**/api/user", used: 1 },
+        { id: 2, pattern: "**/once", used: 1 }
+      ]
+    )
+    // The counted rule was spent before the navigation and stays spent after it.
+    assert.equal(await (await globalThis.window.fetch("https://app.test/once")).text(), "live")
+    assert.deepEqual(second.hasgard.dialogs().policy, { action: "accept", promptText: "typed" })
+    assert.equal(second.hasgard.route({ pattern: "**/later" }).id, 3, "ids continue rather than restart")
+
+    // The application's own storage shows only the application's data.
+    assert.deepEqual(second.hasgard.storageList({ session: true }).entries, [{ key: "app-key", value: "app-value" }])
+    assert.deepEqual(second.hasgard.storageGet({ session: true, key: "__hasgard__" }), { found: false })
+    second.hasgard.storageClear({ session: true })
+    assert.equal(loadBridge().hasgard.routes().routes.length, 3, "clearing app storage keeps the standing rules")
+
+    // Back to defaults leaves nothing behind.
+    const last = loadBridge()
+    last.hasgard.clearRoutes()
+    last.hasgard.handleDialogs({ action: "dismiss" })
+    assert.equal(globalThis.sessionStorage.length, 0)
+    assert.deepEqual(loadBridge().hasgard.routes().routes, [])
+  } finally {
+    delete globalThis.sessionStorage
+    delete globalThis.localStorage
+  }
+})

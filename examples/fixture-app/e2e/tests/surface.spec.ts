@@ -557,6 +557,18 @@ test("text and role locators read the frame's own document", async ({ window }) 
   await expect(frame.locator(".row").count()).resolves.toBe(3)
 })
 
+test("html and an untargeted scroll use the frame's own document", async ({ window }) => {
+  const inner = await window.call<string>("html", { frame: ["#pane"] })
+  expect(inner).toContain('<h1 id="scope">inner</h1>')
+  expect(inner).not.toContain('<h1 id="scope">outer</h1>')
+  expect(await window.call<string>("html")).toContain('<h1 id="scope">outer</h1>')
+
+  // The top document must stay where it is when only the frame is asked to scroll.
+  const before = await window.evaluate<number>("window.scrollY")
+  await window.call("scroll", { direction: "down", amount: 40, frame: ["#pane"] })
+  expect(await window.evaluate<number>("window.scrollY")).toBe(before)
+})
+
 test("a nested frame chain reaches two levels down", async ({ window }) => {
   const nested = window.frameLocator("#pane").frameLocator("#nested")
 
@@ -844,4 +856,31 @@ test("native dialogs are answered in advance and recorded, and nothing else is i
   expect(await window.invoke<number>("fixture_process_id", {})).toBeGreaterThan(0)
   expect((await window.nativeDialogs.manual()).action).toBe("manual")
   await window.nativeDialogs.clear()
+})
+
+test("routes and the dialog policy hold across a navigation", async ({ hasgard }) => {
+  const settings = await hasgard.waitForWindow("settings", 5_000)
+  await settings.routes.clear()
+  await settings.routes.fulfill({ pattern: "**/api/profile", status: 200, body: "stubbed profile" })
+  await settings.dialogs.accept("typed")
+  try {
+    await settings.navigate("embedded.html")
+    await settings.waitForURL("**/embedded.html", { waitUntil: "load", timeoutMs: 10_000 })
+
+    // The new document never saw the calls that set these; it found them standing.
+    const read = "fetch('/api/profile').then((response) => response.text())"
+    expect(await settings.evaluate<string>(read)).toBe("stubbed profile")
+    expect(await settings.evaluate<string | null>("prompt('Name?')")).toBe("typed")
+    const { routes } = await settings.routes.list()
+    expect(routes.map(({ pattern, used }) => ({ pattern, used }))).toEqual([{ pattern: "**/api/profile", used: 1 }])
+    // The application's session storage does not show Hasgard's own entry.
+    expect(await settings.evaluate<number>("sessionStorage.length")).toBeGreaterThan(0)
+    expect((await settings.call<{ entries: unknown[] }>("storage.list", { session: true })).entries).toEqual([])
+  } finally {
+    await settings.routes.clear()
+    await settings.dialogs.dismiss()
+    expect(await settings.evaluate<number>("sessionStorage.length")).toBe(0)
+    await settings.navigate("settings.html")
+    await settings.waitForURL(/settings\.html$/, { waitUntil: "load", timeoutMs: 10_000 })
+  }
 })

@@ -40,6 +40,10 @@ function makeElement(initialRect, { visibleRect } = {}) {
     _rect: initialRect,
     dispatched: [],
     scrollCalls: [],
+    // A live element always knows its document; a drag works in that document's viewport.
+    get ownerDocument() {
+      return globalThis.document
+    },
     getBoundingClientRect() {
       return this._rect
     },

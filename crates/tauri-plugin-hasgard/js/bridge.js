@@ -188,6 +188,7 @@
     // `promptText` is only meaningful for accept; keeping a stale value around
     // after switching to dismiss would resurface it on the next accept.
     _dialogPolicy.promptText = action === "accept" && params.promptText != null ? String(params.promptText) : null
+    saveState()
     return { action: _dialogPolicy.action, promptText: _dialogPolicy.promptText }
   }
 
@@ -333,6 +334,7 @@
     // Paths and a button belong to an accept; a stale one must not resurface later.
     _nativeDialogPolicy.paths = action === "accept" ? [...paths] : []
     _nativeDialogPolicy.button = action === "accept" && params.button != null ? params.button : null
+    saveState()
     return nativeDialogPolicy()
   }
 
@@ -405,6 +407,8 @@
       if (route.method && route.method !== method.toUpperCase()) continue
       if (!route.regex.test(url)) continue
       route.used += 1
+      // A counted rule must stay spent after a navigation.
+      if (route.times != null) saveState()
       _routeLog.push({
         id: ++_netIdCounter,
         timestamp: Date.now(),
@@ -419,6 +423,60 @@
     }
     return null
   }
+
+  // --- Standing state across navigation ------------------------------------
+  //
+  // Routes and dialog policies are set once and meant to hold for a flow, but
+  // this bridge is rebuilt with every document. They are kept in the tab's
+  // session storage, which is the only place a new document can read at its very
+  // start, before its own first request. That makes the hand-over race-free, and
+  // limits it to documents of one origin. The entry exists only while a rule or a
+  // non-default policy does, and Hasgard's own storage operations do not show it.
+  const STATE_KEY = "__hasgard__"
+
+  function saveState() {
+    const idle =
+      _routes.length === 0 &&
+      _dialogPolicy.action === "dismiss" &&
+      _dialogPolicy.promptText === null &&
+      _nativeDialogPolicy.action === "manual"
+    try {
+      if (idle) {
+        sessionStorage.removeItem(STATE_KEY)
+        return
+      }
+      sessionStorage.setItem(
+        STATE_KEY,
+        JSON.stringify({
+          routes: _routes.map(({ regex: _regex, ...rule }) => rule),
+          routeIdCounter: _routeIdCounter,
+          dialog: { ..._dialogPolicy },
+          nativeDialog: nativeDialogPolicy()
+        })
+      )
+    } catch {
+      // A document without session storage (an opaque origin, storage disabled)
+      // keeps its state for its own lifetime; there is nowhere to hand it on.
+    }
+  }
+
+  function restoreState() {
+    let raw
+    try {
+      raw = sessionStorage.getItem(STATE_KEY)
+    } catch {
+      return
+    }
+    if (!raw) return
+    const state = JSON.parse(raw)
+    _routes = state.routes.map((rule) => ({ ...rule, regex: globToRegExp(rule.pattern) }))
+    _routeIdCounter = state.routeIdCounter
+    Object.assign(_dialogPolicy, state.dialog)
+    Object.assign(_nativeDialogPolicy, state.nativeDialog)
+  }
+
+  // Everything it restores is declared above, and no request has been wrapped yet.
+  restoreState()
 
   function recordNetwork(entry) {
     _networkRequests.push(entry)
@@ -456,6 +514,7 @@
       used: 0
     }
     _routes.push(route)
+    saveState()
     return { id: route.id, pattern: route.pattern, action: route.action }
   }
 
@@ -480,6 +539,7 @@
     const removed = _routes.length
     _routes = []
     _routeLog = []
+    saveState()
     return { removed }
   }
 
@@ -1607,24 +1667,27 @@
     // point locator can scroll its own element; with `ref`-only, every
     // selector-based caller silently scrolled the document instead.
     const hasTarget = options && (options.ref || options.selector || (options.x != null && options.y != null))
-    const target = hasTarget ? resolveTarget(options) : window
+    // Without a target the document scrolls: the frame's own when one is named.
+    const doc = frameDocument(options?.frame)
+    const view = doc.defaultView
+    const target = hasTarget ? resolveTarget(options) : view
 
     if (dir === "top") {
-      if (target === window) {
-        target.scrollTo(window.scrollX, 0)
+      if (target === view) {
+        target.scrollTo(view.scrollX, 0)
       } else {
         target.scrollTop = 0
       }
       return { ok: true }
     }
     if (dir === "bottom") {
-      if (target === window) {
-        const docEl = document.documentElement
-        const body = document.body
+      if (target === view) {
+        const docEl = doc.documentElement
+        const body = doc.body
         const fullHeight = Math.max(docEl ? docEl.scrollHeight : 0, body ? body.scrollHeight : 0)
-        const viewportHeight = docEl ? docEl.clientHeight : window.innerHeight
+        const viewportHeight = docEl ? docEl.clientHeight : view.innerHeight
         const max = fullHeight - viewportHeight
-        target.scrollTo(window.scrollX, Math.max(0, max))
+        target.scrollTo(view.scrollX, Math.max(0, max))
       } else {
         target.scrollTop = Math.max(0, target.scrollHeight - target.clientHeight)
       }
@@ -1641,7 +1704,10 @@
   }
 
   function drag(params) {
-    const source = resolveTarget(params.source || params)
+    // The frame scope arrives beside `source` and `target`, not inside them.
+    const scoped = (target) =>
+      params.frame != null && target.frame == null ? { ...target, frame: params.frame } : target
+    const source = resolveTarget(scoped(params.source || params))
     let sourceRect = source.getBoundingClientRect()
     let startX = sourceRect.left + sourceRect.width / 2
     let startY = sourceRect.top + sourceRect.height / 2
@@ -1649,7 +1715,7 @@
     let endX, endY, dropTarget
 
     if (params.target) {
-      dropTarget = resolveTarget(params.target)
+      dropTarget = resolveTarget(scoped(params.target))
       const targetRect = dropTarget.getBoundingClientRect()
       endX = targetRect.left + targetRect.width / 2
       endY = targetRect.top + targetRect.height / 2
@@ -1659,7 +1725,9 @@
       // view first, like a user would, then recompute the start point.
       // "instant" so a page-level `scroll-behavior: smooth` cannot defer the
       // scroll past the synchronous rect recompute.
-      const docEl = document.documentElement
+      // Points are in the source's own viewport, which inside a frame is the frame's.
+      const sourceDocument = source.ownerDocument
+      const docEl = sourceDocument.documentElement
       const viewportWidth = docEl.clientWidth
       const viewportHeight = docEl.clientHeight
       if (startX < 0 || startY < 0 || startX >= viewportWidth || startY >= viewportHeight) {
@@ -1672,7 +1740,7 @@
       const offsetY = params.offset.y || 0
       endX = startX + offsetX
       endY = startY + offsetY
-      dropTarget = document.elementFromPoint(endX, endY)
+      dropTarget = sourceDocument.elementFromPoint(endX, endY)
       if (!dropTarget) {
         const pointLabel = `(${Math.round(endX)},${Math.round(endY)})`
         if (endX < 0 || endY < 0 || endX >= viewportWidth || endY >= viewportHeight) {
@@ -1780,7 +1848,8 @@
   // `preventDefault`ed — keeps both halves of the contract.
   function wheel(params) {
     const hasTarget = params && (params.ref || params.selector || (params.x != null && params.y != null))
-    const el = hasTarget ? resolveTarget(params) : document.scrollingElement || document.documentElement
+    const doc = frameDocument(params?.frame)
+    const el = hasTarget ? resolveTarget(params) : doc.scrollingElement || doc.documentElement
     const deltaX = params?.deltaX || 0
     const deltaY = params?.deltaY || 0
     const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 }
@@ -1795,7 +1864,7 @@
         bubbles: true,
         cancelable: true,
         composed: true,
-        view: window
+        view: doc.defaultView
       })
     )
 
@@ -1811,7 +1880,7 @@
     if (params && (params.ref || params.selector)) {
       return resolveTarget(params).innerHTML
     }
-    return document.documentElement.innerHTML
+    return frameDocument(params?.frame).documentElement.innerHTML
   }
 
   function value(params) {
@@ -2311,7 +2380,7 @@
       throw new Error("storageGet requires a string key")
     }
     const storage = params.session ? sessionStorage : localStorage
-    const val = storage.getItem(params.key)
+    const val = params.session && params.key === STATE_KEY ? null : storage.getItem(params.key)
     if (val === null) {
       return { found: false }
     }
@@ -2331,22 +2400,24 @@
 
   function storageList(params) {
     const storage = params.session ? sessionStorage : localStorage
-    const total = storage.length
-    const len = Math.min(total, MAX_STORAGE_ENTRIES)
-    const entries = []
-    for (let i = 0; i < len; i++) {
+    // Hasgard's own entry is not the application's data.
+    const keys = []
+    for (let i = 0; i < storage.length; i++) {
       const key = storage.key(i)
-      entries.push({ key, value: storage.getItem(key) })
+      if (!(params.session && key === STATE_KEY)) keys.push(key)
     }
+    const entries = keys.slice(0, MAX_STORAGE_ENTRIES).map((key) => ({ key, value: storage.getItem(key) }))
     return {
       entries: entries.toSorted((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
-      truncated: total > MAX_STORAGE_ENTRIES
+      truncated: keys.length > MAX_STORAGE_ENTRIES
     }
   }
 
   function storageClear(params) {
     const storage = params.session ? sessionStorage : localStorage
     storage.clear()
+    // Clearing the application's data must not drop the rules a test has standing.
+    if (params.session) saveState()
     return { cleared: true }
   }
 

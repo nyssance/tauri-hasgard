@@ -497,12 +497,12 @@ mod tests {
         assert!(js.contains(r#"if (dir === "top")"#), "scroll must handle direction \"top\"");
         assert!(js.contains(r#"if (dir === "bottom")"#), "scroll must handle direction \"bottom\"");
         assert!(
-            js.contains("target.scrollTo(window.scrollX, 0)"),
-            "scroll top on window must preserve window.scrollX and set Y=0"
+            js.contains("target.scrollTo(view.scrollX, 0)"),
+            "scroll top on the document's window must preserve its scrollX and set Y=0"
         );
         assert!(
-            js.contains("target.scrollTo(window.scrollX, Math.max(0, max))"),
-            "scroll bottom on window must preserve window.scrollX and clamp negative max"
+            js.contains("target.scrollTo(view.scrollX, Math.max(0, max))"),
+            "scroll bottom on the document's window must preserve its scrollX and clamp negative max"
         );
         assert!(
             js.contains("Math.max(")
@@ -511,7 +511,7 @@ mod tests {
             "scroll bottom on window must use Math.max(documentElement.scrollHeight, body.scrollHeight) for quirks-mode safety"
         );
         assert!(
-            js.contains("docEl ? docEl.clientHeight : window.innerHeight"),
+            js.contains("docEl ? docEl.clientHeight : view.innerHeight"),
             "scroll bottom on window must subtract docEl.clientHeight (excludes horizontal scrollbar) instead of window.innerHeight"
         );
         assert!(

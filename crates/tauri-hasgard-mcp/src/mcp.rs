@@ -277,16 +277,13 @@ impl HasgardMcpServer {
             "disabled" => self.target_call("disabled", &args, window).await,
             "bounding_box" => self.target_call("boundingBox", &args, window).await,
             "scroll" => {
-                self.call_app_tool(
-                    "scroll",
-                    Some(json!({
-                        "direction": optional_string(&args, "direction")?.unwrap_or_else(|| "down".to_owned()),
-                        "amount": optional_i32(&args, "amount")?,
-                        "ref": optional_ref(&args)?,
-                    })),
-                    window,
-                )
-                .await
+                let mut params = json!({
+                    "direction": optional_string(&args, "direction")?.unwrap_or_else(|| "down".to_owned()),
+                    "amount": optional_i32(&args, "amount")?,
+                    "ref": optional_ref(&args)?,
+                });
+                insert_optional_frame(&mut params, &args)?;
+                self.call_app_tool("scroll", Some(params), window).await
             }
             "drag" => {
                 let source = required_string(&args, "source")?;
@@ -307,6 +304,7 @@ impl HasgardMcpServer {
                         params["offset"] = offset;
                     }
                 }
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("drag", Some(params), window).await
             }
             "drop" => self.call_drop_tool(args, window).await,
@@ -323,6 +321,7 @@ impl HasgardMcpServer {
                     optional_string(&args, "target")?.map_or_else(|| json!({}), |target| target_params(&target));
                 params["deltaX"] = json!(optional_number(&args, "delta_x")?.unwrap_or(0.0));
                 params["deltaY"] = json!(optional_number(&args, "delta_y")?.unwrap_or(0.0));
+                insert_optional_frame(&mut params, &args)?;
                 self.call_app_tool("wheel", Some(params), window).await
             }
             "dialog" => self.call_dialog_tool(args, window).await,
@@ -405,8 +404,10 @@ impl HasgardMcpServer {
             "route" => self.call_route_tool(args, window).await,
             "text" => self.target_call("text", &args, window).await,
             "html" => {
-                let params = optional_string(&args, "target")?.map(|target| target_params(&target));
-                self.call_app_tool("html", params, window).await
+                let mut params =
+                    optional_string(&args, "target")?.map_or_else(|| json!({}), |target| target_params(&target));
+                insert_optional_frame(&mut params, &args)?;
+                self.call_app_tool("html", Some(params), window).await
             }
             "value" => self.target_call("value", &args, window).await,
             "attrs" => self.target_call("attrs", &args, window).await,
@@ -468,14 +469,16 @@ impl HasgardMcpServer {
                     }
                     build_location_wait_params(url.as_deref(), load.as_deref(), timeout)
                 } else {
-                    build_wait_params(
+                    let mut params = build_wait_params(
                         target.as_deref(),
                         selector.as_deref(),
                         expression.as_deref(),
                         poll,
                         gone,
                         timeout,
-                    )
+                    );
+                    insert_optional_frame(&mut params, &args)?;
+                    params
                 };
                 self.call_app_tool("wait", Some(params), window).await
             }
@@ -746,7 +749,7 @@ impl HasgardMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let expected = required_string(&args, "expected")?;
         let target = required_string(&args, "target")?;
-        let actual = match self.call_app("text", Some(target_params(&target)), window).await {
+        let actual = match self.call_app("text", Some(scoped_target(&target, &args)?), window).await {
             Ok(Value::String(actual)) => actual,
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
@@ -769,7 +772,7 @@ impl HasgardMcpServer {
     async fn assert_value(&self, args: JsonObject, window: Option<String>) -> Result<CallToolResult, McpError> {
         let expected = required_string(&args, "expected")?;
         let target = required_string(&args, "target")?;
-        let actual = match self.call_app("value", Some(target_params(&target)), window).await {
+        let actual = match self.call_app("value", Some(scoped_target(&target, &args)?), window).await {
             Ok(Value::String(actual)) => actual,
             Ok(other) => {
                 return Ok(tool_error_msg(format!("expected string response, got {other}")));
@@ -788,7 +791,7 @@ impl HasgardMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let target = required_string(&args, "target")?;
         let field = method;
-        let actual = match self.call_app(method, Some(target_params(&target)), window).await {
+        let actual = match self.call_app(method, Some(scoped_target(&target, &args)?), window).await {
             Ok(result) => match result.get(field).and_then(Value::as_bool) {
                 Some(value) => value,
                 None => return Ok(tool_error_msg(format!("missing boolean field '{field}'"))),
@@ -813,7 +816,9 @@ impl HasgardMcpServer {
     async fn assert_count(&self, args: JsonObject, window: Option<String>) -> Result<CallToolResult, McpError> {
         let selector = required_string(&args, "selector")?;
         let expected = required_u64(&args, "expected")?;
-        let actual = match self.call_app("count", Some(json!({"selector": selector})), window).await {
+        let mut count_params = json!({"selector": selector});
+        insert_optional_frame(&mut count_params, &args)?;
+        let actual = match self.call_app("count", Some(count_params), window).await {
             Ok(result) => match result.get("count").and_then(Value::as_u64) {
                 Some(value) => value,
                 None => return Ok(tool_error_msg("missing 'count' field")),
@@ -1476,8 +1481,35 @@ fn tool_specs() -> Vec<ToolSpec> {
 /// Tools whose bridge operation resolves inside a frame and whose own schema
 /// does not already declare `frame`. Listed, not blanket-applied: a tool that
 /// ignored the chain would answer from the top document without saying so.
-const FRAME_SCOPED_TOOLS: &[&str] =
-    &["snapshot", "query", "fill", "type", "select", "check", "drop", "set_input_files"];
+const FRAME_SCOPED_TOOLS: &[&str] = &[
+    "snapshot",
+    "query",
+    "fill",
+    "type",
+    "select",
+    "check",
+    "drop",
+    "set_input_files",
+    "text",
+    "html",
+    "value",
+    "attrs",
+    "focus",
+    "blur",
+    "disabled",
+    "bounding_box",
+    "scroll",
+    "wheel",
+    "drag",
+    "wait",
+    "assert_text",
+    "assert_contains",
+    "assert_visible",
+    "assert_hidden",
+    "assert_value",
+    "assert_count",
+    "assert_checked",
+];
 
 fn frame_prop() -> Value {
     json!({
@@ -1683,6 +1715,13 @@ fn optional_frame(args: &JsonObject) -> Result<Option<Vec<String>>, McpError> {
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
+}
+
+/// Target params carrying the call's frame scope, for tools that resolve an element.
+fn scoped_target(target: &str, args: &JsonObject) -> Result<Value, McpError> {
+    let mut params = target_params(target);
+    insert_optional_frame(&mut params, args)?;
+    Ok(params)
 }
 
 fn insert_optional_frame(params: &mut Value, args: &JsonObject) -> Result<(), McpError> {
@@ -2393,6 +2432,50 @@ mod tests {
         assert!(server.call_tool_by_name("eval", JsonObject::new()).await.is_err());
         assert!(server.get_tool("eval").is_none());
         assert!(server.with_dangerous_tools(true).get_tool("eval").is_some());
+    }
+
+    #[tokio::test]
+    async fn the_frame_scope_reaches_every_tool_that_advertises_it() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let server = HasgardMcpServer::in_process(
+            move |method, params| {
+                log.lock().expect("log").push((method.clone(), params["frame"].clone()));
+                // Whatever each assertion compares against, so every call completes.
+                async move {
+                    Ok(match method.as_str() {
+                        "text" | "value" => json!("x"),
+                        "visible" => json!({"visible": true}),
+                        "count" => json!({"count": 1}),
+                        _ => json!({"ok": true}),
+                    })
+                }
+            },
+            Some("main".to_owned()),
+        );
+        let frame = json!(["#outer", "#inner"]);
+        for (tool, extra) in [
+            ("html", json!({})),
+            ("scroll", json!({})),
+            ("wheel", json!({"delta_y": 10})),
+            ("drag", json!({"source": "#a", "target": "#b"})),
+            ("wait", json!({"selector": "#a"})),
+            ("assert_text", json!({"target": "#a", "expected": "x"})),
+            ("assert_value", json!({"target": "#a", "expected": "x"})),
+            ("assert_visible", json!({"target": "#a"})),
+            ("assert_count", json!({"selector": "#a", "expected": 1})),
+        ] {
+            let mut arguments = extra.as_object().expect("object").clone();
+            arguments.insert("frame".to_owned(), frame.clone());
+            let result = server.call_tool_by_name(tool, arguments).await.expect(tool);
+            assert_ne!(result.is_error, Some(true), "{tool}: {result:?}");
+            let advertised = server.get_tool(tool).expect("listed tool");
+            assert!(advertised.input_schema["properties"].get("frame").is_some(), "{tool} must advertise frame");
+        }
+        for (method, sent) in calls.lock().expect("log").iter() {
+            assert_eq!(sent, &frame, "{method} must carry the frame scope");
+        }
+        assert_eq!(calls.lock().expect("log").len(), 9);
     }
 
     #[tokio::test]

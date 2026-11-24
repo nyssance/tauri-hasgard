@@ -1,3 +1,8 @@
+# Unreleased
+
+- Wry: routes, the dialog policy and the native dialog policy hold across a navigation to another document of the same origin, as they already did on CEF. A counted route stays spent. They are handed over through the tab's session storage, in one entry that exists only while a rule or a non-default policy does and that Hasgard's own `storage.*` operations do not show.
+- The frame scope reaches the operations that ignored it. In the bridge, an untargeted `scroll` or `wheel`, `html` without a target, and both ends of a `drag` (and its drop point for an offset) now use the frame's document. The MCP tools `text`, `html`, `value`, `attrs`, `focus`, `blur`, `disabled`, `bounding_box`, `scroll`, `wheel`, `drag`, `wait` and the `assert_*` tools accept and advertise `frame`.
+
 # 0.8.1 (2026-11-24)
 
 - Add answers for native dialogs: `nativeDialog.handle`, `nativeDialog.list` and `nativeDialog.clear` answer the dialog plugin's open, save and message commands in advance and record them; nothing else in the application's IPC is intercepted. The default, `manual`, leaves the system dialog on screen. CLI `native-dialog`, the MCP `native_dialog` tool, and Playwright `window.nativeDialogs`. Wry only.

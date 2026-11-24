@@ -287,3 +287,68 @@ test("query searches the frame document", () => {
   assert.equal(unscoped.elements.length, 1)
   assert.notEqual(scoped.elements[0].ref, unscoped.elements[0].ref, "different nodes, different refs")
 })
+
+test("html, an untargeted scroll and an untargeted wheel act on the frame's own document", () => {
+  const scrolls = { outer: [], inner: [] }
+  const wheeled = makeElement("inner-root", {
+    scrollBy(x, y) {
+      scrolls.inner.push(["wheel", x, y])
+    }
+  })
+  const documentWith = (name, html, root) => ({
+    ...makeDocument(),
+    documentElement: { innerHTML: html, scrollHeight: 2000, clientHeight: 500 },
+    body: { scrollHeight: 2000 },
+    scrollingElement: root,
+    defaultView: {
+      scrollX: 0,
+      scrollBy(x, y) {
+        scrolls[name].push(["scroll", x, y])
+      }
+    }
+  })
+  globalThis.WheelEvent = class WheelEvent {
+    constructor(type, init) {
+      this.type = type
+      Object.assign(this, init || {})
+    }
+  }
+  const hasgard = loadBridge({
+    main: documentWith("outer", "<p>outer</p>", makeElement("outer-root")),
+    frames: { "#checkout": documentWith("inner", "<p>inner</p>", wheeled) }
+  })
+
+  assert.equal(hasgard.html({ frame: ["#checkout"] }), "<p>inner</p>")
+  assert.equal(hasgard.html({}), "<p>outer</p>")
+
+  hasgard.scroll({ direction: "down", amount: 120, frame: ["#checkout"] })
+  hasgard.wheel({ deltaY: 40, frame: ["#checkout"] })
+  assert.deepEqual(scrolls.inner, [
+    ["scroll", 0, 120],
+    ["wheel", 0, 40]
+  ])
+  assert.deepEqual(scrolls.outer, [], "the main document must not move")
+})
+
+test("a drag resolves its source and target inside the frame", () => {
+  const outer = { card: makeElement("outer-card"), lane: makeElement("outer-lane") }
+  const inner = { card: makeElement("inner-card"), lane: makeElement("inner-lane") }
+  globalThis.DragEvent = class DragEvent {
+    constructor(type, init) {
+      this.type = type
+      Object.assign(this, init || {})
+    }
+  }
+  globalThis.DataTransfer = class DataTransfer {}
+  const hasgard = loadBridge({
+    main: makeDocument({ "#card": outer.card, "#lane": outer.lane }),
+    frames: { "#board": makeDocument({ "#card": inner.card, "#lane": inner.lane }) }
+  })
+
+  hasgard.drag({ source: { selector: "#card" }, target: { selector: "#lane" }, frame: ["#board"] })
+
+  assert.ok(inner.card.dispatched.includes("dragstart"))
+  assert.ok(inner.lane.dispatched.includes("drop"))
+  assert.deepEqual(outer.card.dispatched, [])
+  assert.deepEqual(outer.lane.dispatched, [])
+})

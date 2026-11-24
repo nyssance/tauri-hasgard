@@ -62,6 +62,10 @@ function loadBridge({ one, all } = {}) {
 
   globalThis.window = { fetch() {}, scrollX: 0, scrollY: 0, innerWidth: 800, innerHeight: 600 }
   globalThis.document = {
+    // A live document always knows its window; an untargeted scroll scrolls that window.
+    get defaultView() {
+      return globalThis.window
+    },
     querySelector(selector) {
       if (one === undefined) throw new Error(`unexpected querySelector(${selector})`)
       return one
