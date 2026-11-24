@@ -93,7 +93,7 @@ On Windows, an application on `tauri-runtime-cef` 3.0.0-alpha.7 sometimes ends w
 
 ## Known issue: an event subscription made while the page loads
 
-On `tauri-runtime-cef` 3.0.0-alpha.7 a page that calls `listen` while it is still loading sometimes never hears the event: the call resolves, and then neither the application's own `emit` nor `event.emit` reaches it. It happened in five of eight runs of the CEF fixture across macOS and Windows, and not once in a page that subscribes after it has loaded. A test that depends on such a listener should wait for something the page shows once it is subscribed.
+On `tauri-runtime-cef` 3.0.0-alpha.7 a page that calls `listen` while it is still loading sometimes never hears the event: the call resolves, and then neither the application's own `emit` nor `event.emit` reaches it. It happened in five of thirteen launches of the CEF fixture (four of six on macOS, one of seven on Windows), and not once in a page that subscribes after it has loaded. A test that depends on such a listener should wait for something the page shows once it is subscribed.
 
 ## Native test
 
