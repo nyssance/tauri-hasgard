@@ -18,12 +18,16 @@ const WORLD: &str = "tauri-hasgard";
 /// Same bound as the page bridge keeps on Wry.
 const MAX_LOGS: usize = 500;
 const MAX_REQUESTS: usize = 200;
+/// Thrown by an evaluation that expected the bridge in its context and did not find it.
+const BRIDGE_MISSING: &str = "HASGARD_BRIDGE_MISSING";
 
 #[derive(Clone)]
 struct ExecutionContext {
     unique_id: String,
     frame_id: Option<String>,
     is_default: bool,
+    /// The automation bridge is already installed in this context.
+    bridged: bool,
 }
 
 #[derive(Default)]
@@ -530,6 +534,7 @@ impl Client {
                                 unique_id: unique.to_owned(),
                                 frame_id: value["context"]["auxData"]["frameId"].as_str().map(str::to_owned),
                                 is_default: value["context"]["auxData"]["isDefault"] == true,
+                                bridged: false,
                             },
                         );
                     }
@@ -653,48 +658,63 @@ impl Client {
     }
 
     fn evaluate(
-        &self, view: &View, script: &EvalScript, remaining: impl FnOnce() -> Result<Duration, String>,
+        &self, view: &View, script: &EvalScript, remaining_time: impl Fn() -> Result<Duration, String>,
     ) -> Result<Value, String> {
         let tree = self.call(view, "Page.getFrameTree", &json!({}))?;
         let frame = tree["frameTree"]["frame"]["id"].as_str().ok_or("CDP returned no main frame")?;
-        let unique = match script.world {
-            EvalWorld::Main => self.main_world(frame)?,
+        // Bind to a unique context: navigation must fail, never execute in a
+        // replacement renderer. Main-world IPC uses the page's real Tauri bridge
+        // and its existing capability checks; no native command bypass exists.
+        let (unique, bridge) = match script.world {
+            EvalWorld::Main => (self.main_world(frame)?, None),
             EvalWorld::Automation => {
                 let world =
                     self.call(view, "Page.createIsolatedWorld", &json!({"frameId": frame, "worldName": WORLD}))?;
                 let context = world["executionContextId"].as_i64().ok_or("CDP returned no execution context")?;
-                self.contexts
-                    .lock()
-                    .expect("CDP contexts lock")
-                    .get(&context)
-                    .map(|context| context.unique_id.clone())
-                    .ok_or("AUTOMATION_NOT_READY: CEF execution context is not available")?
+                let contexts = self.contexts.lock().expect("CDP contexts lock");
+                let known =
+                    contexts.get(&context).ok_or("AUTOMATION_NOT_READY: CEF execution context is not available")?;
+                (known.unique_id.clone(), Some((context, known.bridged)))
             }
         };
-        // Bind to a unique context: navigation must fail, never execute in a
-        // replacement renderer. Main-world IPC uses the page's real Tauri bridge
-        // and its existing capability checks; no native command bypass exists.
-        let prelude = match script.world {
-            EvalWorld::Automation => crate::BRIDGE_JS,
-            EvalWorld::Main => {
-                "if(typeof window.__TAURI_INTERNALS__?.invoke!=='function')throw new Error('Tauri IPC is unavailable in this document');"
-            }
+        // The bridge is about 90 KB of source. A context keeps it once installed, so
+        // only the first evaluation in each document carries it.
+        let run = |prelude: &str| -> Result<Value, String> {
+            let expression = format!(
+                "(async()=>{{{prelude}\nconst value=await({});return value===undefined?null:value;}})()",
+                script.code
+            );
+            let result = self.call_with_timeout(
+                view,
+                "Runtime.evaluate",
+                &json!({
+                    "expression": expression, "uniqueContextId": unique,
+                    "awaitPromise": true, "returnByValue": true, "userGesture": true,
+                }),
+                remaining_time()?,
+            )?;
+            evaluation_result(&result)
         };
-        let expression = format!(
-            "(async()=>{{{prelude}\nconst value=await({});return value===undefined?null:value;}})()",
-            script.code
-        );
-        let timeout = remaining()?;
-        let result = self.call_with_timeout(
-            view,
-            "Runtime.evaluate",
-            &json!({
-                "expression": expression, "uniqueContextId": unique,
-                "awaitPromise": true, "returnByValue": true, "userGesture": true,
-            }),
-            timeout,
-        )?;
-        evaluation_result(&result)
+        match bridge {
+            None => run(
+                "if(typeof window.__TAURI_INTERNALS__?.invoke!=='function')throw new Error('Tauri IPC is unavailable in this document');",
+            ),
+            Some((context, bridged)) => {
+                if bridged {
+                    match run(&format!("if(!window.__HASGARD__)throw new Error('{BRIDGE_MISSING}');")) {
+                        // The record outlived the bridge it describes; install it again below.
+                        Err(error) if error.contains(BRIDGE_MISSING) => {}
+                        other => return other,
+                    }
+                }
+                let result = run(crate::BRIDGE_JS);
+                // Whatever the script itself did, the bridge ran first and is now in place.
+                if let Some(known) = self.contexts.lock().expect("CDP contexts lock").get_mut(&context) {
+                    known.bridged = true;
+                }
+                result
+            }
+        }
     }
 }
 
@@ -1221,7 +1241,12 @@ mod tests {
         client.pending.lock().expect("test lock").insert(1, tx);
         client.contexts.lock().expect("test lock").insert(
             1,
-            ExecutionContext { unique_id: "old-process".into(), frame_id: Some("main".into()), is_default: true },
+            ExecutionContext {
+                unique_id: "old-process".into(),
+                frame_id: Some("main".into()),
+                is_default: true,
+                bridged: false,
+            },
         );
         client.receive(DevToolsProtocol::Event {
             method: "Runtime.executionContextsCleared".into(),

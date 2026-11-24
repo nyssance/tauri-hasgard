@@ -189,6 +189,37 @@ try {
   await rpc("fill", { selector: "#second-input", value: "second text" }, "second")
   assert.equal(await evaluate("guest", 'document.querySelector("#guest-input").value'), "guest text")
   pass("DOM click and fill are isolated between windows")
+  // Operations the page cannot perform go through the runtime, here CEF's.
+  const located = await rpc("wait", { url: "**/guest.html", load: "load", timeout: 5000 }, "guest")
+  assert.equal(located.readyState, "complete")
+  await assert.rejects(rpc("wait", { url: "**/absent.html", timeout: 300 }, "guest"), /Timeout waiting/)
+  const frame = await rpc("window.state", {}, "second")
+  assert.equal(frame.label, "second")
+  assert.ok(frame.width > 100 && frame.height > 100 && frame.scaleFactor >= 1)
+  // A child webview has no window of its own; its label names the window that holds it.
+  assert.equal((await rpc("window.state", {}, "guest")).width, (await rpc("window.state", {}, "main")).width)
+  await rpc("window.resize", { width: frame.width - 40, height: frame.height - 20 }, "second")
+  await until(
+    async () => Math.abs((await rpc("window.state", {}, "second")).width - (frame.width - 40)) < 1,
+    "Resized window"
+  )
+  await rpc("window.resize", { width: frame.width, height: frame.height }, "second")
+  // CEF sets a cookie against the document's own URL, so it must belong to this page's host.
+  await rpc("cookies.clear", { name: "session" }, "guest")
+  await rpc("cookies.set", { name: "session", value: "s3cret", url: guestUrl, httpOnly: true }, "guest")
+  const cookies = await rpc("cookies.get", { url: guestUrl, name: "session" }, "guest")
+  assert.deepEqual(
+    cookies.map(({ name, value, httpOnly, secure }) => ({ name, value, httpOnly, secure })),
+    [{ name: "session", value: "s3cret", httpOnly: true, secure: false }]
+  )
+  assert.equal(await evaluate("guest", 'document.cookie.includes("s3cret")'), false)
+  await assert.rejects(
+    rpc("cookies.set", { name: "foreign", value: "x", url: "https://elsewhere.example.test/" }, "guest"),
+    /did not accept the cookie/
+  )
+  assert.deepEqual(await rpc("cookies.clear", { name: "session" }, "guest"), { removed: 1 })
+  assert.deepEqual(await rpc("cookies.get", { url: guestUrl, name: "session" }, "guest"), [])
+  pass("location wait, native window state and resize, and the cookie store through the CEF runtime")
   await collectExecutors()
   assert.ok(executorPids.size >= 3, "Each exercised native view must use its packaged Playwright executor")
   await rpc("click", { selector: "#trusted" }, "guest")

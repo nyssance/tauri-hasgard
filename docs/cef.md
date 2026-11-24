@@ -59,6 +59,7 @@ A request to a closed label fails. Recreating a view under the same label starts
 | route                                      | `fetch` and `XMLHttpRequest` only, with the Wry rule semantics. Tauri IPC is never routed.                                   |
 | screenshot                                 | Compositor pixels through `Page.captureScreenshot`.                                                                          |
 | screenshot-native                          | macOS only. See [Screenshots](#screenshots-and-occlusion).                                                                   |
+| cookies, window, clipboard, wait for a URL | Supported. A cookie can be set only for the host of the page the webview is showing. |
 | dialog (`alert`, `confirm`, `prompt`)      | Not implemented; returns an error. HTML dialogs are ordinary DOM and work.                                                   |
 | heap-snapshot                              | Not implemented; returns an error.                                                                                           |
 | CEF-owned popups without a Tauri label     | Not routed.                                                                                                                  |

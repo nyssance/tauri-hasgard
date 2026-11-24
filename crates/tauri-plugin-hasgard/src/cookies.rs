@@ -103,6 +103,33 @@ fn build(params: &Value) -> Result<Cookie<'static>, RpcError> {
     Ok(cookie.build())
 }
 
+/// A runtime may hand a change to the store and return before the store has
+/// applied it. Each change is confirmed by reading the store back.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+
+fn same_cookie(stored: &Cookie<'_>, name: &str, domain: Option<&str>, path: Option<&str>) -> bool {
+    let bare = |domain: &str| domain.trim_start_matches('.').to_ascii_lowercase();
+    stored.name() == name && stored.domain().map(bare) == domain.map(bare) && stored.path() == path
+}
+
+/// Poll `stored` until `settled` accepts what the store holds.
+fn settle(
+    method: &str, what: &str, stored: impl Fn() -> Result<Vec<Cookie<'static>>, RpcError>,
+    settled: impl Fn(&[Cookie<'static>]) -> bool,
+) -> Result<(), RpcError> {
+    let deadline = std::time::Instant::now() + SETTLE;
+    loop {
+        if settled(&stored()?) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(failed(method, format!("the cookie store did not {what}")));
+        }
+        std::thread::sleep(SETTLE_POLL);
+    }
+}
+
 pub(crate) fn make_cookie_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> crate::eval::NativeFn {
     let handle = app.clone();
     std::sync::Arc::new(move |label, method, params| {
@@ -134,24 +161,46 @@ pub(crate) fn make_cookie_fn<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> cr
             "cookies.set" => {
                 let cookie = build(params)?;
                 let described = describe(&cookie);
-                webview.set_cookie(cookie).map_err(|error| failed(method, error))?;
+                webview.set_cookie(cookie.clone()).map_err(|error| failed(method, error))?;
+                // A store that refuses the cookie — a domain it will not accept, say — never shows it.
+                settle(
+                    method,
+                    "accept the cookie",
+                    || listed(None),
+                    |stored| {
+                        stored.iter().any(|stored| {
+                            same_cookie(stored, cookie.name(), cookie.domain(), cookie.path())
+                                && stored.value() == cookie.value()
+                        })
+                    },
+                )?;
                 Ok(described)
             }
             "cookies.clear" => {
                 let name = optional_str(params, "name", method)?;
                 let domain = optional_str(params, "domain", method)?;
-                let mut removed = 0_u64;
+                let mut removed = Vec::new();
                 for cookie in listed(optional_str(params, "url", method)?)? {
                     let wanted = name.is_none_or(|name| cookie.name() == name)
                         && domain.is_none_or(|domain| {
                             cookie.domain().is_some_and(|own| own.trim_start_matches('.') == domain)
                         });
                     if wanted {
-                        webview.delete_cookie(cookie).map_err(|error| failed(method, error))?;
-                        removed += 1;
+                        webview.delete_cookie(cookie.clone()).map_err(|error| failed(method, error))?;
+                        removed.push(cookie);
                     }
                 }
-                Ok(json!({"removed": removed}))
+                settle(
+                    method,
+                    "delete the cookies",
+                    || listed(None),
+                    |stored| {
+                        !stored.iter().any(|stored| {
+                            removed.iter().any(|gone| same_cookie(stored, gone.name(), gone.domain(), gone.path()))
+                        })
+                    },
+                )?;
+                Ok(json!({"removed": removed.len()}))
             }
             other => Err(RpcError {
                 code: crate::protocol::RPC_METHOD_NOT_FOUND,
