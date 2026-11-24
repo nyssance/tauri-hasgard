@@ -288,6 +288,8 @@ jobs:
           git -C homebrew-tap config user.name github-actions[bot]
           git -C homebrew-tap config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -C homebrew-tap add Formula/tauri-hasgard.rb
+          # A rerun after a partial failure finds this one already published.
+          if git -C homebrew-tap diff --cached --quiet; then exit 0; fi
           git -C homebrew-tap commit -m "tauri-hasgard ${GITHUB_REF_NAME#v}"
           git -C homebrew-tap push
       - name: Update Scoop Bucket
@@ -297,5 +299,7 @@ jobs:
           git -C scoop-bucket config user.name github-actions[bot]
           git -C scoop-bucket config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -C scoop-bucket add bucket/tauri-hasgard.json
+          # A rerun after a partial failure finds this one already published.
+          if git -C scoop-bucket diff --cached --quiet; then exit 0; fi
           git -C scoop-bucket commit -m "tauri-hasgard ${GITHUB_REF_NAME#v}"
           git -C scoop-bucket push
