@@ -11,3 +11,4 @@
 - Match alwith-desktop formatting: use the shared Bun formatting options and rustfmt.toml, run Rust formatting with stable `cargo fmt`. Do not install nightly; the nightly-only rustfmt options (`unstable_features` / `trailing_comma` / `trailing_semicolon`) are silently ignored on stable, which is known and accepted. Keep generated and upstream vendor files excluded.
 - CI and release validation test native behavior on macOS and Windows only. Do not add Linux Rust or native E2E test jobs; keep Linux release artifact builds.
 - Publish CLI archives only for macOS Apple Silicon (aarch64-apple-darwin), Windows x64 (x86_64-pc-windows-msvc), and Linux x64 (x86_64-unknown-linux-gnu). Do not add Windows ARM64 or Linux ARM64 jobs or manifests.
+- Release only as 0.8.x, whatever a release contains, new features included. Do not raise the version to 0.9 or beyond until the owner says so.
