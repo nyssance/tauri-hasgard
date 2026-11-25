@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/3.0.0-alpha.5",
+  "productName": "CEF Upstream Probe",
+  "version": "0.1.0",
+  "identifier": "dev.nyssance.cef-upstream-probe",
+  "build": { "frontendDist": "../ui" },
+  "app": { "withGlobalTauri": true, "windows": [] },
+  "bundle": { "active": true, "targets": ["app"] }
+}

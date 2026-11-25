@@ -1,0 +1,6 @@
+<!doctype html><meta charset="utf-8"><title>early</title>
+<script>
+const { listen } = window.__TAURI__.event
+const { invoke } = window.__TAURI__.core
+listen("ping", (event) => invoke("heard", { n: event.payload })).then(() => invoke("subscribed"))
+</script>

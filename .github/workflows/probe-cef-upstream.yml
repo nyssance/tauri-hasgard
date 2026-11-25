@@ -1,0 +1,41 @@
+name: CEF upstream probe
+
+on:
+  push:
+    branches: [probe/cef-upstream]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            build: --bundles app
+          - runner: windows-2025
+            build: --no-bundle
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cef-upstream-probe
+      - run: bun install --frozen-lockfile
+      - name: Build
+        working-directory: examples/cef-upstream-probe
+        shell: bash
+        env:
+          CEF_PATH: ${{ runner.temp }}/cef-cache
+        run: bun ../fixture-app/node_modules/@tauri-apps/cli/tauri.js build --debug ${{ matrix.build }}
+      - name: Probe
+        env:
+          CEF_PATH: ${{ runner.temp }}/cef-cache
+        run: bun scripts/probe-cef-upstream.mjs 30

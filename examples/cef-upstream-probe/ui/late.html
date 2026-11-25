@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>late</title>
+<script>
+const { listen } = window.__TAURI__.event
+const { invoke } = window.__TAURI__.core
+addEventListener("load", () =>
+  setTimeout(() => listen("ping", (event) => invoke("heard", { n: event.payload })).then(() => invoke("subscribed")), 1000)
+)
+</script>

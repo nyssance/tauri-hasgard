@@ -1,0 +1,10 @@
+{
+  "local": {
+    "identifier": "local",
+    "description": "",
+    "local": true,
+    "windows": ["main"],
+    "webviews": ["child"],
+    "permissions": ["core:default"]
+  }
+}

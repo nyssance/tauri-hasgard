@@ -6,6 +6,7 @@ members = [
   "crates/tauri-hasgard-cli",
   "examples/fixture-app/src-tauri",
   "examples/cef-fixture-app/src-tauri",
+  "examples/cef-upstream-probe/src-tauri",
 ]
 
 [workspace.package]
