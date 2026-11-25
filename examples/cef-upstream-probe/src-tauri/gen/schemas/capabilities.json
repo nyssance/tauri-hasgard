@@ -3,7 +3,7 @@
     "identifier": "local",
     "description": "",
     "local": true,
-    "windows": ["main"],
+    "windows": ["main", "second"],
     "webviews": ["child"],
     "permissions": ["core:default"]
   }

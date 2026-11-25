@@ -38,4 +38,4 @@ jobs:
       - name: Probe
         env:
           CEF_PATH: ${{ runner.temp }}/cef-cache
-        run: bun scripts/probe-cef-upstream.mjs 30
+        run: bun scripts/probe-cef-upstream.mjs 40

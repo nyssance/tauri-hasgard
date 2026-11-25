@@ -1,6 +1,6 @@
 {
   "identifier": "local",
-  "windows": ["main"],
+  "windows": ["main", "second"],
   "webviews": ["child"],
   "permissions": ["core:default"]
 }

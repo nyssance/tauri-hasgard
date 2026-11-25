@@ -35,7 +35,8 @@ if (!mac) {
 const variants = [
   ["listen while the page loads", { PROBE_PAGE: "early.html" }],
   ["listen one second after load", { PROBE_PAGE: "late.html" }],
-  ["listen while the page loads, child webview alive at exit", { PROBE_PAGE: "early.html", PROBE_CHILD: "1" }]
+  ["listen while the page loads, child webview alive at exit", { PROBE_PAGE: "early.html", PROBE_CHILD: "1" }],
+  ["listen while the page loads, second window", { PROBE_PAGE: "early.html", PROBE_SECOND: "1" }]
 ]
 for (const [name, extra] of variants) {
   const exits = {}

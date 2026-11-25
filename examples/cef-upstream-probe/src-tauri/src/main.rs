@@ -1,13 +1,13 @@
 //! A page subscribes to an event; the application emits it three times, records which
 //! arrived, and exits. Nothing but `tauri` and `tauri-runtime-cef`.
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use tauri::{Emitter, Manager};
 
 static HEARD: Mutex<Vec<u32>> = Mutex::new(Vec::new());
-static SUBSCRIBED: AtomicBool = AtomicBool::new(false);
+static SUBSCRIBED: AtomicU32 = AtomicU32::new(0);
 static FINISHED: AtomicBool = AtomicBool::new(false);
 
 fn finish(app: &tauri::AppHandle) {
@@ -28,7 +28,10 @@ fn heard(n: u32) {
 /// Called by the page once `listen` has resolved.
 #[tauri::command]
 fn subscribed(app: tauri::AppHandle) {
-    SUBSCRIBED.store(true, Ordering::SeqCst);
+    // Counted, and the events are emitted once however often the page reports in.
+    if SUBSCRIBED.fetch_add(1, Ordering::SeqCst) > 0 {
+        return;
+    }
     std::thread::spawn(move || {
         for n in 1..=3_u32 {
             std::thread::sleep(Duration::from_millis(500));
@@ -51,6 +54,9 @@ fn main() {
         .setup(|app| {
             let page = std::env::var("PROBE_PAGE").expect("PROBE_PAGE");
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(page.into())).build()?;
+            if std::env::var_os("PROBE_SECOND").is_some() {
+                tauri::WebviewWindowBuilder::new(app, "second", tauri::WebviewUrl::App("child.html".into())).build()?;
+            }
             if std::env::var_os("PROBE_CHILD").is_some() {
                 app.get_window("main").ok_or("main missing")?.add_child(
                     tauri::webview::WebviewBuilder::new("child", tauri::WebviewUrl::App("child.html".into()))
