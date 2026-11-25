@@ -1,4 +1,4 @@
-# Unreleased
+# 0.8.4 (2026-11-25)
 
 - CLI text output: `attrs` shows the element's attributes as they are, and a result's `status` is read as a verdict only when it is one (`video start` no longer prints as a failure).
 - CLI: `--frame` on a command that has no document to scope is refused instead of dropped.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.4 — 2026-11-25
+
+Needs plugin 0.8.4: `waitForDownload` reads the `session` the plugin now answers with.
+
+- `waitForDownload` resolves with a download it has not given before, whether the wait starts before or after the action, per window and with several waits at once.
+- `waitForEvent` resolves with each event once; two calls waiting at once are not answered with the same event.
+- `downloads.clear(window)` clears one window's downloads.
+- Fix `dragTo` inside a frame: each end is sent with its own locator's frame.
+- `frameLocator(...).watch()` and `.forms()`.
+
 ## 0.8.3 — 2026-11-24
 
 - No client changes; released with plugin 0.8.3.

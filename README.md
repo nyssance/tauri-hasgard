@@ -67,7 +67,7 @@ Then inspect the running app:
 
 ```console
 $ tauri-hasgard ping
-✓ Connected. Plugin and CLI both 0.8.3.
+✓ Connected. Plugin and CLI both 0.8.4.
 $ tauri-hasgard windows
 main       tauri://localhost                 My application
 $ tauri-hasgard --window main snapshot -i
