@@ -39,5 +39,5 @@ tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
 serial_test = "4"
 tempfile = "3"
 # Proves the server plugs into the official ACP bridge; MCP over ACP is still a draft there.
-agent-client-protocol-rmcp = { version = "5.4", features = ["rmcp_3", "unstable_mcp_over_acp"] }
-agent-client-protocol = { version = "5.4", features = ["unstable_mcp_over_acp", "unstable_protocol_v2"] }
+agent-client-protocol-rmcp = { version = "5", features = ["rmcp_3", "unstable_mcp_over_acp"] }
+agent-client-protocol = { version = "5", features = ["unstable_mcp_over_acp", "unstable_protocol_v2"] }

@@ -42,6 +42,6 @@ Formatting follows `alwith-desktop`: `bun fmt` and stable `cargo fmt`. The night
 
 ## Dependencies and releases
 
-`fab u` (alias `fab upgrade`) upgrades Bun workspaces and Rust dependencies, including major versions, and refreshes both lockfiles. It requires Fabric (`uv tool install fabric`) and cargo-edit (`cargo install cargo-edit`). Review the resulting changes before committing.
+`fab u` (alias `fab upgrade`) updates Bun workspaces and Rust dependencies within their declared ranges and refreshes both lockfiles; `cargo update --verbose` also lists each crate whose newest release is outside its range, which is raised by hand. It requires Fabric (`uv tool install fabric`). Review the resulting changes before committing.
 
 Follow [the release checklist](docs/releasing.md) for publishing. Preserve upstream notices in [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
