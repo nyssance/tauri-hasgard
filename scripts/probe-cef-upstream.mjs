@@ -70,7 +70,12 @@ for (const [name, extra] of variants) {
     exits[exit] = (exits[exit] ?? 0) + 1
     results[result] = (results[result] ?? 0) + 1
     if (!mac) spawnSync("taskkill", ["/IM", "cef-upstream-probe.exe", "/T", "/F"], { stdio: "ignore" })
-    rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    // A crashed launch can leave a helper process holding the profile for a moment.
+    try {
+      rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+    } catch (error) {
+      console.log(`  (left ${temp}: ${error.code})`)
+    }
   }
   console.log(`\n${name} (${rounds} launches)`)
   for (const [key, count] of Object.entries(exits)) console.log(`  ${count} x ${key}`)
