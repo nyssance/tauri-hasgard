@@ -89,7 +89,7 @@ Native screenshots of CEF are macOS only for now.
 
 ## Known issue: exit crash on Windows
 
-On Windows, an application on `tauri-runtime-cef` 3.0.0-alpha.7 sometimes ends with an access violation (`0xC0000005`) while it shuts down, after its windows are gone. It does not come from this plugin: the CEF fixture crashed in one of eight launches with the plugin not loaded, quitting by itself. It is more frequent while a child webview is still alive at exit, and closing child webviews first makes it rare. `scripts/probe-cef-exit.mjs` reproduces the measurement; the fixture reads `HASGARD_CEF_WITHOUT_PLUGIN` and `HASGARD_CEF_QUIT_AFTER_MS` for it. The native test reports this exit as a warning on Windows and fails on any other exit code.
+On Windows, an application on `tauri-runtime-cef` 3.0.0-alpha.7 sometimes ends with an access violation (`0xC0000005`) while it shuts down, after its windows are gone. It does not come from this plugin: the CEF fixture crashed in one of eight launches with the plugin not loaded, quitting by itself. It is more frequent while a child webview is still alive at exit, and closing child webviews first makes it rare. `scripts/probe-cef-exit.mjs` reproduces the measurement; the fixture reads `HASGARD_CEF_WITHOUT_PLUGIN` and `HASGARD_CEF_QUIT_AFTER_MS` for it. The native test reports this exit as a warning on Windows and fails on any other exit code. Reported upstream as [tauri-apps/tauri#16644](https://github.com/tauri-apps/tauri/issues/16644), with an application that has no plugin at all.
 
 ## Downloads ask where to save unless a destination is named
 
@@ -97,7 +97,7 @@ On Windows, an application on `tauri-runtime-cef` 3.0.0-alpha.7 sometimes ends w
 
 ## Known issue: an event subscription made while the page loads
 
-On `tauri-runtime-cef` 3.0.0-alpha.7 a page that calls `listen` while it is still loading sometimes never hears the event: the call resolves, and then neither the application's own `emit` nor `event.emit` reaches it. It happened in five of thirteen launches of the CEF fixture (four of six on macOS, one of seven on Windows), and not once in a page that subscribes after it has loaded. A test that depends on such a listener should wait for something the page shows once it is subscribed.
+On `tauri-runtime-cef` 3.0.0-alpha.7 a page that calls `listen` while it is still loading sometimes never hears the event: the call resolves, and then neither the application's own `emit` nor `event.emit` reaches it. It happened in five of thirteen launches of the CEF fixture (four of six on macOS, one of seven on Windows), and not once in a page that subscribes after it has loaded. A test that depends on such a listener should wait for something the page shows once it is subscribed. Reported upstream as [tauri-apps/tauri#16643](https://github.com/tauri-apps/tauri/issues/16643), reproduced without this plugin.
 
 ## Native test
 
